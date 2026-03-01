@@ -248,10 +248,8 @@ export async function summarizeModules(
   const settings = getSettings();
   if (!settings) throw new Error('No LLM settings configured');
 
-  const model = resolveModel(
-    selectModelTier({ type: 'summarize' }).tier,
-    settings,
-  );
+  // v5.4: 项目分析是高价值低频任务,统一用 strongModel 确保兼容性和质量
+  const model = settings.strongModel;
 
   log.info('Phase 1: Starting module summarization', {
     moduleCount: skeleton.modules.length,
@@ -454,10 +452,8 @@ export async function populateDocuments(
   const settings = getSettings();
   if (!settings) throw new Error('No LLM settings configured');
 
-  const model = resolveModel(
-    selectModelTier({ type: 'summarize' }).tier,
-    settings,
-  );
+  // v5.4: 统一用 strongModel
+  const model = settings.strongModel;
 
   log.info('Phase 3: Populating documents', { moduleCount: summaries.length, model });
 

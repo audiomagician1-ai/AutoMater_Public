@@ -244,11 +244,13 @@ export function setupProjectHandlers() {
 
     // 导入项目用 analyzing 状态; 新项目用 initializing
     const initialStatus = isImport ? 'analyzing' : 'initializing';
+    // v5.4: 持久标记项目类型, 用于 error 后重试时路由到正确流程
+    const configJson = isImport ? JSON.stringify({ importExisting: true }) : '{}';
 
     db.prepare(`
       INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo, github_token)
-      VALUES (?, ?, '', ?, ?, '{}', ?, ?, ?)
-    `).run(id, displayName, initialStatus, workspacePath, gitMode, githubRepo, githubToken);
+      VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)
+    `).run(id, displayName, initialStatus, workspacePath, configJson, gitMode, githubRepo, githubToken);
 
     // ── 自动创建默认团队 ──
     try {
@@ -468,14 +470,33 @@ export function setupProjectHandlers() {
   // ── 启动项目 (开始 Agent 编排) ──
   // v5.1: 如果项目处于 analyzing 状态（导入项目分析中断/重启），
   //       自动路由到 importProject 流程，而非走 PM 流水线（wish 为空会失败）
+  // v5.4: 也检查 config.importExisting 标记 — 分析失败(error)后重试也走导入流程
   ipcMain.handle('project:start', async (_event, projectId: string) => {
     const db = getDb();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
-    const proj = db.prepare('SELECT status, workspace_path FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string } | undefined;
+    const proj = db.prepare('SELECT status, workspace_path, config, wish FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string; config: string; wish: string } | undefined;
 
-    if (proj?.status === 'analyzing') {
+    // 判断是否为导入项目: status=analyzing 或 config 中标记了 importExisting
+    let isImportProject = proj?.status === 'analyzing';
+    if (!isImportProject && proj?.config) {
+      try {
+        const cfg = JSON.parse(proj.config);
+        // 导入项目 + wish 为空或以 [导入项目] 开头 + 没有已有 features → 走导入流程
+        if (cfg.importExisting) {
+          const featureCount = (db.prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?').get(projectId) as { c: number }).c;
+          if (featureCount === 0 || !proj.wish?.trim() || proj.wish.startsWith('[导入项目]')) {
+            isImportProject = true;
+          }
+        }
+      } catch {}
+    }
+
+    if (isImportProject) {
       // 导入项目：走 analyze-existing 流程
-      console.log(`[project:start] Project ${projectId} is in 'analyzing' state — routing to importProject`);
+      console.log(`[project:start] Project ${projectId} is import project — routing to importProject`);
+      // 恢复 analyzing 状态 (可能从 error 重试)
+      db.prepare("UPDATE projects SET status = 'analyzing', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      sendToUI(win, 'project:status', { projectId, status: 'analyzing' });
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📥 检测到导入项目，启动/恢复项目分析...' });
 
       (async () => {

@@ -22,6 +22,16 @@ export function sendToUI(win: BrowserWindow | null, channel: string, data: any) 
   } catch (err) {
     log.debug('sendToUI failed (window likely closed)', { channel });
   }
+  // v5.4: agent:log 消息自动持久化到 DB
+  if (channel === 'agent:log' && data?.projectId && data?.content) {
+    try {
+      const db = getDb();
+      db.prepare('INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, ?, ?, ?)')
+        .run(data.projectId, data.agentId || 'system', 'info', data.content);
+    } catch {
+      // 静默: 可能在批量日志输出时偶发 busy
+    }
+  }
 }
 
 // ═══════════════════════════════════════
