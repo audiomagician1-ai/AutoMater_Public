@@ -771,6 +771,11 @@ export function OverviewPage() {
     phase: number; step: string; progress: number; done?: boolean; error?: boolean;
   } | null>(null);
 
+  // 切换项目时清空残留的分析进度
+  useEffect(() => {
+    setImportProgress(null);
+  }, [currentProjectId]);
+
   const load = useCallback(async () => {
     if (!currentProjectId) return;
     const [feats, st, proj] = await Promise.all([
@@ -946,7 +951,7 @@ export function OverviewPage() {
 
       <div className="flex-1 px-6 pb-6 space-y-6 relative z-10">
         {/* Project Import Analysis — Real-time Progress (v5.1) */}
-        {(project?.status === 'analyzing' || importProgress) && (
+        {project?.status === 'analyzing' && (
           <section className="bg-gradient-to-r from-cyan-900/15 to-slate-900/30 border border-cyan-800/30 rounded-xl p-5 animate-in fade-in">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
