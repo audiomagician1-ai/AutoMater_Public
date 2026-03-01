@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Code Graph — 文件级 import/export 依赖图
  *
  * 解析工作区所有代码文件的 import 语句，构建一个有向图：
@@ -52,7 +52,7 @@ export interface CodeGraph {
 
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.agentforge', '.venv', 'venv',
+  'coverage', '.cache', 'target', 'vendor', '.automater', '.venv', 'venv',
 ]);
 
 const CODE_EXTENSIONS = new Set([

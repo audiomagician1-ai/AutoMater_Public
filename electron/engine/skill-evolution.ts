@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Skill Evolution Engine — Agent 技能自主习得与进化
  *
  * 设计哲学 (参照 echo agent-memory 系统):
@@ -8,7 +8,7 @@
  *   - 跨项目共享：技能存储在全局目录，所有项目的 Agent 均可使用
  *   - 版本可追溯：每次改进保留历史，可回退
  *
- * 存储结构 (%APPDATA%/agentforge/evolved-skills/):
+ * 存储结构 (%APPDATA%/automater/evolved-skills/):
  *   skill-index.json           — 技能索引 (id, name, trigger, maturity, stats)
  *   skills/{id}.json           — 技能定义 (含 execution + 版本历史)
  *   skills/{id}.md             — 技能知识文档 (Markdown, Agent 可读的步骤说明)
@@ -271,7 +271,7 @@ class SkillEvolutionManager {
     const indexPath = getIndexPath();
     fs.mkdirSync(path.dirname(indexPath), { recursive: true });
     fs.writeFileSync(indexPath, JSON.stringify({
-      _doc: 'AgentForge 进化技能索引 — 自动生成, 请勿手动编辑',
+      _doc: 'AutoMater 进化技能索引 — 自动生成, 请勿手动编辑',
       _version: 1,
       updatedAt: new Date().toISOString(),
       skills: this.index,

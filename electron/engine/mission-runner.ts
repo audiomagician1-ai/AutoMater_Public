@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mission Runner — 临时工作流引擎 (v5.5)
  *
  * 参考架构:
@@ -211,7 +211,7 @@ export async function runMission(
   if (!project) throw new Error('Project not found');
 
   const workspacePath = project.workspace_path;
-  const missionDir = path.join(workspacePath, '.agentforge', 'missions', missionId);
+  const missionDir = path.join(workspacePath, '.automater', 'missions', missionId);
   fs.mkdirSync(missionDir, { recursive: true });
 
   let totalTokens = 0;
@@ -254,7 +254,7 @@ export async function runMission(
     ];
 
     // Read architecture doc if exists
-    const archPath = path.join(workspacePath, '.agentforge', 'docs', 'ARCHITECTURE.md');
+    const archPath = path.join(workspacePath, '.automater', 'docs', 'ARCHITECTURE.md');
     if (fs.existsSync(archPath)) {
       contextParts.push(`\n架构文档(前3000字):\n${fs.readFileSync(archPath, 'utf-8').slice(0, 3000)}`);
     }
@@ -465,7 +465,7 @@ export function cleanupMission(missionId: string) {
 
   const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as any;
   if (project?.workspace_path) {
-    const missionDir = path.join(project.workspace_path, '.agentforge', 'missions', missionId);
+    const missionDir = path.join(project.workspace_path, '.automater', 'missions', missionId);
     if (fs.existsSync(missionDir)) {
       fs.rmSync(missionDir, { recursive: true, force: true });
     }
@@ -587,7 +587,7 @@ export function getMissionPatches(missionId: string): Array<{ file: string; diff
   const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as any;
   if (!project?.workspace_path) return [];
 
-  const patchesFile = path.join(project.workspace_path, '.agentforge', 'missions', missionId, 'patches.json');
+  const patchesFile = path.join(project.workspace_path, '.automater', 'missions', missionId, 'patches.json');
   if (fs.existsSync(patchesFile)) {
     try {
       return JSON.parse(fs.readFileSync(patchesFile, 'utf-8'));

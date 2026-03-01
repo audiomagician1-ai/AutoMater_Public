@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AcceptancePanel v4.4 — 用户验收面板
  *
  * 浮动模态框, 当项目进入 awaiting_user_acceptance 状态时触发。
@@ -66,9 +66,9 @@ export function AcceptancePanel() {
   const loadData = useCallback(async () => {
     if (!currentProjectId || !showAcceptancePanel) return;
     const [feats, st, design] = await Promise.all([
-      window.agentforge.project.getFeatures(currentProjectId),
-      window.agentforge.project.getStats(currentProjectId),
-      window.agentforge.project.getDesignDoc(currentProjectId),
+      window.automater.project.getFeatures(currentProjectId),
+      window.automater.project.getStats(currentProjectId),
+      window.automater.project.getDesignDoc(currentProjectId),
     ]);
     setFeatures(feats || []);
     setStats(st);
@@ -81,7 +81,7 @@ export function AcceptancePanel() {
     if (!currentProjectId || submitting) return;
     setSubmitting(true);
     try {
-      await window.agentforge.project.userAccept(currentProjectId, true);
+      await window.automater.project.userAccept(currentProjectId, true);
       addLog({ projectId: currentProjectId, agentId: 'user', content: '✅ 用户验收通过' });
       setShowAcceptancePanel(false);
     } catch (err: any) {
@@ -95,7 +95,7 @@ export function AcceptancePanel() {
     if (!currentProjectId || submitting || !rejectReason.trim()) return;
     setSubmitting(true);
     try {
-      await window.agentforge.project.userAccept(currentProjectId, false, rejectReason.trim());
+      await window.automater.project.userAccept(currentProjectId, false, rejectReason.trim());
       addLog({ projectId: currentProjectId, agentId: 'user', content: `❌ 用户验收驳回: ${rejectReason.trim().slice(0, 80)}` });
       setShowAcceptancePanel(false);
       setRejectReason('');

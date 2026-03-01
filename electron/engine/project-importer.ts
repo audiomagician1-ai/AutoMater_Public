@@ -13,7 +13,7 @@
  * Step 2: 单次 LLM 调用 (~10-30s)
  *   - 将项目快照发给 strong 模型
  *   - 生成: ARCHITECTURE.md + 模块列表 + skeleton.json
- *   - 直接写入 .agentforge/ 目录
+ *   - 直接写入 .automater/ 目录
  *
  * 设计理念: 模拟开发者"把项目丢给大模型"的自然工作流
  *           秒级完成，不做无谓的全量文件读取
@@ -102,15 +102,15 @@ export type ImportProgressCallback = (phase: number, step: string, progress: num
 // Constants
 // ═══════════════════════════════════════
 
-const ANALYSIS_DIR = '.agentforge/analysis';
-const MODULES_DIR = '.agentforge/analysis/modules';
-const SKELETON_FILE = '.agentforge/analysis/skeleton.json';
+const ANALYSIS_DIR = '.automater/analysis';
+const MODULES_DIR = '.automater/analysis/modules';
+const SKELETON_FILE = '.automater/analysis/skeleton.json';
 const MAX_SCAN_FILES = 5000;
 
 // 忽略的目录
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.agentforge', '.venv',
+  'coverage', '.cache', 'target', 'vendor', '.automater', '.venv',
   'venv', '.turbo', '.output', '.nuxt', '.svelte-kit',
 ]);
 
@@ -514,7 +514,7 @@ export async function importProject(
   );
 
   // 写入 ARCHITECTURE.md
-  const docsDir = path.join(workspacePath, '.agentforge/docs');
+  const docsDir = path.join(workspacePath, '.automater/docs');
   fs.mkdirSync(docsDir, { recursive: true });
   fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), llmResult.architectureMd, 'utf-8');
 

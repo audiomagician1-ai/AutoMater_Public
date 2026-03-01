@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LogsPage — 实时日志 + 持久化历史 (v5.0)
  *
  * - 进入页面时从 DB 加载历史日志
@@ -244,7 +244,7 @@ export function LogsPage() {
 
   useEffect(() => {
     if (!currentProjectId) return;
-    window.agentforge.team.list(currentProjectId).then((members: any[]) => {
+    window.automater.team.list(currentProjectId).then((members: any[]) => {
       const map: Record<string, string> = {};
       // 内置名称
       map['system'] = '🖥️ 系统';
@@ -263,7 +263,7 @@ export function LogsPage() {
     if (!currentProjectId) return;
     setLoading(true);
     try {
-      const result = await window.agentforge.project.getLogs(currentProjectId, {
+      const result = await window.automater.project.getLogs(currentProjectId, {
         limit: PAGE_SIZE,
         offset: opts?.offset ?? 0,
         agentId: filterAgent || undefined,

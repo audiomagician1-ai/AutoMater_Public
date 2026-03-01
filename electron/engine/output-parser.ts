@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Output Parser — LLM 输出的程序化解析 + 结构化验证
  *
  * 核心原则: 不信任 LLM 的输出格式。用多策略提取 + schema 校验替代正则祈祷。
@@ -380,7 +380,7 @@ export function parseStructuredOutput<T = any>(raw: string, schema: SchemaSpec):
 }
 
 // ═══════════════════════════════════════
-// Pre-built Schemas for AgentForge
+// Pre-built Schemas for AutoMater
 // ═══════════════════════════════════════
 
 /** PM Feature 清单 schema */

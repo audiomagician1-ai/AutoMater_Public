@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TimelinePage — 事件流时间线 + 项目分析 (v2.0)
  *
  * 可视化展示项目的所有事件:
@@ -68,10 +68,10 @@ export default function TimelinePage() {
     setLoading(true);
     try {
       const [evts, st, cps, ms] = await Promise.all([
-        window.agentforge.events.query(projectId, { limit: 200 }),
-        window.agentforge.events.getStats(projectId),
-        window.agentforge.mission.getCheckpoints(projectId),
-        window.agentforge.mission.getStatus(projectId),
+        window.automater.events.query(projectId, { limit: 200 }),
+        window.automater.events.getStats(projectId),
+        window.automater.mission.getCheckpoints(projectId),
+        window.automater.mission.getStatus(projectId),
       ]);
       setEvents(evts);
       setStats(st);
@@ -111,7 +111,7 @@ export default function TimelinePage() {
 
   useEffect(() => {
     if (tab === 'knowledge' && !knowledgeStats) {
-      window.agentforge.knowledge.getStats().then(setKnowledgeStats).catch(() => {});
+      window.automater.knowledge.getStats().then(setKnowledgeStats).catch(() => {});
     }
   }, [tab, knowledgeStats]);
 

@@ -1,9 +1,9 @@
-import { contextBridge, ipcRenderer, webFrame } from 'electron';
+﻿import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
 /**
  * Preload — 暴露安全的 API 给渲染进程
  */
-contextBridge.exposeInMainWorld('agentforge', {
+contextBridge.exposeInMainWorld('automater', {
   // ── 设置 ──
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

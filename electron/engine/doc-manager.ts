@@ -1,14 +1,14 @@
-/**
+﻿/**
  * Doc Manager — 项目文档生命周期管理
  *
  * 职责:
- *  1. 文档读写 — 标准化路径 (.agentforge/docs/)
+ *  1. 文档读写 — 标准化路径 (.automater/docs/)
  *  2. 版本追踪 — 每次写入自动在 changelog 追加 diff 摘要
  *  3. 一致性校验 — 检查设计文档、需求文档、测试用例的互引用完整性
  *  4. 全文拼接 — 为 LLM 上下文提供 "当前设计文档全文" 快照
  *
  * 目录约定:
- *   .agentforge/
+ *   .automater/
  *   ├── docs/
  *   │   ├── design.md          — PM 总体设计文档
  *   │   ├── reqs/
@@ -73,9 +73,9 @@ export interface ConsistencyIssue {
 // Path Helpers
 // ═══════════════════════════════════════
 
-/** 获取 .agentforge/docs 根目录, 不存在则创建 */
+/** 获取 .automater/docs 根目录, 不存在则创建 */
 function docsRoot(workspacePath: string): string {
-  const dir = path.join(workspacePath, '.agentforge', 'docs');
+  const dir = path.join(workspacePath, '.automater', 'docs');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -365,7 +365,7 @@ export function checkConsistency(workspacePath: string, featureIds: string[]): C
   if (!readDoc(workspacePath, 'design')) {
     issues.push({
       severity: 'error',
-      description: '总体设计文档缺失 (.agentforge/docs/design.md)',
+      description: '总体设计文档缺失 (.automater/docs/design.md)',
       documents: ['design.md'],
     });
   }

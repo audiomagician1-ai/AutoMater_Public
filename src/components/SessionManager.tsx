@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SessionManager — Session 切换/创建/浏览组件
  *
  * 支持:
@@ -56,7 +56,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   const loadSessions = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await (window as any).agentforge.session.list(projectId, agentId);
+      const list = await (window as any).automater.session.list(projectId, agentId);
       setSessions(list || []);
     } catch (err) {
       console.error('Failed to load sessions:', err);
@@ -66,7 +66,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const loadStats = useCallback(async () => {
     try {
-      const s = await (window as any).agentforge.session.backupStats();
+      const s = await (window as any).automater.session.backupStats();
       setStats(s);
     } catch (err) {
       console.error('Failed to load backup stats:', err);
@@ -82,7 +82,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const handleCreateSession = async (aId: string, role: string) => {
     try {
-      await (window as any).agentforge.session.create(projectId, aId, role);
+      await (window as any).automater.session.create(projectId, aId, role);
       await loadSessions();
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -91,7 +91,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const handleSwitchSession = async (sessionId: string) => {
     try {
-      await (window as any).agentforge.session.switch(sessionId);
+      await (window as any).automater.session.switch(sessionId);
       await loadSessions();
     } catch (err) {
       console.error('Failed to switch session:', err);
@@ -101,7 +101,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   const handleViewBackup = async (sessionId: string) => {
     setSelectedSession(sessionId);
     try {
-      const backup = await (window as any).agentforge.session.readBackup(sessionId);
+      const backup = await (window as any).automater.session.readBackup(sessionId);
       setBackupContent(backup);
     } catch (err) {
       console.error('Failed to read backup:', err);
@@ -112,7 +112,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   const handleCleanup = async () => {
     if (!confirm('确认清理 30 天前的旧备份？')) return;
     try {
-      const result = await (window as any).agentforge.session.cleanup(30);
+      const result = await (window as any).automater.session.cleanup(30);
       alert(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
       await loadStats();
     } catch (err) {

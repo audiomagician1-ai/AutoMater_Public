@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
 
 type Feature = {
@@ -30,11 +30,11 @@ export function BoardPage() {
 
   const load = async () => {
     if (!currentProjectId) return;
-    const data = await window.agentforge.project.getFeatures(currentProjectId);
+    const data = await window.automater.project.getFeatures(currentProjectId);
     setFeatures(data || []);
     // v8.1: 批量加载所有 Feature 的 Session 摘要
     try {
-      const summaries = await window.agentforge.session.batchFeatureSummaries(currentProjectId);
+      const summaries = await window.automater.session.batchFeatureSummaries(currentProjectId);
       setSessionSummaries(summaries || {});
     } catch { /* session API 可能未就绪 */ }
   };

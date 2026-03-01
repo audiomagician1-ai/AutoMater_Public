@@ -1,6 +1,10 @@
-# AgentForge — 设计文档
+﻿# 智械母机 AutoMater — 设计文档
 
 > Agent 版软件开发公司：用户许愿，虚拟团队交付。
+
+> ⚠️ **注意**: 本文档为项目初始设计方案（Tauri + Monorepo 架构）。实际实现已迁移为 **Electron 33 单体架构**。
+> 最新架构请参见 [`CLAUDE.md`](./CLAUDE.md)（v6.0 项目大脑）和 [`docs/IMPLEMENTATION-AUDIT-2026-03.md`](./docs/IMPLEMENTATION-AUDIT-2026-03.md)（规划 vs 现实差距分析）。
+> 本文档保留作为产品愿景和角色体系的参考。
 
 ## 1. 产品愿景
 
@@ -19,7 +23,7 @@
 ### 2.1 Actant（D:\VibeCoding\Actant）
 
 **核心借鉴**：
-| 概念 | Actant 实现 | AgentForge 吸收 |
+| 概念 | Actant 实现 | AutoMater 吸收 |
 |------|-------------|-----------------|
 | Docker 隐喻 | Template → Image → Instance | ✅ Agent 角色模板 → 实例化 |
 | Agent 生命周期 | create → start → monitor → stop → destroy | ✅ 完整生命周期管理 |
@@ -32,7 +36,7 @@
 ### 2.2 agent-swarm（D:\EchoAgent\agent-swarm）
 
 **核心借鉴**：
-| 概念 | agent-swarm 实现 | AgentForge 吸收 |
+| 概念 | agent-swarm 实现 | AutoMater 吸收 |
 |------|-----------------|-----------------|
 | 三阶段工作流 | Init → Iterative Execution → Review | ✅ 核心流程 |
 | 两层 Feature 清单 | 索引层(轻量) + 详情层(按需读取) | ✅ 任务管理结构 |
@@ -64,7 +68,7 @@
 ### 3.2 模块架构
 
 ```
-AgentForge/
+AutoMater/
 ├── apps/
 │   └── desktop/                  # Tauri 桌面应用 (主入口)
 │       ├── src-tauri/            # Rust 后端
@@ -81,7 +85,7 @@ AgentForge/
 │           └── lib/              # 工具函数
 │
 ├── packages/
-│   ├── @agentforge/core/         # Agent 引擎核心
+│   ├── @AutoMater/core/         # Agent 引擎核心
 │   │   ├── src/
 │   │   │   ├── orchestrator/     # 主编排器
 │   │   │   ├── agents/           # Agent 角色定义
@@ -92,21 +96,21 @@ AgentForge/
 │   │   │   └── session/          # 会话管理
 │   │   └── package.json
 │   │
-│   ├── @agentforge/llm/          # LLM 适配层
+│   ├── @AutoMater/llm/          # LLM 适配层
 │   │   ├── src/
 │   │   │   ├── providers/        # OpenAI / Anthropic / 本地
 │   │   │   ├── router.ts         # 模型路由
 │   │   │   └── cost-tracker.ts   # 成本追踪
 │   │   └── package.json
 │   │
-│   ├── @agentforge/sandbox/      # 代码执行沙箱
+│   ├── @AutoMater/sandbox/      # 代码执行沙箱
 │   │   ├── src/
 │   │   │   ├── docker.ts         # Docker 容器管理
 │   │   │   ├── process.ts        # 本地进程管理
 │   │   │   └── fs.ts             # 文件系统隔离
 │   │   └── package.json
 │   │
-│   └── @agentforge/shared/       # 公共类型 & 工具
+│   └── @AutoMater/shared/       # 公共类型 & 工具
 │       ├── src/
 │       │   ├── types/            # 共享类型定义
 │       │   ├── events/           # 事件总线
@@ -127,7 +131,7 @@ AgentForge/
 │   └── ADR_TEMPLATE.md           # 架构决策记录模板
 │
 ├── DESIGN.md                     # 本文件
-├── CLAUDE.md                     # AgentForge 自身的项目大脑
+├── CLAUDE.md                     # AutoMater 自身的项目大脑
 ├── package.json
 ├── pnpm-workspace.yaml
 └── tsconfig.base.json
@@ -261,7 +265,7 @@ interface AgentInstance {
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  🔥 AgentForge           [Project ▾]  [⚙ Settings] │
+│  🔥 AutoMater           [Project ▾]  [⚙ Settings] │
 ├──────┬──────────────────────────────────────────────┤
 │      │                                              │
 │  🏠  │  ┌─────────────────────────────────────────┐ │
@@ -323,7 +327,7 @@ interface ModelConfig {
 
 ### Phase 1: MVP (核心骨架) — 2 周
 - [ ] 项目工程搭建 (Tauri + React + monorepo)
-- [ ] LLM 适配层 (@agentforge/llm)
+- [ ] LLM 适配层 (@AutoMater/llm)
 - [ ] 基础 Agent 引擎 (单 Agent 对话)
 - [ ] 许愿台 UI + 设置页
 

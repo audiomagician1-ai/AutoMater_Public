@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Collector — 为 Developer Agent 收集项目上下文
  *
  * 在每个 Feature 开发前，自动收集：
@@ -148,13 +148,13 @@ export async function collectDeveloperContext(
   }
 
   // ─── 0. AGENTS.md 项目指令 (v1.0, 最高优先) ───
-  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  const agentsMd = readWorkspaceFile(workspacePath, '.automater/AGENTS.md');
   if (agentsMd) {
     const agentsContent = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
     if (agentsContent.length < charBudget * 0.15) {
       addSection({
         id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
-        content: agentsContent, truncated: false, files: ['.agentforge/AGENTS.md'],
+        content: agentsContent, truncated: false, files: ['.automater/AGENTS.md'],
       });
     }
   }
@@ -167,7 +167,7 @@ export async function collectDeveloperContext(
       addSection({
         id: 'memory', name: '3-layer Memory (全局+项目+角色)', source: 'project-config',
         content: memContent, truncated: false,
-        files: ['.agentforge/project-memory.md', '.agentforge/memories/developer.md'],
+        files: ['.automater/project-memory.md', '.automater/memories/developer.md'],
       });
     } else if (memContent.length > 100) {
       // 截断
@@ -175,7 +175,7 @@ export async function collectDeveloperContext(
       addSection({
         id: 'memory', name: '3-layer Memory (截断)', source: 'project-config',
         content: memContent.slice(0, maxLen) + '\n... [记忆已截断]', truncated: true,
-        files: ['.agentforge/project-memory.md', '.agentforge/memories/developer.md'],
+        files: ['.automater/project-memory.md', '.automater/memories/developer.md'],
       });
     }
   }
@@ -434,7 +434,7 @@ export function buildHotMemory(workspacePath: string): MemoryLayer {
   const parts: string[] = [];
 
   // 1. 从 skeleton.json 读取项目元数据
-  const skeletonPath = `${workspacePath}/.agentforge/analysis/skeleton.json`;
+  const skeletonPath = `${workspacePath}/.automater/analysis/skeleton.json`;
   try {
     if (fs.existsSync(skeletonPath)) {
       const skeleton = JSON.parse(fs.readFileSync(skeletonPath, 'utf-8'));
@@ -449,7 +449,7 @@ export function buildHotMemory(workspacePath: string): MemoryLayer {
   } catch { /* skeleton 不存在，跳过 */ }
 
   // 2. 架构文档摘要（前 2000 字符）
-  const archContent = readWorkspaceFile(workspacePath, '.agentforge/docs/ARCHITECTURE.md')
+  const archContent = readWorkspaceFile(workspacePath, '.automater/docs/ARCHITECTURE.md')
     || readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
   if (archContent) {
     const summary = archContent.length > 2000
@@ -459,7 +459,7 @@ export function buildHotMemory(workspacePath: string): MemoryLayer {
   }
 
   // 3. AGENTS.md 项目规范
-  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  const agentsMd = readWorkspaceFile(workspacePath, '.automater/AGENTS.md');
   if (agentsMd) {
     const maxLen = 1000;
     const trimmed = agentsMd.length > maxLen
@@ -481,7 +481,7 @@ export function buildHotMemory(workspacePath: string): MemoryLayer {
  * 每个模块只保留 ID + 一句话职责
  */
 export function buildWarmMemory(workspacePath: string): MemoryLayer {
-  const modulesDir = `${workspacePath}/.agentforge/analysis/modules`;
+  const modulesDir = `${workspacePath}/.automater/analysis/modules`;
   const parts: string[] = ['## 模块索引 (Warm Memory)'];
 
   try {
@@ -512,7 +512,7 @@ export function buildWarmMemory(workspacePath: string): MemoryLayer {
  * 加载 Cold Memory — 指定模块的详细摘要（按需）
  */
 export function loadColdMemory(workspacePath: string, moduleId: string): MemoryLayer {
-  const cacheFile = `${workspacePath}/.agentforge/analysis/modules/${moduleId}.summary.json`;
+  const cacheFile = `${workspacePath}/.automater/analysis/modules/${moduleId}.summary.json`;
   try {
     if (fs.existsSync(cacheFile)) {
       const summary = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
@@ -539,7 +539,7 @@ export function selectColdModules(
     (feature.title || '') + ' ' + (feature.description || ''),
   );
 
-  const modulesDir = `${workspacePath}/.agentforge/analysis/modules`;
+  const modulesDir = `${workspacePath}/.automater/analysis/modules`;
   const scores = new Map<string, number>();
 
   try {
@@ -992,11 +992,11 @@ export function collectLightContext(
   }
 
   // 1.5. AGENTS.md (v1.0)
-  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  const agentsMd = readWorkspaceFile(workspacePath, '.automater/AGENTS.md');
   if (agentsMd && totalChars + agentsMd.length < charBudget * 0.2) {
     addSection({
       id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
-      content: `## 项目规范\n${agentsMd}`, truncated: false, files: ['.agentforge/AGENTS.md'],
+      content: `## 项目规范\n${agentsMd}`, truncated: false, files: ['.automater/AGENTS.md'],
     });
   }
 
@@ -1106,13 +1106,13 @@ export function collectBaselineContext(
   }
 
   // ─── 3. AGENTS.md 项目规范 ───
-  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  const agentsMd = readWorkspaceFile(workspacePath, '.automater/AGENTS.md');
   if (agentsMd) {
     const content = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
     addSection({
       id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
       content, truncated: false,
-      files: ['.agentforge/AGENTS.md'],
+      files: ['.automater/AGENTS.md'],
     });
   }
 
@@ -1123,7 +1123,7 @@ export function collectBaselineContext(
       addSection({
         id: 'memory', name: `角色记忆 (${role})`, source: 'project-config',
         content: `## Agent 记忆\n${memory.combined}`, truncated: false,
-        files: ['.agentforge/project-memory.md', `.agentforge/memories/${role}.md`],
+        files: ['.automater/project-memory.md', `.automater/memories/${role}.md`],
       });
     }
   } catch { /* 非致命 */ }

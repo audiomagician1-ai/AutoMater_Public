@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Skill Loader — 本地技能目录扫描器
  *
- * 从指定目录读取 JSON 格式的技能定义文件，转换为 AgentForge 的 ToolDefinition。
+ * 从指定目录读取 JSON 格式的技能定义文件，转换为 AutoMater 的 ToolDefinition。
  * 每个 .json 文件定义一个或多个工具，文件格式:
  *
  * ```json
@@ -86,7 +86,7 @@ export interface SkillFileEntry {
 
 /** 加载后的技能 (含执行信息) */
 export interface LoadedSkill {
-  /** 作为 AgentForge 工具使用的定义 */
+  /** 作为 AutoMater 工具使用的定义 */
   definition: ToolDefinition;
   /** 执行配置 */
   execution: SkillExecution;
@@ -222,7 +222,7 @@ function parseSkillEntry(entry: any, filePath: string): LoadedSkill {
     throw new Error(`Skill "${entry.name}" (script type) missing "code"`);
   }
 
-  // 构造 AgentForge ToolDefinition
+  // 构造 AutoMater ToolDefinition
   const definition: ToolDefinition = {
     name: `skill_${entry.name}`,
     description: `[Skill] ${entry.description}`,

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MCP Client — Model Context Protocol 客户端
  *
  * 支持两种传输方式:
@@ -308,7 +308,7 @@ export class McpConnection {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: {
-        name: 'AgentForge',
+        name: 'AutoMater',
         version: '5.0.0',
       },
     });

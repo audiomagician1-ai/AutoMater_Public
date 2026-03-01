@@ -1,4 +1,4 @@
-/**
+﻿/**
  * QA Loop — QA 审查循环
  *
  * v5.5 增强: 始终尝试 test/lint 执行 (不再仅在检测到测试文件时才跑)
@@ -297,14 +297,14 @@ export async function generateTestSkeleton(
   }
 
   // 读取 feature 的子需求文档 (如有)
-  const reqDocPath = path.join(workspacePath, `.agentforge/docs/requirements/${feature.id}.md`);
+  const reqDocPath = path.join(workspacePath, `.automater/docs/requirements/${feature.id}.md`);
   let reqDoc = '';
   if (fs.existsSync(reqDocPath)) {
     reqDoc = fs.readFileSync(reqDocPath, 'utf-8').slice(0, 3000);
   }
 
   // 读取 feature 的测试规格 (如有)
-  const testSpecPath = path.join(workspacePath, `.agentforge/docs/test_specs/${feature.id}.md`);
+  const testSpecPath = path.join(workspacePath, `.automater/docs/test_specs/${feature.id}.md`);
   let testSpec = '';
   if (fs.existsSync(testSpecPath)) {
     testSpec = fs.readFileSync(testSpecPath, 'utf-8').slice(0, 3000);

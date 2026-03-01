@@ -1,12 +1,12 @@
-/**
+﻿/**
  * Memory System — 3-layer Agent 记忆系统 (v1.2)
  *
  * 三层结构 (参照 Factory Droids):
- * 1. Global Memory — %APPDATA%/agentforge/global-memory.md
+ * 1. Global Memory — %APPDATA%/automater/global-memory.md
  *    用户偏好/coding style/通用经验，跨项目共享
- * 2. Project Memory — {workspace}/.agentforge/project-memory.md
+ * 2. Project Memory — {workspace}/.automater/project-memory.md
  *    架构决策/踩坑记录/项目约定
- * 3. Agent Role Memory — {workspace}/.agentforge/memories/{role}.md
+ * 3. Agent Role Memory — {workspace}/.automater/memories/{role}.md
  *    per-role 经验 (pm/developer/qa/architect)
  *
  * 所有记忆用 Markdown 存储，Agent 可通过工具读写。
@@ -20,14 +20,14 @@ import { app } from 'electron';
 // 路径辅助
 // ═══════════════════════════════════════
 
-/** Global memory 路径: %APPDATA%/agentforge/global-memory.md */
+/** Global memory 路径: %APPDATA%/automater/global-memory.md */
 function getGlobalMemoryPath(): string {
   return path.join(app.getPath('userData'), 'global-memory.md');
 }
 
-/** Project memory 基目录: {workspace}/.agentforge/ */
+/** Project memory 基目录: {workspace}/.automater/ */
 function getProjectMemoryDir(workspacePath: string): string {
-  return path.join(workspacePath, '.agentforge');
+  return path.join(workspacePath, '.automater');
 }
 
 function getProjectMemoryPath(workspacePath: string): string {
@@ -207,14 +207,14 @@ export function ensureGlobalMemory(): void {
   const p = getGlobalMemoryPath();
   if (fs.existsSync(p)) return;
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, `# Global Memory — AgentForge 全局记忆
+  fs.writeFileSync(p, `# Global Memory — AutoMater 全局记忆
 > 跨项目共享的用户偏好和通用经验。Agent 和用户均可编辑。
 
 ## 用户偏好
 - (在此添加你的编码风格偏好、命名规范等)
 
 ## 通用经验
-- (AgentForge 会自动积累跨项目经验)
+- (AutoMater 会自动积累跨项目经验)
 `, 'utf-8');
 }
 

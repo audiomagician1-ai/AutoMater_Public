@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DocsPage v4.4 — 项目文档浏览器
  *
  * 左侧: 三类文档树 (设计文档 / 子需求 / 测试规格) + 变更日志
@@ -320,8 +320,8 @@ export function DocsPage() {
   const loadDocList = useCallback(async () => {
     if (!currentProjectId) return;
     const [docs, log] = await Promise.all([
-      window.agentforge.project.listAllDocs(currentProjectId),
-      window.agentforge.project.getDocChangelog(currentProjectId),
+      window.automater.project.listAllDocs(currentProjectId),
+      window.automater.project.getDocChangelog(currentProjectId),
     ]);
     setDocList(docs as DocListResult);
     setChangelog((log || []) as DocChangeEntry[]);
@@ -369,7 +369,7 @@ export function DocsPage() {
     setLoadingContent(true);
     try {
       if (!currentProjectId) return;
-      const content = await window.agentforge.project.readDoc(
+      const content = await window.automater.project.readDoc(
         currentProjectId,
         item.type,
         item.type === 'design' ? '' : item.id,

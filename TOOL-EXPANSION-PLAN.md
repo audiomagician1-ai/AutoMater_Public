@@ -1,18 +1,18 @@
-# AgentForge v2.1+ 工具体系扩展迭代计划
+﻿# AutoMater v2.1+ 工具体系扩展迭代计划
 
 > **日期**: 2026-03-01  
 > **版本**: v2.0.0 → v2.1 ~ v3.0  
-> **核心认知修正**: AgentForge 的 Agent 不仅写代码，还要做复杂规划、黑盒测试、GUI 操作，未来还要直接操控游戏引擎编辑器（Unity/Unreal）。工具体系必须按此目标全面扩展。
+> **核心认知修正**: AutoMater 的 Agent 不仅写代码，还要做复杂规划、黑盒测试、GUI 操作，未来还要直接操控游戏引擎编辑器（Unity/Unreal）。工具体系必须按此目标全面扩展。
 
 ---
 
 ## 1. 定位重定义
 
 ### 之前的理解（错误）
-AgentForge = 代码生成工具，Agent 只需要文件操作 + Shell + Git
+AutoMater = 代码生成工具，Agent 只需要文件操作 + Shell + Git
 
 ### 纠正后的理解
-AgentForge = **AI 虚拟开发团队**，Agent 需要：
+AutoMater = **AI 虚拟开发团队**，Agent 需要：
 - ✅ 写代码、读代码、搜索代码（已有）
 - ✅ 执行命令、运行测试（已有）
 - 🆕 **看到屏幕** — 截图、理解 GUI 界面
@@ -50,9 +50,9 @@ GitHub:    github_create_issue, github_list_issues
 
 ## 3. EchoAgent（我自己）的工具审计
 
-我自己拥有 ~55 个工具，分为 8 大类。AgentForge 应该参考但不是照搬：
+我自己拥有 ~55 个工具，分为 8 大类。AutoMater 应该参考但不是照搬：
 
-| 类别 | EchoAgent 的工具 | AgentForge 是否需要 | 备注 |
+| 类别 | EchoAgent 的工具 | AutoMater 是否需要 | 备注 |
 |---|---|---|---|
 | **文件系统** | read, edit, multiedit, ls, grep | ✅ 已有等价物 | 需要增加 batch_edit |
 | **Shell** | bash (PowerShell) | ✅ 已有 | 需要增加后台执行 + 进程管理 |
@@ -195,7 +195,7 @@ Agent ReAct Loop:
 - **Remote Control API** — UE 内置 REST API (UE5+)
 - **Python Editor Utility** — UE 的 Python 脚本集成
 
-**AgentForge 架构设计**:
+**AutoMater 架构设计**:
 ```
 electron/engine/
   engine-bridge.ts          ← 统一接口层
@@ -215,7 +215,7 @@ electron/engine/
   engine_build              ← 构建/打包项目
 ```
 
-**可插拔设计**: 用户在 Settings 中选择引擎类型 + 填入连接地址，AgentForge 自动加载对应 bridge。
+**可插拔设计**: 用户在 Settings 中选择引擎类型 + 填入连接地址，AutoMater 自动加载对应 bridge。
 
 ---
 
@@ -315,7 +315,7 @@ function getToolsForAgent(role: AgentRole, phase: TaskPhase): ToolDefinition[] {
 
 ## 8. 与 EchoAgent 能力的最终对齐表
 
-| 能力 | EchoAgent (我自己) | AgentForge v2.0 | AgentForge v3.0 (目标) |
+| 能力 | EchoAgent (我自己) | AutoMater v2.0 | AutoMater v3.0 (目标) |
 |---|---|---|---|
 | 文件读写编辑 | ✅ read/edit/multiedit/ls/grep | ✅ 6个工具 | ✅ +batch_edit |
 | Shell 执行 | ✅ bash (PowerShell) | ✅ run_command | ✅ +后台进程 |
@@ -353,7 +353,7 @@ function getToolsForAgent(role: AgentRole, phase: TaskPhase): ToolDefinition[] {
 
 ## 10. 总结
 
-AgentForge 从 v2.0 到 v3.0 的工具扩展路线：
+AutoMater 从 v2.0 到 v3.0 的工具扩展路线：
 
 ```
 v2.0 (当前)   17 工具 → 纯代码生成

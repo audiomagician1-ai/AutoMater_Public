@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Cross-project Learning — 跨项目经验池
  *
  * 所有项目完成后，将 project-memory 中的有价值经验
  * 提取/归类到全局经验池 (按技术栈分类)。
  * 新项目初始化时，自动匹配并注入相关经验。
  *
- * 存储: %APPDATA%/agentforge/knowledge/
+ * 存储: %APPDATA%/automater/knowledge/
  *   - _index.json     — 经验条目索引 (id, tags, source, summary)
  *   - typescript.md    — TypeScript 项目通用经验
  *   - react.md         — React 项目经验
@@ -183,7 +183,7 @@ export function extractFromProjectMemory(
   workspacePath: string,
   projectName: string,
 ): number {
-  const memPath = path.join(workspacePath, '.agentforge', 'project-memory.md');
+  const memPath = path.join(workspacePath, '.automater', 'project-memory.md');
   if (!fs.existsSync(memPath)) return 0;
 
   const content = fs.readFileSync(memPath, 'utf-8');

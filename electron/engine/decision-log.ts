@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Decision Log — 并行 Worker 共享决策日志 (v5.5)
  *
  * 解决并行 Worker 同时修改同一文件导致冲突的问题。
  * 每个 Worker 在开始 Feature 前声明 "我计划修改哪些文件"，
  * 其他 Worker 在开始前检查有无交叉，若有则等待或标记冲突。
  *
- * 存储: .agentforge/decision-log.jsonl (JSON Lines, 追加写入)
+ * 存储: .automater/decision-log.jsonl (JSON Lines, 追加写入)
  * 机制: 乐观锁 + 文件级声明 + 冲突检测
  */
 
@@ -47,11 +47,11 @@ export interface ConflictInfo {
 // ═══════════════════════════════════════
 
 function getLogPath(workspacePath: string): string {
-  return path.join(workspacePath, '.agentforge', 'decision-log.jsonl');
+  return path.join(workspacePath, '.automater', 'decision-log.jsonl');
 }
 
 function ensureLogDir(workspacePath: string): void {
-  const dir = path.join(workspacePath, '.agentforge');
+  const dir = path.join(workspacePath, '.automater');
   fs.mkdirSync(dir, { recursive: true });
 }
 

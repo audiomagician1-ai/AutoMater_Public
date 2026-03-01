@@ -1,4 +1,4 @@
-/**
+﻿/**
  * meta-agent IPC handlers — 元Agent 对话 + 管理 + 记忆系统
  *
  * v5.4: 初始创建 — LLM 对话 + 意图检测
@@ -260,7 +260,7 @@ function collectProjectContext(projectId: string): string {
 
   // Design doc (truncated)
   if (project.workspace_path) {
-    const archPath = path.join(project.workspace_path, '.agentforge', 'docs', 'ARCHITECTURE.md');
+    const archPath = path.join(project.workspace_path, '.automater', 'docs', 'ARCHITECTURE.md');
     if (fs.existsSync(archPath)) {
       const content = fs.readFileSync(archPath, 'utf-8');
       parts.push(`\n设计文档(前2000字):\n${content.slice(0, 2000)}`);

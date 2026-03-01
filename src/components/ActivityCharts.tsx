@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ActivityCharts — 活动时序折线图
  *
  * 展示过去 30 分钟内每分钟的:
@@ -109,7 +109,7 @@ export function ActivityCharts({ projectId }: { projectId: string }) {
   const load = useCallback(async () => {
     if (!projectId) return;
     try {
-      const result = await window.agentforge.monitor.getActivityTimeseries(projectId, CHART_MINUTES);
+      const result = await window.automater.monitor.getActivityTimeseries(projectId, CHART_MINUTES);
       setData(result);
     } catch { /* ignore */ }
   }, [projectId]);

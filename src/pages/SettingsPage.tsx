@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 
 // ═══════════════════════════════════════
@@ -194,7 +194,7 @@ export function SettingsPage() {
 
   // ── Load ──
   useEffect(() => {
-    window.agentforge.settings.get().then((s: AppSettings) => {
+    window.automater.settings.get().then((s: AppSettings) => {
       setSettings({
         ...s,
         fastModel: s.fastModel ?? '',
@@ -212,29 +212,29 @@ export function SettingsPage() {
       }
     });
     // 加载内置价格表
-    window.agentforge.monitor.getBuiltinPricing().then(setBuiltinPricing).catch(() => {});
+    window.automater.monitor.getBuiltinPricing().then(setBuiltinPricing).catch(() => {});
     refreshMcpServers();
     refreshSkills();
 
     // 监听 Ctrl+/Ctrl- 导致的缩放变化，同步滑条
-    const unsubZoom = window.agentforge.on('zoom:changed', (factor: number) => {
+    const unsubZoom = window.automater.on('zoom:changed', (factor: number) => {
       setZoomFactor(factor);
     });
     return () => unsubZoom();
   }, []);
 
   const refreshMcpServers = useCallback(async () => {
-    const servers = await window.agentforge.mcp.listServers();
+    const servers = await window.automater.mcp.listServers();
     setMcpServers(servers);
-    const tools = await window.agentforge.mcp.listTools();
+    const tools = await window.automater.mcp.listTools();
     setMcpTools(tools);
   }, []);
 
   const refreshSkills = useCallback(async () => {
-    const dir = await window.agentforge.skill.getDirectory();
+    const dir = await window.automater.skill.getDirectory();
     setSkillDir(dir);
     setSkillDirInput(dir);
-    const list = await window.agentforge.skill.list();
+    const list = await window.automater.skill.list();
     setSkills(list);
   }, []);
 
@@ -260,7 +260,7 @@ export function SettingsPage() {
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
-    const result = await window.agentforge.llm.testConnection({
+    const result = await window.automater.llm.testConnection({
       type: settings.llmProvider,
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
@@ -272,7 +272,7 @@ export function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    await window.agentforge.settings.save(settings);
+    await window.automater.settings.save(settings);
     setSettingsConfigured(!!settings.apiKey);
     setSaving(false);
     setSaved(true);
@@ -293,29 +293,29 @@ export function SettingsPage() {
   const handleZoomChange = async (factor: number) => {
     const clamped = Math.round(Math.min(3.0, Math.max(0.5, factor)) * 10) / 10;
     setZoomFactor(clamped);
-    window.agentforge.zoom.set(clamped);
+    window.automater.zoom.set(clamped);
     // 持久化到设置
-    const current = await window.agentforge.settings.get();
-    await window.agentforge.settings.save({ ...current, zoomFactor: clamped });
+    const current = await window.automater.settings.get();
+    await window.automater.settings.save({ ...current, zoomFactor: clamped });
   };
 
   // ── MCP Handlers ──
   const handleAddMcp = async (config: Partial<McpServerConfig>) => {
-    await window.agentforge.mcp.addServer(config as Omit<McpServerConfig, 'id'>);
+    await window.automater.mcp.addServer(config as Omit<McpServerConfig, 'id'>);
     setShowMcpForm(false);
     await refreshMcpServers();
   };
 
   const handleUpdateMcp = async (config: Partial<McpServerConfig>) => {
     if (editingMcpId) {
-      await window.agentforge.mcp.updateServer(editingMcpId, config);
+      await window.automater.mcp.updateServer(editingMcpId, config);
       setEditingMcpId(null);
       await refreshMcpServers();
     }
   };
 
   const handleRemoveMcp = async (id: string) => {
-    await window.agentforge.mcp.removeServer(id);
+    await window.automater.mcp.removeServer(id);
     await refreshMcpServers();
   };
 
@@ -323,9 +323,9 @@ export function SettingsPage() {
     setMcpConnecting(server.id);
     try {
       if (server.connected) {
-        await window.agentforge.mcp.disconnectServer(server.id);
+        await window.automater.mcp.disconnectServer(server.id);
       } else {
-        await window.agentforge.mcp.connectServer(server.id);
+        await window.automater.mcp.connectServer(server.id);
       }
     } catch { /* ignore */ }
     setMcpConnecting(null);
@@ -335,7 +335,7 @@ export function SettingsPage() {
   // ── Skill Handlers ──
   const handleSetSkillDir = async () => {
     setSkillLoading(true);
-    const result = await window.agentforge.skill.setDirectory(skillDirInput.trim());
+    const result = await window.automater.skill.setDirectory(skillDirInput.trim());
     setSkillDir(skillDirInput.trim());
     setSkills(result.skills || []);
     setSkillErrors(result.errors || []);
@@ -344,7 +344,7 @@ export function SettingsPage() {
 
   const handleReloadSkills = async () => {
     setSkillLoading(true);
-    const result = await window.agentforge.skill.reload();
+    const result = await window.automater.skill.reload();
     setSkills(result.skills || []);
     setSkillErrors(result.errors || []);
     setSkillLoading(false);
@@ -874,8 +874,8 @@ export function SettingsPage() {
                     numericPricing[model] = { input: inp, output: outp };
                   }
                 }
-                const current = await window.agentforge.settings.get();
-                await window.agentforge.settings.save({ ...current, modelPricing: numericPricing });
+                const current = await window.automater.settings.get();
+                await window.automater.settings.save({ ...current, modelPricing: numericPricing });
                 setPricingSaved(true);
                 setTimeout(() => setPricingSaved(false), 3000);
               }}

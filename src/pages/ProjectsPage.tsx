@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
 
 const STATUS_LABELS: Record<string, { text: string; color: string; icon: string }> = {
@@ -36,11 +36,11 @@ export function ProjectsPage() {
   const { settingsConfigured, setGlobalPage, enterProject, addLog } = useAppStore();
 
   const loadProjects = async () => {
-    const list = await window.agentforge.project.list();
+    const list = await window.automater.project.list();
     setProjects(list || []);
     const stats: Record<string, any> = {};
     for (const p of (list || [])) {
-      try { stats[p.id] = await window.agentforge.project.getStats(p.id); } catch {}
+      try { stats[p.id] = await window.automater.project.getStats(p.id); } catch {}
     }
     setProjectStats(stats);
   };
@@ -64,7 +64,7 @@ export function ProjectsPage() {
         options.githubRepo = githubRepo;
         options.githubToken = githubToken;
       }
-      const result = await window.agentforge.project.create(projectName.trim(), options);
+      const result = await window.automater.project.create(projectName.trim(), options);
       if (result.success) {
         addLog({ projectId: result.projectId, agentId: 'system', content: `📁 项目已创建: ${result.name}` });
         // 重置表单
@@ -89,32 +89,32 @@ export function ProjectsPage() {
     if (!githubRepo || !githubToken) return;
     setGithubTesting(true);
     setGithubTestResult(null);
-    const result = await window.agentforge.project.testGitHub(githubRepo, githubToken);
+    const result = await window.automater.project.testGitHub(githubRepo, githubToken);
     setGithubTestResult(result);
     setGithubTesting(false);
   };
 
   const handleStop = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await window.agentforge.project.stop(id);
+    await window.automater.project.stop(id);
     loadProjects();
   };
 
   const handleResume = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await window.agentforge.project.start(id);
+    await window.automater.project.start(id);
     enterProject(id, 'logs');
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await window.agentforge.project.delete(id);
+    await window.automater.project.delete(id);
     loadProjects();
   };
 
   const handleExport = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const result = await window.agentforge.project.export(id);
+    const result = await window.automater.project.export(id);
     if (result.success) addLog({ projectId: id, agentId: 'system', content: `📦 已导出: ${result.path}` });
   };
 
@@ -131,10 +131,10 @@ export function ProjectsPage() {
         workspacePath: importPath.trim(),
         importExisting: true,
       };
-      const result = await window.agentforge.project.create(name, options);
+      const result = await window.automater.project.create(name, options);
       if (result.success) {
         // 触发后端异步分析（不阻塞，进度通过事件推送到 OverviewPage）
-        window.agentforge.project.analyzeExisting(result.projectId).catch(() => {});
+        window.automater.project.analyzeExisting(result.projectId).catch(() => {});
 
         addLog({ projectId: result.projectId, agentId: 'system', content: `📥 项目已导入，分析中: ${name}` });
         setImportPath('');
@@ -190,7 +190,7 @@ export function ProjectsPage() {
             <div className="bg-slate-900 border border-cyan-800/30 rounded-xl p-6 space-y-4 mb-4">
               <h3 className="text-sm font-semibold text-slate-200">📥 导入已有项目</h3>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                将已有代码项目导入 AgentForge。系统会自动执行静态扫描 → 模块摘要 → 架构合成 → 文档填充，
+                将已有代码项目导入 AutoMater。系统会自动执行静态扫描 → 模块摘要 → 架构合成 → 文档填充，
                 生成完整的项目文档框架，让 Agent 团队理解你的项目。
               </p>
 
@@ -216,7 +216,7 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await window.agentforge.dialog.openDirectory('选择项目根目录');
+                        const result = await window.automater.dialog.openDirectory('选择项目根目录');
                         if (!result.canceled && result.filePaths?.[0]) {
                           setImportPath(result.filePaths[0]);
                           if (!importName) setImportName(result.filePaths[0].split(/[\\/]/).pop() || '');
@@ -306,7 +306,7 @@ export function ProjectsPage() {
                     // 自动填充工作区和历史版本路径
                     if (projectName.trim() && !workspacePath) {
                       const safeName = projectName.trim().replace(/[\s\\/:<>"'|?*]+/g, '-').toLowerCase();
-                      const base = `D:\\AgentForge-Projects\\${safeName}`;
+                      const base = `D:\\AutoMater-Projects\\${safeName}`;
                       setWorkspacePath(base);
                       if (!historyPath) setHistoryPath(`${base}\\.versions`);
                     }
@@ -332,7 +332,7 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await window.agentforge.dialog.openDirectory('选择工作区文件夹');
+                        const result = await window.automater.dialog.openDirectory('选择工作区文件夹');
                         if (!result.canceled && result.filePaths?.[0]) setWorkspacePath(result.filePaths[0]);
                       } catch {}
                     }}
@@ -362,7 +362,7 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await window.agentforge.dialog.openDirectory('选择历史版本文件夹');
+                        const result = await window.automater.dialog.openDirectory('选择历史版本文件夹');
                         if (!result.canceled && result.filePaths?.[0]) setHistoryPath(result.filePaths[0]);
                       } catch {}
                     }}

@@ -1,8 +1,8 @@
-{
-  "name": "agentforge",
+﻿{
+  "name": "automater",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentForge — AI Agent 集群式软件开发桌面应用",
+  "description": "智械母机 AutoMater — AI Agent 集群式软件开发桌面应用",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -54,8 +54,8 @@
     "vite-plugin-electron-renderer": "^0.14.0"
   },
   "build": {
-    "appId": "com.agentforge.app",
-    "productName": "AgentForge",
+    "appId": "com.automater.app",
+    "productName": "智械母机 AutoMater",
     "directories": {
       "output": "release"
     },

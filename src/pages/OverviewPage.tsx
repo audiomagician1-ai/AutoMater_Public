@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OverviewPage — 项目全景 (v4.1)
  *
  * 三层级 DAG 可视化:
@@ -856,7 +856,7 @@ function DocCompletionBar({ features, projectId }: { features: Feature[]; projec
 
   useEffect(() => {
     if (!projectId) return;
-    window.agentforge.project.listAllDocs(projectId).then(docs => {
+    window.automater.project.listAllDocs(projectId).then(docs => {
       setDocStats({
         design: (docs?.design?.length ?? 0) > 0,
         reqCount: docs?.requirements?.length ?? 0,
@@ -952,9 +952,9 @@ export function OverviewPage() {
   const load = useCallback(async () => {
     if (!currentProjectId) return;
     const [feats, st, proj] = await Promise.all([
-      window.agentforge.project.getFeatures(currentProjectId),
-      window.agentforge.project.getStats(currentProjectId),
-      window.agentforge.project.get(currentProjectId),
+      window.automater.project.getFeatures(currentProjectId),
+      window.automater.project.getStats(currentProjectId),
+      window.automater.project.get(currentProjectId),
     ]);
     setFeatures(feats || []);
     setStats(st);
@@ -975,7 +975,7 @@ export function OverviewPage() {
 
   // 订阅后端 import-progress 事件
   useEffect(() => {
-    const unsub = window.agentforge.on('project:import-progress', (data: any) => {
+    const unsub = window.automater.on('project:import-progress', (data: any) => {
       if (data.projectId === currentProjectId) {
         setImportProgress({
           phase: data.phase,
@@ -997,7 +997,7 @@ export function OverviewPage() {
     if (!settingsConfigured) { setGlobalPage('settings'); return; }
     setStarting(true);
     try {
-      await window.agentforge.project.start(currentProjectId);
+      await window.automater.project.start(currentProjectId);
       addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队开始工作' });
       load();
     } finally {
@@ -1007,7 +1007,7 @@ export function OverviewPage() {
   };
   const handleStop = async () => {
     if (!currentProjectId) return;
-    await window.agentforge.project.stop(currentProjectId);
+    await window.automater.project.stop(currentProjectId);
     addLog({ projectId: currentProjectId, agentId: 'system', content: '⏸ 已暂停' });
     load();
   };
@@ -1045,7 +1045,7 @@ export function OverviewPage() {
   const handleAnalyze = async () => {
     if (!currentProjectId) return;
     if (!settingsConfigured) { setGlobalPage('settings'); return; }
-    await window.agentforge.project.start(currentProjectId);
+    await window.automater.project.start(currentProjectId);
     addLog({ projectId: currentProjectId, agentId: 'system', content: '📥 启动项目导入分析...' });
     load();
   };

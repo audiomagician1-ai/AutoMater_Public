@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
 
@@ -147,7 +147,7 @@ export function OutputPage() {
 
   const loadTree = useCallback(async () => {
     if (!currentProjectId) return;
-    const result = await window.agentforge.workspace.tree(currentProjectId);
+    const result = await window.automater.workspace.tree(currentProjectId);
     if (result.success) setTree(result.tree);
   }, [currentProjectId]);
 
@@ -160,7 +160,7 @@ export function OutputPage() {
 
   // 监听工作区变化事件
   useEffect(() => {
-    const unsub = window.agentforge.on('workspace:changed', (data: any) => {
+    const unsub = window.automater.on('workspace:changed', (data: any) => {
       if (data.projectId === currentProjectId) loadTree();
     });
     return unsub;
@@ -171,7 +171,7 @@ export function OutputPage() {
     setSelectedFile(filePath);
     setLoading(true);
     try {
-      const result = await window.agentforge.workspace.readFile(currentProjectId, filePath);
+      const result = await window.automater.workspace.readFile(currentProjectId, filePath);
       setFileContent(result.success ? result.content : '无法读取文件');
     } catch {
       setFileContent('读取失败');
@@ -181,12 +181,12 @@ export function OutputPage() {
 
   const handleOpenInExplorer = async () => {
     if (!currentProjectId) return;
-    await window.agentforge.project.openWorkspace(currentProjectId);
+    await window.automater.project.openWorkspace(currentProjectId);
   };
 
   const handleExport = async () => {
     if (!currentProjectId) return;
-    await window.agentforge.project.export(currentProjectId);
+    await window.automater.project.export(currentProjectId);
   };
 
   const handleFileRightClick = (e: React.MouseEvent, node: any) => {

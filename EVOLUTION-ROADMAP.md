@@ -1,8 +1,8 @@
-# AgentForge Dev-Agent 伙伴 — Skill 迭代进化路线图
+﻿# AutoMater Dev-Agent 伙伴 — Skill 迭代进化路线图
 
 > **日期**: 2026-03-01  
-> **定位**: 我（EchoAgent / Tim的开发助手）作为 AgentForge 的 dev-agent 伙伴，需要哪些 Skill 来高效辅助 AgentForge 项目的开发、调试、运维  
-> **背景**: AgentForge 是一个 Agent 集群式软件开发桌面应用（Electron + React + TypeScript），当前处于 v0.9 → v1.0 跨越期
+> **定位**: 我（EchoAgent / Tim的开发助手）作为 AutoMater 的 dev-agent 伙伴，需要哪些 Skill 来高效辅助 AutoMater 项目的开发、调试、运维  
+> **背景**: AutoMater 是一个 Agent 集群式软件开发桌面应用（Electron + React + TypeScript），当前处于 v0.9 → v1.0 跨越期
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1.1 已有 Skill（23 个）
 
-| 分类 | Skill 名 | 与 AgentForge 的适配度 |
+| 分类 | Skill 名 | 与 AutoMater 的适配度 |
 |---|---|---|
 | 代码工程 | batch-feature-development | ✅ 批量 Feature 开发 |
 | 代码工程 | code-hygiene-patrol | ✅ 代码卫生检查 |
@@ -19,7 +19,7 @@
 | 代码工程 | fix-quality-gate | ✅ 修复质量门禁 |
 | 代码工程 | iterative-simplification | ✅ 迭代简化 |
 | 部署运维 | deploy-consistency-check | ⚠️ 需要适配 Electron 打包场景 |
-| 部署运维 | frontend-deploy-verify | ⚠️ Web 前端部署，AgentForge 是桌面端 |
+| 部署运维 | frontend-deploy-verify | ⚠️ Web 前端部署，AutoMater 是桌面端 |
 | 部署运维 | safe-commit-deploy | ✅ 安全提交部署 |
 | 部署运维 | supabase-full-deploy | ❌ Supabase 专用 |
 | 分析调研 | competitive-analysis | ✅ 竞品分析（对标 Devin/OpenHands/Factory） |
@@ -62,7 +62,7 @@
 
 #### Skill #1: `electron-main-process-debug`
 **定位**: Electron 主进程调试排查专用
-**Why**: AgentForge 的核心逻辑（orchestrator, engine 40+ 模块）全部跑在 Electron 主进程。当前的 `remote-diagnosis` skill 面向 Web 服务器，不适用 Electron 架构。
+**Why**: AutoMater 的核心逻辑（orchestrator, engine 40+ 模块）全部跑在 Electron 主进程。当前的 `remote-diagnosis` skill 面向 Web 服务器，不适用 Electron 架构。
 **覆盖场景**:
 - IPC 通信追踪（主进程 ↔ 渲染进程）
 - 主进程 crash / unhandled rejection 排查
@@ -124,7 +124,7 @@ if (runningOrchestrators.has(projectId)) {
 ### 🟠 P1: 近期应补充（提升开发效率）
 
 #### Skill #5: `orchestrator-state-machine`  
-**定位**: 理解和调试 AgentForge 5 阶段流水线的状态机
+**定位**: 理解和调试 AutoMater 5 阶段流水线的状态机
 **Why**: 当前 orchestrator 的状态流转（initializing → developing → paused → ...) 分散在 1162 行代码中，没有统一的状态机定义。调试时需要理解每个 phase 的入口条件、退出条件、异常处理。
 **覆盖内容**:
 - 5 阶段流水线的完整状态图
@@ -136,7 +136,7 @@ if (runningOrchestrators.has(projectId)) {
 
 #### Skill #6: `llm-api-compatibility`
 **定位**: 多 LLM Provider 兼容性问题排查
-**Why**: AgentForge 支持 OpenAI + Anthropic 双协议，但用户可能配 Azure OpenAI、本地 Ollama、各种国产模型。每种的错误格式、限制不同。今天的 `gpt-5.3-codex` 就是 Azure OpenAI 端点返回的特殊错误格式。
+**Why**: AutoMater 支持 OpenAI + Anthropic 双协议，但用户可能配 Azure OpenAI、本地 Ollama、各种国产模型。每种的错误格式、限制不同。今天的 `gpt-5.3-codex` 就是 Azure OpenAI 端点返回的特殊错误格式。
 **覆盖内容**:
 - OpenAI vs Azure OpenAI vs Anthropic 的 API 差异清单
 - 常见错误码及对应处理策略
@@ -146,7 +146,7 @@ if (runningOrchestrators.has(projectId)) {
 
 #### Skill #7: `react-loop-debug`
 **定位**: ReAct (Reason-Act) 循环的专用调试
-**Why**: AgentForge 的核心执行引擎是 ReAct 循环（react-loop.ts 800+ 行），Developer / PM 都通过它工作。当 Agent 行为异常（无限循环、选错工具、输出解析失败），需要专门的调试流程。
+**Why**: AutoMater 的核心执行引擎是 ReAct 循环（react-loop.ts 800+ 行），Developer / PM 都通过它工作。当 Agent 行为异常（无限循环、选错工具、输出解析失败），需要专门的调试流程。
 **覆盖内容**:
 - ReAct 迭代日志分析（每轮的 think → tool_call → result → 下一步）
 - 终止条件检查（task_complete 被调用? error_loop 计数器? max iterations?）
@@ -156,7 +156,7 @@ if (runningOrchestrators.has(projectId)) {
 
 #### Skill #8: `multi-agent-coordination`
 **定位**: 多 Worker 并行协调问题排查
-**Why**: AgentForge 支持 1-15 个并行 dev worker。今天的日志显示 15 个 worker 全部同时"下班了"——说明没有真正的任务分发。Worker 间的文件冲突、决策日志、feature 锁定都需要系统化的调试方法。
+**Why**: AutoMater 支持 1-15 个并行 dev worker。今天的日志显示 15 个 worker 全部同时"下班了"——说明没有真正的任务分发。Worker 间的文件冲突、决策日志、feature 锁定都需要系统化的调试方法。
 **覆盖内容**:
 - Feature 锁定竞争诊断
 - Decision log 冲突检测
@@ -174,11 +174,11 @@ if (runningOrchestrators.has(projectId)) {
 
 #### Skill #10: `electron-build-pipeline`
 **定位**: Electron 应用打包、签名、分发
-**Why**: AgentForge 最终需要打包给用户使用。Electron 的 electron-builder / electron-forge 配置、跨平台签名、auto-update 都是坑点密集区。
+**Why**: AutoMater 最终需要打包给用户使用。Electron 的 electron-builder / electron-forge 配置、跨平台签名、auto-update 都是坑点密集区。
 
 #### Skill #11: `agent-prompt-engineering`
 **定位**: Agent System Prompt 迭代优化
-**Why**: AgentForge 中 PM / Architect / Developer / QA 四种角色各有 system prompt，prompt 质量直接决定输出质量。需要系统化的 prompt A/B 测试、质量度量、迭代方法。
+**Why**: AutoMater 中 PM / Architect / Developer / QA 四种角色各有 system prompt，prompt 质量直接决定输出质量。需要系统化的 prompt A/B 测试、质量度量、迭代方法。
 **覆盖内容**:
 - Prompt 结构化模板（角色定义 → 能力声明 → 输出格式 → 约束条件）
 - JSON 输出稳定性技巧（schema 注入、few-shot example、retry parse）
@@ -186,8 +186,8 @@ if (runningOrchestrators.has(projectId)) {
 - 角色人格一致性（PM 不要写代码、Developer 不要做产品决策）
 
 #### Skill #12: `doc-driven-development`
-**定位**: 文档驱动开发（AgentForge 的核心工作流）
-**Why**: AgentForge 的 5 阶段流水线是文档驱动的：需求文档 → 设计文档 → 架构文档 → 子需求文档 → 测试规格文档 → 代码。文档质量和一致性是整个系统的关键。
+**定位**: 文档驱动开发（AutoMater 的核心工作流）
+**Why**: AutoMater 的 5 阶段流水线是文档驱动的：需求文档 → 设计文档 → 架构文档 → 子需求文档 → 测试规格文档 → 代码。文档质量和一致性是整个系统的关键。
 **覆盖内容**:
 - 文档链路完整性检查（每个 Feature 都有需求文档 + 测试规格？）
 - 文档变更级联更新（需求变了 → 设计要跟着变 → 测试规格也要变）
@@ -273,7 +273,7 @@ if (runningOrchestrators.has(projectId)) {
 | Sprint 4 | P2 Skill 补充 | 4 (S-036~S-039) | 2026-03-02 |
 | **合计** | | **12 新 Skill** | |
 
-**技能库**: 23 → 35 个（+12），AgentForge 直接适用 22 → 26 个
+**技能库**: 23 → 35 个（+12），AutoMater 直接适用 22 → 26 个
 
 ---
 
@@ -284,7 +284,7 @@ if (runningOrchestrators.has(projectId)) {
 | `REVIEW-v0.9.md` | 差距分析 → 本文档将每个差距映射到具体 Skill |
 | `TOOL-EXPANSION-PLAN.md` | 工具扩展计划 → 每个 Tier 的工具落地都需要对应 Skill 支撑 |
 | `DESIGN.md` | 系统设计 → Skill #5 (orchestrator state machine) 是其执行指南 |
-| `AGENTFORGE.md` | 项目脑 → 每个 Sprint 完成后 ADR 更新 |
+| `AutoMater.md` | 项目脑 → 每个 Sprint 完成后 ADR 更新 |
 
 ---
 
@@ -292,7 +292,7 @@ if (runningOrchestrators.has(projectId)) {
 
 ### 7.1 为什么 dev-agent 伙伴需要专门的 Skill
 
-AgentForge 不是普通的 Web 项目。它的特殊性：
+AutoMater 不是普通的 Web 项目。它的特殊性：
 
 1. **自指性 (Self-referential)**: 我在帮助开发一个 Agent 系统，同时我自己就是一个 Agent。理解 Agent 的行为模式既是领域知识也是自我反思。
 2. **状态爆炸**: 5 个 Phase × 15 个 Feature × 15 个 Worker × 多种 Agent 角色 = 状态组合爆炸。没有系统化的状态理解就无法调试。
@@ -303,4 +303,4 @@ AgentForge 不是普通的 Web 项目。它的特殊性：
 
 **先止血（P0）→ 再固化（P1）→ 后演进（P2）**
 
-当前 AgentForge 的问题不是缺少高级功能，而是基础的鲁棒性不足。一个不能稳定完成单次运行的系统，加再多工具也没用。
+当前 AutoMater 的问题不是缺少高级功能，而是基础的鲁棒性不足。一个不能稳定完成单次运行的系统，加再多工具也没用。

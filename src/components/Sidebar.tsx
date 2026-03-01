@@ -1,4 +1,4 @@
-import { useAppStore, type ProjectPageId, type GlobalPageId } from '../stores/app-store';
+﻿import { useAppStore, type ProjectPageId, type GlobalPageId } from '../stores/app-store';
 
 const globalNavItems: { id: GlobalPageId; icon: string; label: string }[] = [
   { id: 'projects', icon: '📁', label: '项目' },
@@ -36,7 +36,7 @@ export function Sidebar() {
       {/* 品牌 Logo */}
       <div
         className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center text-sm font-bold shadow-lg shadow-forge-500/20 mb-3 cursor-pointer select-none hover:shadow-forge-500/40 hover:scale-105 transition-all duration-300 z-10"
-        title="AgentForge"
+        title="智械母机 AutoMater"
         onClick={() => { if (insideProject) exitProject(); else setGlobalPage('projects'); }}
       >
         F

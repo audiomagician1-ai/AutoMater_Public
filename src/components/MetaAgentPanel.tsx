@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MetaAgentPanel — 全局右侧可伸缩元Agent对话面板
  *
  * 收起时: 窄条 (40px) 带 🤖 图标按钮
@@ -33,7 +33,7 @@ export function MetaAgentPanel() {
 
   // Load config to get agent name and greeting
   useEffect(() => {
-    window.agentforge.metaAgent.getConfig().then((config: MetaAgentConfig) => {
+    window.automater.metaAgent.getConfig().then((config: MetaAgentConfig) => {
       if (config.name) setAgentName(config.name);
       if (config.greeting) setGreeting(config.greeting);
     }).catch(() => {});
@@ -72,7 +72,7 @@ export function MetaAgentPanel() {
 
     try {
       const history = messages.slice(-20).map(m => ({ role: m.role as string, content: m.content }));
-      const result = await window.agentforge.metaAgent.chat(currentProjectId, userMsg.content, history);
+      const result = await window.automater.metaAgent.chat(currentProjectId, userMsg.content, history);
       updateLastAssistant(chatKey, result.reply);
       if (result.wishCreated) {
         window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));

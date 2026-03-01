@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Web Tools — 网络搜索 + URL 抓取 (v2.1)
  * 
  * 使用 Jina AI 免费 API（开源、零依赖、返回 Markdown）：
@@ -10,7 +10,7 @@ const JINA_TIMEOUT = 20_000;
 
 const JINA_HEADERS = {
   'Accept': 'text/plain',
-  'User-Agent': 'AgentForge/2.1',
+  'User-Agent': 'automater/2.1',
 };
 
 // ═══════════════════════════════════════

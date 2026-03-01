@@ -1,4 +1,4 @@
-# AgentForge — 项目大脑
+﻿# 智械母机 AutoMater — 项目大脑
 
 > 最后更新: 2026-03-01 | 版本: v6.0
 
@@ -10,7 +10,7 @@
 
 ## 2. PROJECT IDENTITY
 
-**产品**: AgentForge — AI Agent 集群式软件开发桌面应用
+**产品**: 智械母机 AutoMater — AI Agent 集群式软件开发桌面应用
 **定位**: "AI 软件开发公司" — 用户许愿(Wish)，虚拟团队(PM/Architect/Developer/QA)自主交付完整软件
 **目标用户**: 非程序员或需要快速原型的开发者
 
@@ -30,7 +30,7 @@
 ### 目录结构
 
 ```
-AgentForge/
+AutoMater/
 ├── electron/              # Electron 主进程
 │   ├── main.ts            # 入口, 窗口管理, IPC 注册
 │   ├── preload.ts         # Context Bridge (14 个命名空间)
@@ -162,7 +162,7 @@ Phase 5:  汇总 + AGENTS.md 自动生成 + 用户验收等待
 | ADR-004 | better-sqlite3 同步 API | Electron 主进程友好, 无 async 竞态 |
 | ADR-005 | 3 层模型选择 (strong/worker/fast) | 控制 Token 成本: 规划用 strong, 编码用 worker |
 | ADR-006 | ReAct + 内嵌 Planning (无独立 Planner 调用) | 减少 Token 开销, 2026 最佳实践 |
-| ADR-007 | 文档驱动开发 (.agentforge/docs/) | ARCHITECTURE.md + 子需求文档 + 测试规格驱动代码生成 |
+| ADR-007 | 文档驱动开发 (.AutoMater/docs/) | ARCHITECTURE.md + 子需求文档 + 测试规格驱动代码生成 |
 
 ## 4. CURRENT STATE
 

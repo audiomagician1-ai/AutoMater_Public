@@ -1,4 +1,4 @@
-/**
+﻿/**
  * WishPage v5.0 — 需求管理 + 元Agent对话
  *
  * 左侧: 需求列表 (agent自主识别迭代需求)
@@ -81,7 +81,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         content: m.content,
       }));
 
-      const result = await window.agentforge.metaAgent.chat(
+      const result = await window.automater.metaAgent.chat(
         currentProjectId,
         userMsg.content,
         history,
@@ -195,7 +195,7 @@ export function WishPage() {
   // ── Load data ──
   const loadWishes = useCallback(async () => {
     if (!currentProjectId) return;
-    const list = await window.agentforge.wish.list(currentProjectId);
+    const list = await window.automater.wish.list(currentProjectId);
     setWishes(list || []);
     if (!selectedWishId && list?.length > 0) setSelectedWishId(list[0].id);
   }, [currentProjectId, selectedWishId]);
@@ -219,14 +219,14 @@ export function WishPage() {
     if (!newWish.trim() || !currentProjectId || submitting) return;
     setSubmitting(true);
     try {
-      const res = await window.agentforge.wish.create(currentProjectId, newWish.trim());
+      const res = await window.automater.wish.create(currentProjectId, newWish.trim());
       addLog({ projectId: currentProjectId, agentId: 'system', content: '✨ 新需求已提交' });
 
-      await window.agentforge.project.setWish(currentProjectId, newWish.trim());
-      await window.agentforge.wish.update(res.wishId, { status: 'developing' });
+      await window.automater.project.setWish(currentProjectId, newWish.trim());
+      await window.automater.wish.update(res.wishId, { status: 'developing' });
 
       if (settingsConfigured) {
-        await window.agentforge.project.start(currentProjectId);
+        await window.automater.project.start(currentProjectId);
         addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队已自动启动, 开始创造!' });
       } else {
         addLog({ projectId: currentProjectId, agentId: 'system', content: '⚠️ 请先在设置中配置 LLM API Key' });
@@ -245,7 +245,7 @@ export function WishPage() {
   };
 
   const handleDeleteWish = async (id: string) => {
-    await window.agentforge.wish.delete(id);
+    await window.automater.wish.delete(id);
     if (selectedWishId === id) setSelectedWishId(null);
     loadWishes();
   };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useAppStore } from './stores/app-store';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
@@ -34,7 +34,7 @@ export function App() {
   useEffect(() => {
     const unsubs: (() => void)[] = [];
 
-    unsubs.push(window.agentforge.on('agent:log', (data: any) => {
+    unsubs.push(window.automater.on('agent:log', (data: any) => {
       addLog({ projectId: data.projectId, agentId: data.agentId, content: data.content });
       // v6.0: 解析为结构化工作消息分发到 agentWorkMessages
       if (data.agentId && data.agentId !== 'system') {
@@ -61,33 +61,33 @@ export function App() {
       }
     }));
 
-    unsubs.push(window.agentforge.on('agent:spawned', (data: any) => {
+    unsubs.push(window.automater.on('agent:spawned', (data: any) => {
       addLog({ projectId: data.projectId, agentId: data.agentId, content: `🚀 ${data.role} Agent 已上线` });
       updateAgentStatus(data.agentId, 'idle', null);
     }));
 
-    unsubs.push(window.agentforge.on('agent:status', (data: any) => {
+    unsubs.push(window.automater.on('agent:status', (data: any) => {
       updateAgentStatus(data.agentId, data.status, data.currentTask ?? null, data.featureTitle);
     }));
 
-    unsubs.push(window.agentforge.on('feature:status', (data: any) => {
+    unsubs.push(window.automater.on('feature:status', (data: any) => {
       updateFeatureStatus(data.featureId, data.status);
     }));
 
-    unsubs.push(window.agentforge.on('project:status', (data: any) => {
+    unsubs.push(window.automater.on('project:status', (data: any) => {
       addLog({ projectId: data.projectId, agentId: 'system', content: `📌 项目状态: ${data.status}` });
     }));
 
-    unsubs.push(window.agentforge.on('project:features-ready', (data: any) => {
+    unsubs.push(window.automater.on('project:features-ready', (data: any) => {
       addLog({ projectId: data.projectId, agentId: 'system', content: `📋 Feature 清单已就绪: ${data.count} 个任务` });
     }));
 
-    unsubs.push(window.agentforge.on('agent:error', (data: any) => {
+    unsubs.push(window.automater.on('agent:error', (data: any) => {
       addLog({ projectId: data.projectId, agentId: 'system', content: `❌ 错误: ${data.error}` });
     }));
 
     // 工具调用事件 (v0.9 ReAct)
-    unsubs.push(window.agentforge.on('agent:tool-call', (data: any) => {
+    unsubs.push(window.automater.on('agent:tool-call', (data: any) => {
       const icon = data.success ? '✅' : '❌';
       addLog({
         projectId: data.projectId,
@@ -112,32 +112,32 @@ export function App() {
     }));
 
     // 上下文快照事件 (v1.1)
-    unsubs.push(window.agentforge.on('agent:context-snapshot', (data: any) => {
+    unsubs.push(window.automater.on('agent:context-snapshot', (data: any) => {
       if (data.snapshot) {
         updateContextSnapshot(data.snapshot);
       }
     }));
 
     // Agent ReAct 状态事件 (v1.1)
-    unsubs.push(window.agentforge.on('agent:react-state', (data: any) => {
+    unsubs.push(window.automater.on('agent:react-state', (data: any) => {
       if (data.state) {
         updateAgentReactState(data.state);
       }
     }));
 
     // 流式事件
-    unsubs.push(window.agentforge.on('agent:stream-start', (data: any) => {
+    unsubs.push(window.automater.on('agent:stream-start', (data: any) => {
       startStream(data.agentId, data.label || '');
     }));
-    unsubs.push(window.agentforge.on('agent:stream', (data: any) => {
+    unsubs.push(window.automater.on('agent:stream', (data: any) => {
       appendStream(data.agentId, data.chunk);
     }));
-    unsubs.push(window.agentforge.on('agent:stream-end', (data: any) => {
+    unsubs.push(window.automater.on('agent:stream-end', (data: any) => {
       endStream(data.agentId);
     }));
 
     // v4.4: 用户验收通知
-    unsubs.push(window.agentforge.on('project:awaiting-acceptance', (data: any) => {
+    unsubs.push(window.automater.on('project:awaiting-acceptance', (data: any) => {
       incrementNotifications();
       setShowAcceptancePanel(true);
       addLog({
@@ -147,7 +147,7 @@ export function App() {
       });
       // Electron native notification (renderer can use Notification API)
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('AgentForge — 需要您的验收', {
+        new Notification('AutoMater — 需要您的验收', {
           body: '项目开发已完成，等待您的验收决定',
           icon: undefined,
         });
@@ -157,17 +157,17 @@ export function App() {
     }));
 
     // 检查设置
-    window.agentforge.settings.get().then(s => {
+    window.automater.settings.get().then(s => {
       if (s.apiKey) setSettingsConfigured(true);
       // v5.2: 应用保存的缩放倍率 (默认 1.5)
       const zoom = s.zoomFactor ?? 1.5;
-      window.agentforge.zoom.set(zoom);
+      window.automater.zoom.set(zoom);
     });
 
     // v5.2: 监听主进程下发的缩放变化, 持久化到设置
-    const unsubZoom = window.agentforge.on('zoom:changed', (factor: number) => {
-      window.agentforge.settings.get().then(s => {
-        window.agentforge.settings.save({ ...s, zoomFactor: factor });
+    const unsubZoom = window.automater.on('zoom:changed', (factor: number) => {
+      window.automater.settings.get().then(s => {
+        window.automater.settings.save({ ...s, zoomFactor: factor });
       });
     });
 
@@ -181,7 +181,7 @@ export function App() {
   useEffect(() => {
     if (!currentProjectId) { setStats(null); return; }
     const poll = async () => {
-      try { setStats(await window.agentforge.project.getStats(currentProjectId)); } catch {}
+      try { setStats(await window.automater.project.getStats(currentProjectId)); } catch {}
     };
     poll();
     const t = setInterval(poll, 5000);

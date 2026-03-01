@@ -1,4 +1,4 @@
-/**
+﻿/**
  * WorkflowPage — v3.0 多工作流预设 + 大尺寸预览
  *
  * 顶部 1/3: 工作流可视化预览图 (SVG 流水线)
@@ -405,8 +405,8 @@ export function WorkflowPage() {
   const loadPresets = useCallback(async () => {
     if (!currentProjectId) return;
     const [list, stages] = await Promise.all([
-      window.agentforge.workflow.list(currentProjectId),
-      window.agentforge.workflow.availableStages(),
+      window.automater.workflow.list(currentProjectId),
+      window.automater.workflow.availableStages(),
     ]);
     setPresets(list || []);
     setAvailableStages(stages || []);
@@ -418,7 +418,7 @@ export function WorkflowPage() {
 
   const handleActivate = async (presetId: string) => {
     if (!currentProjectId) return;
-    await window.agentforge.workflow.activate(currentProjectId, presetId);
+    await window.automater.workflow.activate(currentProjectId, presetId);
     loadPresets();
   };
 
@@ -428,28 +428,28 @@ export function WorkflowPage() {
   const handleSavePreset = async (data: { name: string; description: string; icon: string; stages: WorkflowStageInfo[] }) => {
     if (!currentProjectId) return;
     if (editingPreset === 'new') {
-      await window.agentforge.workflow.create(currentProjectId, data);
+      await window.automater.workflow.create(currentProjectId, data);
     } else if (editingPreset) {
-      await window.agentforge.workflow.update(editingPreset.id, data);
+      await window.automater.workflow.update(editingPreset.id, data);
     }
     setEditingPreset(null);
     loadPresets();
   };
 
   const handleDuplicate = async (presetId: string) => {
-    await window.agentforge.workflow.duplicate(presetId);
+    await window.automater.workflow.duplicate(presetId);
     loadPresets();
   };
 
   const handleDeletePreset = async (presetId: string) => {
-    await window.agentforge.workflow.delete(presetId);
+    await window.automater.workflow.delete(presetId);
     loadPresets();
   };
 
   // Load missions
   const loadMissions = useCallback(async () => {
     if (!currentProjectId) return;
-    const list = await window.agentforge.ephemeralMission.list(currentProjectId);
+    const list = await window.automater.ephemeralMission.list(currentProjectId);
     setMissions(list || []);
   }, [currentProjectId]);
 
@@ -463,7 +463,7 @@ export function WorkflowPage() {
     if (!currentProjectId || launchingMission) return;
     setLaunchingMission(true);
     try {
-      const res = await window.agentforge.ephemeralMission.create(currentProjectId, type, { maxWorkers: 3 });
+      const res = await window.automater.ephemeralMission.create(currentProjectId, type, { maxWorkers: 3 });
       if (!res?.success) {
         setMissionError(res?.error || '创建任务失败');
         return;
@@ -478,13 +478,13 @@ export function WorkflowPage() {
   };
 
   const handleCancelMission = async (id: string) => {
-    await window.agentforge.ephemeralMission.cancel(id);
+    await window.automater.ephemeralMission.cancel(id);
     loadMissions();
   };
 
   const handleDeleteMission = async (id: string) => {
     if (expandedMission === id) setExpandedMission(null);
-    await window.agentforge.ephemeralMission.delete(id);
+    await window.automater.ephemeralMission.delete(id);
     loadMissions();
   };
 
@@ -496,7 +496,7 @@ export function WorkflowPage() {
     }
     setExpandedMission(id);
     try {
-      const tasks = await window.agentforge.ephemeralMission.getTasks(id);
+      const tasks = await window.automater.ephemeralMission.getTasks(id);
       setExpandedTasks(tasks || []);
     } catch {
       setExpandedTasks([]);
@@ -507,7 +507,7 @@ export function WorkflowPage() {
     if (!expandedMission) return;
     const t = setInterval(async () => {
       try {
-        const tasks = await window.agentforge.ephemeralMission.getTasks(expandedMission);
+        const tasks = await window.automater.ephemeralMission.getTasks(expandedMission);
         setExpandedTasks(tasks || []);
       } catch { /* ignore */ }
     }, 3000);

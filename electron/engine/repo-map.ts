@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Repository Map — 轻量级代码结构索引
  *
  * 参考 Aider 的 repo-map 设计：用正则 (非 AST 依赖) 提取
@@ -61,7 +61,7 @@ export function generateRepoMap(
 
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.agentforge',
+  'coverage', '.cache', 'target', 'vendor', '.automater',
 ]);
 
 const CODE_EXTENSIONS = new Set([

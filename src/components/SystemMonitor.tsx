@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SystemMonitor — 系统性能实时监控 (类 Windows 任务管理器)
  *
  * CPU / GPU / 内存 / 进程内存 实时迷你面积图
@@ -93,7 +93,7 @@ export function SystemMonitor() {
 
   const poll = useCallback(async () => {
     try {
-      const m = await window.agentforge.monitor.getSystemMetrics();
+      const m = await window.automater.monitor.getSystemMetrics();
       setLatestMetrics(m);
       setCpuHistory(prev => [...prev.slice(-(MAX_POINTS - 1)), m.cpu.usage]);
       setMemHistory(prev => [...prev.slice(-(MAX_POINTS - 1)), m.memory.percent]);

@@ -1,4 +1,4 @@
-# 临时工作流 (Ephemeral Workflow) 架构设计
+﻿# 临时工作流 (Ephemeral Workflow) 架构设计
 
 > v5.5 | 2026-03-01
 
@@ -66,7 +66,7 @@ EphemeralMission {
   ttlHours: number       // 最大存活时间 (超时自动 fail)
   
   // 产物管理
-  workDir: string        // 临时工作目录 (.agentforge/missions/{id}/)
+  workDir: string        // 临时工作目录 (.AutoMater/missions/{id}/)
   conclusion: string     // 最终结论 (归档)
   patches: PatchRef[]    // 产出的代码修复 (可选应用到主分支)
   
@@ -109,7 +109,7 @@ Phase 4: ARCHIVING
 |------|--------------------------|------------------------------|
 | 产出 | features, 设计文档, 代码 | 结论报告, 可选 patches |
 | 状态 | 永久 (DB features 表) | 临时 (missions 表, 可清理) |
-| 工作目录 | `workspace_path/` | `.agentforge/missions/{id}/` |
+| 工作目录 | `workspace_path/` | `.AutoMater/missions/{id}/` |
 | 文档 | 设计文档/需求文档 (永久) | 任务报告 (可丢弃) |
 | 对项目状态的影响 | 直接修改 features 状态 | 不修改，仅建议 |
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
 import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
@@ -26,7 +26,7 @@ function createWindow() {
     height: 800,
     minWidth: 960,
     minHeight: 600,
-    title: 'AgentForge',
+    title: '智械母机 AutoMater',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

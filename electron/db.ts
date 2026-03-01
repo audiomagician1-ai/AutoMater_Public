@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SQLite 数据库 — 内嵌在应用中，零配置
  * 
  * 使用 better-sqlite3 (同步 API，Electron 主进程友好)
@@ -25,7 +25,7 @@ export async function initDatabase(): Promise<void> {
   const userDataPath = app.getPath('userData');
   const dbDir = path.join(userDataPath, 'data');
   fs.mkdirSync(dbDir, { recursive: true });
-  const dbPath = path.join(dbDir, 'agentforge.db');
+  const dbPath = path.join(dbDir, 'automater.db');
 
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ContextPage — 上下文资产管理器 (v2.0)
  *
  * 显示团队每位成员的上下文状态：
@@ -322,7 +322,7 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
     setError(null);
     setPreview(null);
     const budget = member.max_context_tokens ?? 128000;
-    (window as any).agentforge.context.previewBaseline(projectId, member.role, budget)
+    (window as any).automater.context.previewBaseline(projectId, member.role, budget)
       .then((res: any) => {
         if (res.success) {
           setBaseline(res.snapshot);
@@ -500,7 +500,7 @@ export function ContextPage() {
   // 加载团队成员
   useEffect(() => {
     if (!currentProjectId) return;
-    window.agentforge.team.list(currentProjectId).then(data => {
+    window.automater.team.list(currentProjectId).then(data => {
       setMembers((data || []) as TeamMember[]);
     }).catch(() => {});
   }, [currentProjectId]);
@@ -509,7 +509,7 @@ export function ContextPage() {
   useEffect(() => {
     if (!currentProjectId) return;
     setLoading(true);
-    window.agentforge.project.getContextSnapshots(currentProjectId).then(data => {
+    window.automater.project.getContextSnapshots(currentProjectId).then(data => {
       const store = useAppStore.getState();
       for (const [, snap] of Object.entries(data)) {
         store.updateContextSnapshot(snap as ContextSnapshot);

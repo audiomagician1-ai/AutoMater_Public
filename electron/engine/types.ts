@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Shared Engine Types — 引擎层公共类型定义
  *
  * 消除 `any` 类型，为所有 DB row / settings / feature 等提供强类型。
@@ -151,7 +151,7 @@ export interface CostStatsResult {
 /** Directories to ignore when scanning workspace files */
 export const WORKSPACE_IGNORE_DIRS = new Set([
   'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.agentforge', '.venv', 'venv',
+  'coverage', '.cache', 'target', 'vendor', '.automater', '.venv', 'venv',
 ]);
 
 // ═══════════════════════════════════════

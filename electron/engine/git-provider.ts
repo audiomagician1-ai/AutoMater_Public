@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Git Provider — 抽象 Git 操作层
  * 
  * 两种模式:
@@ -60,14 +60,14 @@ export function initRepo(config: GitProviderConfig): boolean {
       fs.writeFileSync(path.join(workspacePath, '.gitignore'), gitignore, 'utf-8');
 
       try {
-        execSync('git config user.email "agent@agentforge.dev"', { cwd: workspacePath, stdio: 'ignore' });
-        execSync('git config user.name "AgentForge"', { cwd: workspacePath, stdio: 'ignore' });
+        execSync('git config user.email "agent@automater.dev"', { cwd: workspacePath, stdio: 'ignore' });
+        execSync('git config user.name "AutoMater"', { cwd: workspacePath, stdio: 'ignore' });
       } catch (err) {
         log.debug('Git user config failed (non-fatal)', { error: String(err) });
       }
 
       execSync('git add -A', { cwd: workspacePath, stdio: 'ignore' });
-      execSync('git commit -m "Initial commit by AgentForge" --allow-empty', { cwd: workspacePath, stdio: 'ignore' });
+      execSync('git commit -m "Initial commit by AutoMater" --allow-empty', { cwd: workspacePath, stdio: 'ignore' });
     }
 
     // GitHub mode: add remote

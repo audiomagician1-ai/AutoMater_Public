@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Computer Use — 截图 + 鼠标 + 键盘控制 (v2.2)
  * 
  * Windows 实现：PowerShell + .NET System.Drawing / System.Windows.Forms
@@ -59,7 +59,7 @@ export interface ScreenshotResult {
  */
 export function takeScreenshot(scale: number = 0.75): ScreenshotResult {
   const safeScale = sanitizeNumber(scale, 0.1, 2.0, 0.75);
-  const tmpFile = path.join(os.tmpdir(), `agentforge-screenshot-${Date.now()}.png`);
+  const tmpFile = path.join(os.tmpdir(), `automater-screenshot-${Date.now()}.png`);
   const safeTmpPath = tmpFile.replace(/\\/g, '\\\\');
 
   try {

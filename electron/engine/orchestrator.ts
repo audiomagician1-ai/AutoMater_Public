@@ -335,7 +335,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
             projectId,
             error: `所有 ${nonRetryable.length} 个失败的 Feature 都是配置类错误。请检查 LLM 设置后重试。`,
           });
-          notify('🔴 AgentForge 需要修改配置', `${nonRetryable.length} 个 Feature 因模型/配置错误无法继续`);
+          notify('🔴 AutoMater 需要修改配置', `${nonRetryable.length} 个 Feature 因模型/配置错误无法继续`);
           db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
           sendToUI(win, 'project:status', { projectId, status: 'paused' });
           unregisterOrchestrator(projectId);
@@ -444,7 +444,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     }
   }
 
-  if (workspacePath) commitWorkspace(workspacePath, 'AgentForge: PM analysis + Architecture + Docs');
+  if (workspacePath) commitWorkspace(workspacePath, 'AutoMater: PM analysis + Architecture + Docs');
   if (workspacePath) ensureAgentsMd(workspacePath, project.wish);
 
   // v3.0: Architect→Developer 程序化门控
@@ -586,7 +586,7 @@ async function phasePMAnalysis(
       addLog(projectId, pmId, 'warning', `BLOCKED: ${pmReactResult.blockReason}`);
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
       sendToUI(win, 'project:status', { projectId, status: 'paused' });
-      notify('⚠️ AgentForge 需要你的帮助', `PM 分析遇到阻塞: ${pmReactResult.blockReason}`);
+      notify('⚠️ AutoMater 需要你的帮助', `PM 分析遇到阻塞: ${pmReactResult.blockReason}`);
       return null;
     }
 
@@ -837,7 +837,7 @@ async function phasePMDesignDoc(
       completed: true,
     });
 
-    // 写入 .agentforge/docs/design.md
+    // 写入 .automater/docs/design.md
     const version = writeDoc(workspacePath, 'design', result.content, pmId, '初始版本: PM 生成设计文档');
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ 设计文档已写入 (v${version}, ${result.content.length} chars, $${cost.toFixed(4)})` });
     addLog(projectId, pmId, 'output', `设计文档 v${version}: ${result.content.slice(0, 2000)}`);
@@ -1088,7 +1088,7 @@ async function workerLoop(
     const budget = checkBudget(projectId, settings);
     if (!budget.ok) {
       sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停` });
-      notify('⚠️ AgentForge 预算告警', `已花费 $${budget.spent.toFixed(2)}，超过预算 $${budget.budget}`);
+      notify('⚠️ AutoMater 预算告警', `已花费 $${budget.spent.toFixed(2)}，超过预算 $${budget.budget}`);
       _stopOrchestrator(projectId);
       break;
     }
@@ -1422,7 +1422,7 @@ async function phaseIncrementalDocSync(
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string,
 ): Promise<void> {
-  const skeletonPath = path.join(workspacePath, '.agentforge/analysis/skeleton.json');
+  const skeletonPath = path.join(workspacePath, '.automater/analysis/skeleton.json');
   if (!fs.existsSync(skeletonPath)) {
     log.debug('No skeleton.json found, skipping incremental doc sync');
     return;
@@ -1606,7 +1606,7 @@ async function phaseDevOpsBuild(
   emitEvent({ projectId, agentId: devopsId, type: 'phase:dev:end', data: { devops: true, allPassed, steps: results.length, passed: passedCount } });
 
   if (workspacePath && allPassed) {
-    commitWorkspace(workspacePath, 'AgentForge: DevOps build verification passed');
+    commitWorkspace(workspacePath, 'AutoMater: DevOps build verification passed');
   }
 }
 
@@ -1658,7 +1658,7 @@ async function phaseFinalize(
     );
   }
 
-  if (workspacePath) commitWorkspace(workspacePath, `AgentForge: ${stats.passed}/${stats.total} features delivered`);
+  if (workspacePath) commitWorkspace(workspacePath, `AutoMater: ${stats.passed}/${stats.total} features delivered`);
 
   emitEvent({
     projectId, agentId: 'system', type: 'project:complete',
@@ -1724,7 +1724,7 @@ function safeJsonParse(str: string | null | undefined, fallback: any): any {
 }
 
 function ensureAgentsMd(workspacePath: string, wish: string) {
-  const agentsDir = path.join(workspacePath, '.agentforge');
+  const agentsDir = path.join(workspacePath, '.automater');
   const agentsPath = path.join(agentsDir, 'AGENTS.md');
   fs.mkdirSync(agentsDir, { recursive: true });
 
@@ -1778,7 +1778,7 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
 
   const content = [
     `# AGENTS.md — 项目规范`,
-    `> 此文件由 AgentForge 自动生成和维护，Agent 和用户均可编辑。`,
+    `> 此文件由 AutoMater 自动生成和维护，Agent 和用户均可编辑。`,
     `> 最后更新: ${new Date().toISOString().slice(0, 19)}`,
     ``,
     `## 项目概述`,

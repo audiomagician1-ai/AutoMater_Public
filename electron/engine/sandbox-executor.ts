@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sandbox Executor — 轻量级子进程沙箱 (v6.0)
  *
  * 无 Docker 环境下的安全命令执行:
@@ -97,7 +97,7 @@ function buildSafeEnv(extra?: Record<string, string>): Record<string, string> {
     }
   }
   // 标记为沙箱环境
-  env['AGENTFORGE_SANDBOX'] = '1';
+  env['AUTOMATER_SANDBOX'] = '1';
   if (extra) Object.assign(env, extra);
   return env;
 }

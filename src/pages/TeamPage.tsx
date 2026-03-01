@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TeamPage — 虚拟团队 (v6.0)
  *
  * 运行状态 tab: 左侧精简成员卡片 + 右侧对话式工作细节面板
@@ -285,7 +285,7 @@ function MemberEditModal({ member, onClose, onSave, onChange }: {
   const handleTestModel = async () => {
     setModelTesting(true);
     setModelTestResult(null);
-    const result = await window.agentforge.team.testMemberModel(member.id, {
+    const result = await window.automater.team.testMemberModel(member.id, {
       provider: llmConfig.provider,
       apiKey: llmConfig.apiKey,
       baseUrl: llmConfig.baseUrl,
@@ -629,13 +629,13 @@ export function TeamPage() {
 
   const loadAgents = async () => {
     if (!currentProjectId) return;
-    const data = await window.agentforge.project.getAgents(currentProjectId);
+    const data = await window.automater.project.getAgents(currentProjectId);
     setAgents(data || []);
   };
 
   const loadMembers = async () => {
     if (!currentProjectId) return;
-    const data = await window.agentforge.team.list(currentProjectId);
+    const data = await window.automater.team.list(currentProjectId);
     setMembers(data || []);
   };
 
@@ -647,7 +647,7 @@ export function TeamPage() {
 
   // v9.0: 监听 team:member-added 事件 — 热加入实时反馈
   useEffect(() => {
-    const unsub = window.agentforge.on('team:member-added', (data: {
+    const unsub = window.automater.on('team:member-added', (data: {
       projectId: string; memberId: string; role: string; name: string;
     }) => {
       if (data.projectId === currentProjectId) {
@@ -662,13 +662,13 @@ export function TeamPage() {
   // 首次加载时拉取缓存的 react states
   useEffect(() => {
     if (!currentProjectId) return;
-    window.agentforge.project.getReactStates(currentProjectId).then(data => {
+    window.automater.project.getReactStates(currentProjectId).then(data => {
       const store = useAppStore.getState();
       for (const [, state] of Object.entries(data)) {
         store.updateAgentReactState(state as any);
       }
     }).catch(() => {});
-    window.agentforge.project.getContextSnapshots(currentProjectId).then(data => {
+    window.automater.project.getContextSnapshots(currentProjectId).then(data => {
       const store = useAppStore.getState();
       for (const [, snap] of Object.entries(data)) {
         store.updateContextSnapshot(snap as ContextSnapshot);
@@ -679,7 +679,7 @@ export function TeamPage() {
   /** 初始化默认团队 */
   const handleInitDefaults = async () => {
     if (!currentProjectId) return;
-    await window.agentforge.team.initDefaults(currentProjectId);
+    await window.automater.team.initDefaults(currentProjectId);
     loadMembers();
   };
 
@@ -687,7 +687,7 @@ export function TeamPage() {
   const handleAddMember = async () => {
     if (!currentProjectId || !newName.trim()) return;
     const caps = newCaps.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-    await window.agentforge.team.add(currentProjectId, {
+    await window.automater.team.add(currentProjectId, {
       role: newRole,
       name: newName.trim(),
       model: newModel || undefined,
@@ -702,7 +702,7 @@ export function TeamPage() {
 
   /** 删除成员 */
   const handleDeleteMember = async (id: string) => {
-    await window.agentforge.team.delete(id);
+    await window.automater.team.delete(id);
     loadMembers();
   };
 
@@ -713,7 +713,7 @@ export function TeamPage() {
       ? editingMember.capabilities : JSON.stringify(editingMember.capabilities);
     let capsArr: string[];
     try { capsArr = JSON.parse(caps); } catch { capsArr = caps.split(/[,，]/).map(s => s.trim()).filter(Boolean); }
-    await window.agentforge.team.update(editingMember.id, {
+    await window.automater.team.update(editingMember.id, {
       ...editingMember,
       capabilities: JSON.stringify(capsArr),
       // v11.0: 新字段直接传递 (已是 JSON string 或 null)

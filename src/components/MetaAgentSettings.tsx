@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MetaAgentSettings — 元Agent管家管理页面 (Modal)
  *
  * 两个 Tab:
@@ -55,9 +55,9 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   // Load config on mount
   useEffect(() => {
-    window.agentforge.metaAgent.getConfig().then(setConfig).catch(console.error);
+    window.automater.metaAgent.getConfig().then(setConfig).catch(console.error);
     loadMemories();
-    window.agentforge.metaAgent.getMemoryStats().then(setMemoryStats).catch(console.error);
+    window.automater.metaAgent.getMemoryStats().then(setMemoryStats).catch(console.error);
   }, []);
 
   const loadMemories = async () => {
@@ -65,10 +65,10 @@ export function MetaAgentSettings({ onClose }: Props) {
       const cat = memoryFilter === 'all' ? undefined : memoryFilter;
       let mems: MetaAgentMemoryRecord[];
       if (memorySearch.trim()) {
-        mems = await window.agentforge.metaAgent.searchMemories(memorySearch.trim(), 100);
+        mems = await window.automater.metaAgent.searchMemories(memorySearch.trim(), 100);
         if (cat) mems = mems.filter(m => m.category === cat);
       } else {
-        mems = await window.agentforge.metaAgent.listMemories(cat, 200);
+        mems = await window.automater.metaAgent.listMemories(cat, 200);
       }
       setMemories(mems);
     } catch (err) {
@@ -81,7 +81,7 @@ export function MetaAgentSettings({ onClose }: Props) {
   const handleSaveConfig = async () => {
     setSaving(true);
     try {
-      const result = await window.agentforge.metaAgent.saveConfig(config);
+      const result = await window.automater.metaAgent.saveConfig(config);
       if (result.success) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
@@ -96,7 +96,7 @@ export function MetaAgentSettings({ onClose }: Props) {
   const handleAddMemory = async () => {
     if (!newMemory.content.trim()) return;
     try {
-      await window.agentforge.metaAgent.addMemory({
+      await window.automater.metaAgent.addMemory({
         category: newMemory.category,
         content: newMemory.content.trim(),
         source: 'manual',
@@ -105,7 +105,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       setNewMemory({ category: 'facts', content: '', importance: 5 });
       setAddingMemory(false);
       loadMemories();
-      window.agentforge.metaAgent.getMemoryStats().then(setMemoryStats);
+      window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
       console.error('Add memory failed:', err);
     }
@@ -113,7 +113,7 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   const handleUpdateMemory = async (mem: MetaAgentMemoryRecord) => {
     try {
-      await window.agentforge.metaAgent.updateMemory(mem.id, {
+      await window.automater.metaAgent.updateMemory(mem.id, {
         content: mem.content,
         importance: mem.importance,
         category: mem.category,
@@ -127,9 +127,9 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   const handleDeleteMemory = async (id: string) => {
     try {
-      await window.agentforge.metaAgent.deleteMemory(id);
+      await window.automater.metaAgent.deleteMemory(id);
       loadMemories();
-      window.agentforge.metaAgent.getMemoryStats().then(setMemoryStats);
+      window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
       console.error('Delete memory failed:', err);
     }
@@ -137,9 +137,9 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   const handleClearCategory = async (category: MemoryCategory) => {
     try {
-      await window.agentforge.metaAgent.clearMemories(category);
+      await window.automater.metaAgent.clearMemories(category);
       loadMemories();
-      window.agentforge.metaAgent.getMemoryStats().then(setMemoryStats);
+      window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
       console.error('Clear memories failed:', err);
     }

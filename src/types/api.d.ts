@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Preload API 类型声明 — 渲染进程可用的接口
  */
 
@@ -122,7 +122,7 @@ interface AgentReactState {
   maxContextWindow: number;
 }
 
-interface AgentForgeAPI {
+interface AutoMaterAPI {
   settings: {
     get(): Promise<AppSettings>;
     save(settings: AppSettings): Promise<{ success: boolean }>;
@@ -585,7 +585,7 @@ interface MissionTaskRecord {
 }
 
 interface Window {
-  agentforge: AgentForgeAPI;
+  automater: AutoMaterAPI;
 }
 
 /** Session 信息 (v8.0) */

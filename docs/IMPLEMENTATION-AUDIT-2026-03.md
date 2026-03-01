@@ -1,4 +1,4 @@
-# AgentForge 实现审计报告 — 规划 vs 现状全面差距分析
+﻿# AutoMater 实现审计报告 — 规划 vs 现状全面差距分析
 
 > 审计日期: 2026-03-01 (v1.0), 2026-03-02 (v2.0 更新)
 > 审计范围: DESIGN.md, REVIEW-v0.9.md, ITERATION-PLAN-v4.md, TOOL-EXPANSION-PLAN.md, architecture-optimization-analysis.md, ephemeral-workflow-design.md, CLAUDE.md
@@ -33,7 +33,7 @@
 | SQLite (Tauri plugin-sql) | ✅ SQLite (better-sqlite3) | 实现方式不同但效果一致 |
 | pnpm workspace monorepo | **单体应用** (electron/ + src/) | 简化了但缺失模块边界 |
 
-**评估**: 架构从 Tauri monorepo 简化为 Electron 单体。这是务实选择——Electron 开发更快，但 `DESIGN.md` 中规划的 `@agentforge/core`、`@agentforge/llm`、`@agentforge/sandbox`、`@agentforge/shared` 4个包 **全部未实现为独立模块**，代码全在 `electron/engine/` 下。
+**评估**: 架构从 Tauri monorepo 简化为 Electron 单体。这是务实选择——Electron 开发更快，但 `DESIGN.md` 中规划的 `@AutoMater/core`、`@AutoMater/llm`、`@AutoMater/sandbox`、`@AutoMater/shared` 4个包 **全部未实现为独立模块**，代码全在 `electron/engine/` 下。
 
 ### 1.2 Agent 角色体系
 
@@ -157,7 +157,7 @@
 | 改进项 | 状态 | 实际 |
 |--------|------|------|
 | 7阶段流水线 → 5阶段优化 | ✅ | orchestrator v5.0 |
-| 文档体系 (.agentforge/docs/) | ✅ | doc-manager.ts (设计文档/子需求/测试规格) |
+| 文档体系 (.AutoMater/docs/) | ✅ | doc-manager.ts (设计文档/子需求/测试规格) |
 | PM 多次参与 (分析+验收) | ✅ | PM 在 Phase 1/4/5 参与 |
 | 门控检查 (PM→Arch, Arch→Dev) | ✅ | guards.ts |
 | 文档版本追踪 | ✅ | 每次更新递增 version |
