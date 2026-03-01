@@ -466,8 +466,45 @@ export function setupProjectHandlers() {
   });
 
   // ── 启动项目 (开始 Agent 编排) ──
+  // v5.1: 如果项目处于 analyzing 状态（导入项目分析中断/重启），
+  //       自动路由到 importProject 流程，而非走 PM 流水线（wish 为空会失败）
   ipcMain.handle('project:start', async (_event, projectId: string) => {
+    const db = getDb();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
+    const proj = db.prepare('SELECT status, workspace_path FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string } | undefined;
+
+    if (proj?.status === 'analyzing') {
+      // 导入项目：走 analyze-existing 流程
+      console.log(`[project:start] Project ${projectId} is in 'analyzing' state — routing to importProject`);
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📥 检测到导入项目，启动/恢复项目分析...' });
+
+      (async () => {
+        try {
+          const result = await importProject(
+            proj.workspace_path,
+            projectId,
+            undefined,
+            (phase: number, step: string, progress: number) => {
+              sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
+            },
+          );
+          const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
+          db.prepare("UPDATE projects SET status = 'paused', wish = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, projectId);
+          sendToUI(win, 'project:import-progress', { projectId, phase: 4, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true });
+          sendToUI(win, 'project:status', { projectId, status: 'paused' });
+          addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
+        } catch (err: any) {
+          console.error('[project:start→importProject] Error:', err);
+          db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
+          sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: `❌ 分析失败: ${err.message}`, progress: 0, done: true, error: true });
+          sendToUI(win, 'project:status', { projectId, status: 'error' });
+        }
+      })();
+      return { success: true };
+    }
+
+    // 正常项目：走 orchestrator 流水线
     runOrchestrator(projectId, win).catch(err => {
       console.error('[Orchestrator] Fatal error:', err);
       win?.webContents.send('agent:error', { projectId, error: err.message });

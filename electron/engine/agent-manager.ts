@@ -34,7 +34,10 @@ export function stopOrchestrator(projectId: string) {
     runningOrchestrators.delete(projectId);
   }
   const db = getDb();
-  db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+  // v5.1: 保留 analyzing 状态 — 暂停后仍可恢复导入分析
+  const row = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+  const newStatus = row?.status === 'analyzing' ? 'analyzing' : 'paused';
+  db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, projectId);
   db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").run(projectId);
   db.prepare("UPDATE agents SET status = 'idle', current_task = NULL WHERE project_id = ? AND status = 'working'").run(projectId);
 }

@@ -854,10 +854,20 @@ export function OverviewPage() {
   });
 
   // 项目状态判断
+  const isAnalyzing = project?.status === 'analyzing';
   const isActive = project && (project.status === 'initializing' || project.status === 'analyzing' || project.status === 'developing' || project.status === 'reviewing');
   const canStart = project && !isActive && project.wish?.trim();
   const canResume = project && (project.status === 'paused' || project.status === 'error');
   const noWish = project && !isActive && !canResume && !project.wish?.trim();
+
+  // 导入项目启动分析
+  const handleAnalyze = async () => {
+    if (!currentProjectId) return;
+    if (!settingsConfigured) { setGlobalPage('settings'); return; }
+    await window.agentforge.project.start(currentProjectId);
+    addLog({ projectId: currentProjectId, agentId: 'system', content: '📥 启动项目导入分析...' });
+    load();
+  };
 
   return (
     <div className="h-full flex flex-col overflow-y-auto relative">
@@ -907,7 +917,22 @@ export function OverviewPage() {
 
             {/* Action button — compact inline */}
             <div className="flex-1 flex items-center justify-center">
-              {isActive ? (
+              {isAnalyzing && importProgress ? (
+                <button onClick={handleStop}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-cyan-900/40 hover:bg-red-900/40 border border-cyan-500/20 hover:border-red-500/30 transition-all">
+                  <span className="text-lg group-hover:hidden">📥</span>
+                  <span className="text-lg hidden group-hover:inline">⏸</span>
+                  <span className="text-sm font-bold text-cyan-300 group-hover:text-red-300 transition-colors">分析中</span>
+                  <span className="text-[10px] text-cyan-400/60 group-hover:text-red-400/80 transition-colors">点击中断</span>
+                </button>
+              ) : isAnalyzing && !importProgress ? (
+                <button onClick={handleAnalyze}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-cyan-900/30 hover:bg-cyan-800/40 border border-cyan-500/20 hover:border-cyan-400/40 transition-all hover:shadow-lg hover:shadow-cyan-500/10">
+                  <span className="text-lg group-hover:scale-110 transition-all">📥</span>
+                  <span className="text-sm font-bold text-cyan-300 group-hover:text-white transition-colors">开始分析</span>
+                  <span className="text-[10px] text-cyan-400/60">导入项目</span>
+                </button>
+              ) : isActive ? (
                 <button onClick={handleStop}
                   className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-900/40 hover:bg-red-900/40 border border-emerald-500/20 hover:border-red-500/30 transition-all">
                   <span className="text-lg group-hover:hidden">⚡</span>
