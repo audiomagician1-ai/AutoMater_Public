@@ -815,62 +815,140 @@ export function OverviewPage() {
     categoryCount.set(cat, (categoryCount.get(cat) ?? 0) + 1);
   });
 
+  // 项目状态判断
+  const isActive = project && (project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing');
+  const canStart = project && !isActive && project.wish?.trim();
+  const canResume = project && (project.status === 'paused' || project.status === 'error');
+  const noWish = project && !isActive && !canResume && !project.wish?.trim();
+
   return (
     <div className="h-full flex flex-col overflow-y-auto">
-      {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-slate-800/50 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-bold">项目全景</h2>
+      {/* ═══════ Command Center Header ═══════ */}
+      <div className="flex-shrink-0 px-6 pt-6 pb-2">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xl font-bold">指挥中心</h2>
+          <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300 transition-colors" title="刷新">🔄</button>
+        </div>
+      </div>
+
+      {/* ═══════ Boss Control Panel ═══════ */}
+      <div className="flex-shrink-0 mx-6 mb-4">
+        <div className={`relative overflow-hidden rounded-2xl border transition-all duration-500 ${
+          isActive
+            ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/50 via-slate-900 to-cyan-950/50'
+            : canResume
+              ? 'border-amber-500/30 bg-gradient-to-br from-amber-950/30 via-slate-900 to-orange-950/30'
+              : 'border-slate-700/50 bg-gradient-to-br from-slate-900 via-slate-900/80 to-forge-950/50'
+        }`}>
+          {/* Animated background effect */}
+          {isActive && (
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-0 left-1/4 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl animate-pulse" />
+              <div className="absolute bottom-0 right-1/4 w-40 h-40 bg-cyan-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+            </div>
+          )}
+
+          <div className="relative flex flex-col items-center py-8 px-6">
+            {/* Status indicator */}
             {project && (() => {
               const st = PROJECT_STATUS[project.status] || { text: project.status, color: 'text-slate-500' };
-              const isActive = project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing';
               return (
-                <span className={`text-xs font-medium ${st.color} flex items-center gap-1`}>
-                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
-                  {st.text}
-                </span>
+                <div className="flex items-center gap-2 mb-4">
+                  {isActive && <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>}
+                  {canResume && <span className="w-3 h-3 rounded-full bg-amber-500" />}
+                  {!isActive && !canResume && <span className="w-3 h-3 rounded-full bg-slate-600" />}
+                  <span className={`text-sm font-semibold ${st.color}`}>{st.text}</span>
+                </div>
               );
             })()}
-          </div>
-          <div className="flex items-center gap-2">
-            {project && (() => {
-              const isActive = project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing';
-              const canStart = !isActive && project.wish?.trim();
-              const canResume = project.status === 'paused' || project.status === 'error';
-              return (
-                <>
-                  {isActive && (
-                    <button onClick={handleStop} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 transition-colors">⏸ 暂停</button>
-                  )}
-                  {canResume && (
-                    <button onClick={handleStart} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-emerald-900/50 text-slate-400 hover:text-emerald-400 transition-colors">▶ 继续开发</button>
-                  )}
-                  {(!isActive && !canResume && canStart) && (
-                    <button onClick={handleStart} className="text-xs px-3 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors">🚀 启动开发</button>
-                  )}
-                  {(!isActive && !canResume && !canStart) && (
-                    <button onClick={() => setProjectPage('wish')} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors">✨ 去许愿</button>
-                  )}
-                </>
-              );
-            })()}
-            <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300 transition-colors" title="刷新">🔄</button>
+
+            {/* ── Main Action Button ── */}
+            {isActive ? (
+              /* Running → Pause */
+              <button
+                onClick={handleStop}
+                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
+              >
+                {/* Animated ring */}
+                <div className="absolute inset-0 rounded-full border-4 border-emerald-500/30 animate-spin" style={{ animationDuration: '8s' }}>
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-emerald-400" />
+                </div>
+                <div className="absolute inset-2 rounded-full border-2 border-emerald-500/10 animate-spin" style={{ animationDuration: '12s', animationDirection: 'reverse' }}>
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-2 h-2 rounded-full bg-cyan-400" />
+                </div>
+                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-emerald-900/80 to-cyan-900/60 group-hover:from-red-900/60 group-hover:to-orange-900/40 transition-all duration-300" />
+                <div className="relative z-10 flex flex-col items-center gap-1">
+                  <span className="text-4xl transition-all group-hover:hidden">⚡</span>
+                  <span className="text-4xl hidden group-hover:block">⏸</span>
+                  <span className="text-sm font-bold text-emerald-300 group-hover:text-red-300 transition-colors">运行中</span>
+                  <span className="text-[10px] text-emerald-400/60 group-hover:text-red-400/80 transition-colors">点击暂停</span>
+                </div>
+              </button>
+            ) : canResume ? (
+              /* Paused → Resume */
+              <button
+                onClick={handleStart}
+                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
+              >
+                <div className="absolute inset-0 rounded-full border-4 border-amber-500/20" />
+                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-amber-900/50 to-orange-900/40 group-hover:from-emerald-900/60 group-hover:to-cyan-900/50 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/20" />
+                <div className="relative z-10 flex flex-col items-center gap-1">
+                  <span className="text-4xl group-hover:scale-110 transition-transform">▶️</span>
+                  <span className="text-sm font-bold text-amber-300 group-hover:text-emerald-300 transition-colors">已暂停</span>
+                  <span className="text-[10px] text-amber-400/60 group-hover:text-emerald-400/80 transition-colors">点击继续</span>
+                </div>
+              </button>
+            ) : canStart ? (
+              /* Has wish → Launch */
+              <button
+                onClick={handleStart}
+                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95"
+              >
+                <div className="absolute inset-0 rounded-full border-4 border-forge-500/20 group-hover:border-forge-400/40 transition-colors" />
+                <div className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                  <div className="absolute inset-0 rounded-full border-4 border-forge-400/30 animate-ping" />
+                </div>
+                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-forge-800/80 to-indigo-900/60 group-hover:from-forge-700/90 group-hover:to-indigo-800/70 transition-all duration-300 group-hover:shadow-xl group-hover:shadow-forge-500/30" />
+                <div className="relative z-10 flex flex-col items-center gap-1">
+                  <span className="text-5xl group-hover:scale-110 group-hover:rotate-12 transition-all duration-300">🚀</span>
+                  <span className="text-sm font-bold text-forge-300 group-hover:text-white transition-colors">启动开发</span>
+                  <span className="text-[10px] text-forge-400/60 group-hover:text-forge-200/80 transition-colors">开始创造</span>
+                </div>
+              </button>
+            ) : noWish ? (
+              /* No wish → Go to wish */
+              <button
+                onClick={() => setProjectPage('wish')}
+                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
+              >
+                <div className="absolute inset-0 rounded-full border-4 border-dashed border-slate-700 group-hover:border-forge-500/40 transition-colors" />
+                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-slate-800/80 to-slate-900/60 group-hover:from-forge-900/30 group-hover:to-indigo-900/20 transition-all duration-300" />
+                <div className="relative z-10 flex flex-col items-center gap-1">
+                  <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
+                  <span className="text-sm font-bold text-slate-400 group-hover:text-forge-300 transition-colors">去许愿</span>
+                  <span className="text-[10px] text-slate-600 group-hover:text-forge-400/60 transition-colors">描述你的想法</span>
+                </div>
+              </button>
+            ) : null}
+
+            {/* Sub info */}
+            {isActive && (
+              <div className="mt-4 flex items-center gap-6 text-xs text-slate-500">
+                <span>🤖 {a.total ?? 0} 位 Agent 工作中</span>
+                <span>📊 {a.total_tokens ? `${(a.total_tokens / 1000).toFixed(1)}k` : '0'} tokens</span>
+                <span>💰 {a.total_cost ? `$${a.total_cost.toFixed(3)}` : '$0'}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 px-6 pb-6 space-y-6">
         {/* Empty state */}
-        {enriched.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-4">
-            <div className="text-5xl">🗺️</div>
-            <div className="text-lg font-medium text-slate-400">项目全景</div>
-            <div className="text-sm text-center max-w-md">
-              当 PM Agent 完成需求分析并拆分为功能模块后，这里会展示：
-              <br /><span className="text-slate-600">• 多层级系统模块图 (dagre 自动布局)</span>
-              <br /><span className="text-slate-600">• 双击下钻: 系统模块 → 子模块 → 功能节点</span>
-              <br /><span className="text-slate-600">• 实时进度聚合 + Agent 工作状态指示</span>
+        {enriched.length === 0 && !isActive && (
+          <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3">
+            <div className="text-sm text-center max-w-md text-slate-600">
+              当 PM Agent 完成需求分析并拆分为功能模块后，这里会展示系统架构图、进度看板和实时状态
             </div>
           </div>
         )}

@@ -100,10 +100,24 @@ export function WishPage() {
     try {
       const res = await window.agentforge.wish.create(currentProjectId, newWish.trim());
       addLog({ projectId: currentProjectId, agentId: 'system', content: '✨ 新需求已提交' });
+
+      // v5.2: 自动设置 wish 并启动开发
+      await window.agentforge.project.setWish(currentProjectId, newWish.trim());
+      await window.agentforge.wish.update(res.wishId, { status: 'developing' });
+
+      if (settingsConfigured) {
+        await window.agentforge.project.start(currentProjectId);
+        addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队已自动启动, 开始创造!' });
+      } else {
+        addLog({ projectId: currentProjectId, agentId: 'system', content: '⚠️ 请先在设置中配置 LLM API Key' });
+      }
+
       setNewWish('');
       setShowNewWish(false);
       setSelectedWishId(res.wishId);
       setLeftTab('wishes');
+      // 跳转到总览页看大按钮动起来
+      setProjectPage('overview');
       await loadWishes();
     } catch (err: any) {
       addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ ${err.message}` });
@@ -341,7 +355,7 @@ export function WishPage() {
                   disabled={!newWish.trim() || submitting}
                   className="px-5 py-2 rounded-lg text-sm bg-forge-600 hover:bg-forge-500 text-white transition-all disabled:bg-slate-800 disabled:text-slate-600"
                 >
-                  {submitting ? '提交中...' : '✨ 提交需求'}
+                  {submitting ? '启动中...' : '🚀 提交并启动开发'}
                 </button>
               </div>
             </div>
