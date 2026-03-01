@@ -232,3 +232,57 @@ export function ensureProjectMemory(workspacePath: string): void {
 ## 经验教训 (Auto Lessons Learned)
 `, 'utf-8');
 }
+
+// ═══════════════════════════════════════
+// v1.2: Shared Decision Log — Worker 间共享决策日志
+// ═══════════════════════════════════════
+
+export interface SharedDecision {
+  timestamp: string;
+  agentId: string;
+  featureId: string;
+  type: 'file_created' | 'interface_defined' | 'library_chosen' | 'convention' | 'other';
+  description: string;
+}
+
+function getDecisionLogPath(workspacePath: string): string {
+  return path.join(getProjectMemoryDir(workspacePath), 'shared-decisions.jsonl');
+}
+
+/** 追加一条共享决策 */
+export function appendSharedDecision(workspacePath: string, decision: Omit<SharedDecision, 'timestamp'>): void {
+  const p = getDecisionLogPath(workspacePath);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const entry: SharedDecision = { ...decision, timestamp: new Date().toISOString() };
+  fs.appendFileSync(p, JSON.stringify(entry) + '\n', 'utf-8');
+}
+
+/** 读取最近 N 条共享决策 */
+export function readRecentDecisions(workspacePath: string, limit: number = 30): SharedDecision[] {
+  const p = getDecisionLogPath(workspacePath);
+  if (!fs.existsSync(p)) return [];
+  try {
+    const lines = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean);
+    const decisions: SharedDecision[] = [];
+    for (const line of lines.slice(-limit)) {
+      try { decisions.push(JSON.parse(line)); } catch { /* skip bad lines */ }
+    }
+    return decisions;
+  } catch { return []; }
+}
+
+/** 格式化决策日志为上下文文本 */
+export function formatDecisionsForContext(decisions: SharedDecision[], excludeAgent?: string): string {
+  if (decisions.length === 0) return '';
+  // 过滤掉当前 agent 自己的决策（避免重复）
+  const relevant = excludeAgent
+    ? decisions.filter(d => d.agentId !== excludeAgent)
+    : decisions;
+  if (relevant.length === 0) return '';
+
+  const lines = relevant.map(d => {
+    const time = d.timestamp.slice(11, 19);
+    return `- [${time}] ${d.agentId} (${d.featureId}): [${d.type}] ${d.description}`;
+  });
+  return `## 其他 Worker 的决策 (Shared Decision Log)\n${lines.join('\n')}`;
+}

@@ -17,7 +17,7 @@ import { collectDeveloperContext, collectLightContext, type ContextSnapshot } fr
 import { initGitRepo, commitWorkspace } from './workspace-git';
 import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
-import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProjectMemory, appendRoleMemory, recordLessonLearned, buildLessonExtractionPrompt } from './memory-system';
+import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProjectMemory, appendRoleMemory, recordLessonLearned, buildLessonExtractionPrompt, appendSharedDecision, readRecentDecisions, formatDecisionsForContext } from './memory-system';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -1191,11 +1191,18 @@ async function reactDeveloperLoop(
 
   const planText = plan ? getPlanSummary(plan) : '';
 
+  // v1.2: 共享决策日志注入
+  let sharedDecisionsText = '';
+  if (workspacePath) {
+    const decisions = readRecentDecisions(workspacePath, 20);
+    sharedDecisionsText = formatDecisionsForContext(decisions, workerId);
+  }
+
   const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
     { role: 'system', content: DEVELOPER_REACT_PROMPT },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 
@@ -1332,6 +1339,15 @@ async function reactDeveloperLoop(
         if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
           filesWritten.add(toolArgs.path);
           sendToUI(win, 'workspace:changed', { projectId });
+          // v1.2: 共享决策日志
+          if (workspacePath) {
+            appendSharedDecision(workspacePath, {
+              agentId: workerId,
+              featureId: feature.id,
+              type: tc.function.name === 'write_file' ? 'file_created' : 'other',
+              description: `${tc.function.name} ${toolArgs.path}`,
+            });
+          }
         }
 
         // 将工具结果加入消息历史
@@ -1379,9 +1395,9 @@ async function reactDeveloperLoop(
         break;
       }
 
-      // ── 消息窗口压缩: 超过 30 条消息时压缩旧的 tool 结果 ──
+      // ── 消息窗口压缩: 超过 30 条消息时使用 LLM 摘要 (v1.2) ──
       if (messages.length > 30) {
-        compressMessageHistory(messages);
+        await compressMessageHistorySmart(messages, settings, signal);
       }
 
     } catch (err: any) {
@@ -1415,13 +1431,58 @@ async function reactDeveloperLoop(
 }
 
 /**
- * 压缩消息历史 — 将旧的 tool 结果截断以控制 context 大小
- * 保留: system, 最近的用户消息, 最近 10 条消息不动
+ * 压缩消息历史 — v1.2 智能摘要版
+ * 使用 LLM 将旧消息摘要为一条紧凑的 user 消息，替代暴力截断。
+ * 失败时 fallback 到简单截断。
  */
-function compressMessageHistory(messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>) {
+async function compressMessageHistorySmart(
+  messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>,
+  settings: any,
+  signal?: AbortSignal
+): Promise<void> {
+  const keepRecent = 10;
+  if (messages.length <= keepRecent + 2) return; // 没啥好压缩的
+
+  // 提取需要压缩的消息 (跳过 system[0] 和最近 keepRecent 条)
+  const compressRange = messages.slice(1, messages.length - keepRecent);
+  if (compressRange.length < 5) return;
+
+  // 构建摘要 prompt
+  const compressText = compressRange.map(m => {
+    const role = m.role;
+    const content = typeof m.content === 'string' ? m.content.slice(0, 300) : JSON.stringify(m.content).slice(0, 300);
+    const toolInfo = m.tool_calls ? ` [tools: ${m.tool_calls.map((t: any) => t.function.name).join(',')}]` : '';
+    return `[${role}]${toolInfo} ${content}`;
+  }).join('\n');
+
+  try {
+    const summaryResult = await callLLM(settings, settings.workerModel, [
+      { role: 'system', content: '你是对话摘要助手。将以下 Agent 对话历史压缩为一段简洁摘要（200-400字），保留关键决策、已创建的文件、遇到的问题和解决方案。只输出摘要，不要其他内容。' },
+      { role: 'user', content: `请摘要以下 ${compressRange.length} 条对话:\n\n${compressText.slice(0, 4000)}` },
+    ], signal, 1024, 0); // 不重试
+
+    if (summaryResult.content) {
+      // 替换: 删掉旧消息，插入一条摘要
+      const summaryMsg = {
+        role: 'user' as string,
+        content: `## 之前的对话摘要 (${compressRange.length} 条消息已压缩)\n${summaryResult.content}`,
+      };
+      messages.splice(1, compressRange.length, summaryMsg);
+      return;
+    }
+  } catch {
+    // LLM 摘要失败，fallback 到简单截断
+  }
+
+  // Fallback: 简单截断
+  compressMessageHistorySimple(messages);
+}
+
+/** 简单截断 (原 v0.9 逻辑, 作为 fallback) */
+function compressMessageHistorySimple(messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>) {
   const keepRecent = 10;
   const cutoff = messages.length - keepRecent;
-  for (let i = 1; i < cutoff; i++) {  // skip system msg at index 0
+  for (let i = 1; i < cutoff; i++) {
     if (messages[i].role === 'tool' && typeof messages[i].content === 'string') {
       const content = messages[i].content as string;
       if (content.length > 300) {
@@ -1432,7 +1493,8 @@ function compressMessageHistory(messages: Array<{ role: string; content: any; to
 }
 
 // ═══════════════════════════════════════
-// QA 审查 (unchanged from v0.5, uses file paths now)
+// ═══════════════════════════════════════
+// QA 审查 (v1.2: TDD 模式 — 先跑测试, 再 LLM 审查)
 // ═══════════════════════════════════════
 interface QAResult {
   verdict: 'pass' | 'fail';
@@ -1455,11 +1517,46 @@ async function runQAReview(
     }
   }
 
+  // ═══ v1.2: TDD — 先跑测试和 lint ═══
+  let testResults = '';
+  const hasTestFiles = filesWritten.some(f =>
+    f.includes('test') || f.includes('spec') || f.includes('__tests__')
+  );
+  const fs = require('fs');
+  const hasPackageJson = fs.existsSync(require('path').join(workspacePath, 'package.json'));
+  const hasRequirements = fs.existsSync(require('path').join(workspacePath, 'requirements.txt'));
+  const hasCargoToml = fs.existsSync(require('path').join(workspacePath, 'Cargo.toml'));
+
+  if (hasTestFiles || hasPackageJson || hasRequirements || hasCargoToml) {
+    const { runTest: sbRunTest, runLint: sbRunLint } = require('./sandbox-executor');
+    const sandboxCfg = { workspacePath, timeoutMs: 120_000 };
+
+    // 运行测试
+    try {
+      const testResult = sbRunTest(sandboxCfg);
+      testResults += `## 测试执行结果\n`;
+      testResults += `状态: ${testResult.success ? '✅ PASS' : '❌ FAIL'} (exit ${testResult.exitCode}, ${testResult.duration}ms)\n`;
+      testResults += `\`\`\`\n${(testResult.stdout + testResult.stderr).slice(0, 3000)}\n\`\`\`\n\n`;
+    } catch (e: any) {
+      testResults += `## 测试执行\n⚠️ 无法运行: ${e.message}\n\n`;
+    }
+
+    // 运行 lint
+    try {
+      const lintResult = sbRunLint(sandboxCfg);
+      if (lintResult.stdout && lintResult.stdout !== '未检测到 lint/type-check 配置') {
+        testResults += `## Lint/类型检查结果\n`;
+        testResults += `状态: ${lintResult.success ? '✅ PASS' : '❌ FAIL'}\n`;
+        testResults += `\`\`\`\n${lintResult.stdout.slice(0, 2000)}\n\`\`\`\n\n`;
+      }
+    } catch { /* non-fatal */ }
+  }
+
   const result = await callLLM(settings, settings.strongModel, [
     { role: 'system', content: QA_SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `请审查以下 Feature 的实现代码:\n\nFeature ID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n## 实现的文件\n${filesContent.join('\n\n')}\n\n请给出审查结果（JSON 格式，不要用 markdown 代码块包裹）。`,
+      content: `请审查以下 Feature 的实现代码:\n\nFeature ID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n${testResults}## 实现的文件\n${filesContent.join('\n\n')}\n\n请给出审查结果（JSON 格式，不要用 markdown 代码块包裹）。${testResults ? '\n注意: 如果测试失败，verdict 应为 fail。' : ''}`,
     },
   ], signal, 4096);
 
