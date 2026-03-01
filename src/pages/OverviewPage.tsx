@@ -364,11 +364,20 @@ function StatCard({ icon, label, value, sub }: { icon: string; label: string; va
 // ═══════════════════════════════════════
 // Main OverviewPage
 // ═══════════════════════════════════════
+const PROJECT_STATUS: Record<string, { text: string; color: string }> = {
+  initializing: { text: '初始化', color: 'text-blue-400' },
+  developing:   { text: '开发中', color: 'text-emerald-400' },
+  reviewing:    { text: '审查中', color: 'text-amber-400' },
+  delivered:    { text: '已交付', color: 'text-green-400' },
+  paused:       { text: '已暂停', color: 'text-slate-400' },
+  error:        { text: '出错',   color: 'text-red-400' },
+  idle:         { text: '空闲',   color: 'text-slate-500' },
+};
+
 export function OverviewPage() {
-  const { currentProjectId, featureStatuses } = useAppStore();
+  const { currentProjectId, featureStatuses, addLog, settingsConfigured, setGlobalPage, setProjectPage } = useAppStore();
   const [features, setFeatures] = useState<Feature[]>([]);
   const [stats, setStats] = useState<any>(null);
-  const [archContent, setArchContent] = useState<string | null>(null);
   const [project, setProject] = useState<any>(null);
 
   const load = useCallback(async () => {
@@ -381,16 +390,25 @@ export function OverviewPage() {
     setFeatures(feats || []);
     setStats(st);
     setProject(proj);
-
-    // Read ARCHITECTURE.md
-    try {
-      const result = await window.agentforge.workspace.readFile(currentProjectId, 'ARCHITECTURE.md');
-      setArchContent(result.success ? result.content : null);
-    } catch { setArchContent(null); }
   }, [currentProjectId]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+
+  const handleStart = async () => {
+    if (!currentProjectId) return;
+    if (!settingsConfigured) { setGlobalPage('settings'); return; }
+    await window.agentforge.project.start(currentProjectId);
+    addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队开始工作' });
+    load();
+  };
+
+  const handleStop = async () => {
+    if (!currentProjectId) return;
+    await window.agentforge.project.stop(currentProjectId);
+    addLog({ projectId: currentProjectId, agentId: 'system', content: '⏸ 已暂停' });
+    load();
+  };
 
   if (!currentProjectId) {
     return <div className="h-full flex items-center justify-center text-slate-500"><p>加载中...</p></div>;
@@ -421,14 +439,58 @@ export function OverviewPage() {
 
   return (
     <div className="h-full flex flex-col overflow-y-auto">
-      {/* Header */}
+      {/* Header with project controls */}
       <div className="px-6 pt-6 pb-4 border-b border-slate-800/50 flex-shrink-0">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-4">
             <h2 className="text-xl font-bold">项目全景</h2>
-            {project && <p className="text-xs text-slate-500 mt-0.5 max-w-xl truncate">{project.wish}</p>}
+            {project && (() => {
+              const st = PROJECT_STATUS[project.status] || { text: project.status, color: 'text-slate-500' };
+              const isActive = project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing';
+              return (
+                <span className={`text-xs font-medium ${st.color} flex items-center gap-1`}>
+                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+                  {st.text}
+                </span>
+              );
+            })()}
           </div>
-          <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300 transition-colors">🔄</button>
+          <div className="flex items-center gap-2">
+            {project && (() => {
+              const isActive = project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing';
+              const canStart = !isActive && project.wish?.trim();
+              const canResume = project.status === 'paused' || project.status === 'error';
+              return (
+                <>
+                  {isActive && (
+                    <button onClick={handleStop}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 transition-colors">
+                      ⏸ 暂停
+                    </button>
+                  )}
+                  {canResume && (
+                    <button onClick={handleStart}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-emerald-900/50 text-slate-400 hover:text-emerald-400 transition-colors">
+                      ▶ 继续开发
+                    </button>
+                  )}
+                  {(!isActive && !canResume && canStart) && (
+                    <button onClick={handleStart}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors">
+                      🚀 启动开发
+                    </button>
+                  )}
+                  {(!isActive && !canResume && !canStart) && (
+                    <button onClick={() => setProjectPage('wish')}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors">
+                      ✨ 去许愿
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+            <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300 transition-colors" title="刷新">🔄</button>
+          </div>
         </div>
       </div>
 
@@ -494,16 +556,6 @@ export function OverviewPage() {
                   {key === 'todo' ? '待做' : key === 'in_progress' ? '开发中' : key === 'reviewing' ? '审查中' : key === 'passed' ? '已完成' : '失败'}
                 </span>
               ))}
-            </div>
-          </section>
-        )}
-
-        {/* ── 架构概览 ── */}
-        {archContent && (
-          <section>
-            <h3 className="text-sm font-medium text-slate-400 mb-3">🏗️ 架构文档</h3>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 overflow-auto max-h-96">
-              <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">{archContent}</pre>
             </div>
           </section>
         )}
