@@ -1051,3 +1051,122 @@ export function collectLightContext(
     snapshot,
   };
 }
+
+// ═══════════════════════════════════════
+// v5.6: Baseline Context Preview — 无任务时的基线上下文预览
+// ═══════════════════════════════════════
+
+/**
+ * 为指定角色生成基线上下文预览（无需 Feature）
+ *
+ * 展示该角色在开始任何任务前就已固定加载的上下文模块：
+ * - Hot Memory (项目概况 + 架构摘要)
+ * - Warm Memory (模块索引)
+ * - AGENTS.md 项目规范
+ * - 文件目录树
+ * - Repository Map
+ * - 3-layer Memory (角色记忆)
+ *
+ * 用途：让用户提前看到每个 agent 的基线 token 占用和剩余空间
+ */
+export function collectBaselineContext(
+  workspacePath: string,
+  role: string,
+  tokenBudget: number = 128000,
+  agentId?: string,
+): ContextSnapshot {
+  const sectionList: ContextSection[] = [];
+  let totalChars = 0;
+  let filesIncluded = 0;
+
+  function addSection(sec: Omit<ContextSection, 'chars' | 'tokens'>) {
+    const chars = sec.content.length;
+    const tokens = estimateTokens(sec.content);
+    sectionList.push({ ...sec, chars, tokens });
+    totalChars += chars;
+    filesIncluded += sec.files?.length ?? 0;
+  }
+
+  // ─── 1. Hot Memory (项目概况 + 架构摘要) ───
+  const hot = buildHotMemory(workspacePath);
+  if (hot.content) {
+    addSection({
+      id: 'hot-memory', name: 'Hot Memory (项目概况+架构)', source: 'architecture',
+      content: hot.content, truncated: false,
+    });
+  }
+
+  // ─── 2. Warm Memory (模块索引) ───
+  const warm = buildWarmMemory(workspacePath);
+  if (warm.content) {
+    addSection({
+      id: 'warm-memory', name: 'Warm Memory (模块索引)', source: 'repo-map',
+      content: warm.content, truncated: false,
+    });
+  }
+
+  // ─── 3. AGENTS.md 项目规范 ───
+  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  if (agentsMd) {
+    const content = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
+    addSection({
+      id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
+      content, truncated: false,
+      files: ['.agentforge/AGENTS.md'],
+    });
+  }
+
+  // ─── 4. 3-layer Memory (角色记忆) ───
+  try {
+    const memory = readMemoryForRole(workspacePath, role);
+    if (memory.combined) {
+      addSection({
+        id: 'memory', name: `角色记忆 (${role})`, source: 'project-config',
+        content: `## Agent 记忆\n${memory.combined}`, truncated: false,
+        files: ['.agentforge/project-memory.md', `.agentforge/memories/${role}.md`],
+      });
+    }
+  } catch { /* 非致命 */ }
+
+  // ─── 5. 文件目录树 ───
+  try {
+    const tree = readDirectoryTree(workspacePath, '', 3);
+    if (tree.length > 0) {
+      const treeText = `## 文件结构\n\`\`\`\n${formatTreeCompact(tree)}\n\`\`\``;
+      addSection({
+        id: 'file-tree', name: '文件目录树', source: 'file-tree',
+        content: treeText, truncated: false,
+      });
+    }
+  } catch { /* 非致命 */ }
+
+  // ─── 6. Repository Map ───
+  try {
+    const repoMap = generateRepoMap(workspacePath, 40, 10, 80);
+    if (repoMap) {
+      addSection({
+        id: 'repo-map', name: 'Repository Map (代码符号索引)', source: 'repo-map',
+        content: repoMap, truncated: false,
+      });
+    }
+  } catch { /* 非致命 */ }
+
+  // 构建快照
+  const contextText = sectionList.map(s => s.content).join('\n\n');
+  const totalTokens = estimateTokens(contextText);
+  for (const sec of sectionList) {
+    sec.budgetRatio = totalTokens > 0 ? sec.tokens / tokenBudget : 0;
+  }
+
+  return {
+    agentId: agentId || `baseline-${role}`,
+    featureId: 'baseline-preview',
+    timestamp: Date.now(),
+    sections: sectionList,
+    totalChars,
+    totalTokens,
+    tokenBudget,
+    contextText,
+    filesIncluded,
+  };
+}

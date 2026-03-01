@@ -13,6 +13,7 @@ import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, 
 import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 import { importProject } from '../engine/project-importer';
+import { collectBaselineContext } from '../engine/context-collector';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 
 function generateId(): string {
@@ -837,6 +838,21 @@ export function setupProjectHandlers() {
       canceled: result.canceled,
       filePaths: result.filePaths,
     };
+  });
+
+  // ── 基线上下文预览 (v5.6) ──
+  ipcMain.handle('context:preview-baseline', (_event, projectId: string, role: string, tokenBudget?: number) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
+      return { success: false, error: 'Workspace not found' };
+    }
+    try {
+      const snapshot = collectBaselineContext(project.workspace_path, role, tokenBudget || 128000);
+      return { success: true, snapshot };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   });
 }
 

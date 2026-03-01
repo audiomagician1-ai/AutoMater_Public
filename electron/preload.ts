@@ -173,6 +173,12 @@ contextBridge.exposeInMainWorld('agentforge', {
     delete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
   },
 
+  // ── 上下文管理 (v5.6) ──
+  context: {
+    previewBaseline: (projectId: string, role: string, tokenBudget?: number) =>
+      ipcRenderer.invoke('context:preview-baseline', projectId, role, tokenBudget),
+  },
+
   // ── 缩放控制 (v5.2) ──
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */

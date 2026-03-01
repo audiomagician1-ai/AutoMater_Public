@@ -314,39 +314,137 @@ function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect
 }
 
 // ═══════════════════════════════════════
-// StandbyPanel — 成员待机状态详情
+// BaselinePanel — 待机时展示基线上下文预览（可展开查看内容）
 // ═══════════════════════════════════════
-function StandbyPanel({ member }: { member: TeamMember }) {
+function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: string }) {
   const meta = getRoleMeta(member.role);
-  const caps = (() => { try { return JSON.parse(member.capabilities || '[]'); } catch { return []; } })();
+  const [baseline, setBaseline] = useState<ContextSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 加载基线上下文
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    setError(null);
+    const budget = member.max_context_tokens ?? 128000;
+    (window as any).agentforge.context.previewBaseline(projectId, member.role, budget)
+      .then((res: any) => {
+        if (res.success) {
+          setBaseline(res.snapshot);
+        } else {
+          setError(res.error || '加载失败');
+        }
+      })
+      .catch((e: any) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [projectId, member.id, member.role]);
+
+  const budget = member.max_context_tokens ?? 128000;
+  const used = baseline?.totalTokens ?? 0;
+  const remaining = budget - used;
+  const usedRatio = budget > 0 ? used / budget : 0;
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col items-center justify-center gap-6">
-      <div className={`w-24 h-24 rounded-2xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-5xl border border-slate-700/30`}>
-        {meta.icon}
+    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+      {/* 成员信息头 */}
+      <div className="flex items-center gap-4">
+        <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-3xl border border-slate-700/30`}>
+          {meta.icon}
+        </div>
+        <div>
+          <h2 className={`text-lg font-bold ${meta.color}`}>{member.name}</h2>
+          <p className="text-xs text-slate-500">{member.role.toUpperCase()} · 待机中 · 基线上下文预览</p>
+        </div>
       </div>
-      <div className="text-center">
-        <h2 className={`text-xl font-bold ${meta.color}`}>{member.name}</h2>
-        <p className="text-sm text-slate-500 mt-1">{member.role.toUpperCase()} · 待机中</p>
-      </div>
-      <div className="max-w-md w-full space-y-4">
-        <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">能力标签</div>
-          <div className="flex flex-wrap gap-2">
-            {caps.map((c: string) => (
-              <span key={c} className={`text-xs px-2.5 py-1 rounded-lg border border-slate-700 ${meta.color} bg-slate-800/50`}>{c}</span>
-            ))}
+
+      {/* 容量概览 */}
+      <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 space-y-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-400">
+            基线占用: <span className="text-slate-200 font-mono">{formatTokens(used)}</span>
+            {' / '}
+            <span className="font-mono">{formatTokens(budget)}</span>
+          </span>
+          <span className={`font-mono ${usedRatio > 0.5 ? 'text-amber-400' : 'text-emerald-400'}`}>
+            剩余 {formatTokens(remaining)} ({((1 - usedRatio) * 100).toFixed(0)}%)
+          </span>
+        </div>
+        <div className="relative h-5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+          <div className="absolute inset-0 flex">
+            {baseline?.sections.map(sec => {
+              const width = (sec.tokens / budget) * 100;
+              if (width < 0.3) return null;
+              const color = getColor(sec.source);
+              return (
+                <div
+                  key={sec.id}
+                  className={`${color.bar} h-full relative group`}
+                  style={{ width: `${Math.min(width, 100)}%` }}
+                  title={`${sec.name}: ${formatTokens(sec.tokens)} tokens`}
+                >
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
+                    <div className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] whitespace-nowrap shadow-xl">
+                      <span className="font-medium">{sec.name}</span><br/>
+                      {formatTokens(sec.tokens)} tokens · {width.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
-        <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">上下文配额</div>
-          <div className="text-2xl font-bold text-slate-300 font-mono">{formatTokens(member.max_context_tokens ?? 128000)}</div>
-          <div className="text-xs text-slate-500 mt-1">最大上下文 token 数</div>
-        </div>
-        <div className="text-center text-sm text-slate-600 py-4">
-          🔮 当任务分配到此成员时，上下文将自动填充
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {baseline?.sections.map(sec => {
+            const color = getColor(sec.source);
+            return (
+              <div key={sec.id} className="flex items-center gap-1 text-[10px]">
+                <div className={`w-2 h-2 rounded-sm ${color.bar}`} />
+                <span className="text-slate-400">{sec.name}</span>
+                <span className={`${color.text} font-mono`}>{formatTokens(sec.tokens)}</span>
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-1 text-[10px]">
+            <div className="w-2 h-2 rounded-sm bg-slate-700" />
+            <span className="text-slate-500">可用空间</span>
+            <span className="text-slate-400 font-mono">{formatTokens(remaining)}</span>
+          </div>
         </div>
       </div>
+
+      {/* 加载中/错误 */}
+      {loading && (
+        <div className="text-center text-sm text-slate-500 py-4">
+          <div className="inline-block w-4 h-4 border-2 border-slate-600 border-t-cyan-400 rounded-full animate-spin mr-2" />
+          正在计算基线上下文...
+        </div>
+      )}
+      {error && (
+        <div className="text-center text-sm text-red-400 py-4">❌ {error}</div>
+      )}
+
+      {/* 基线上下文模块列表（可展开） */}
+      {baseline && baseline.sections.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-slate-300">
+              固定加载模块 ({baseline.sections.length})
+            </h3>
+            <span className="text-[10px] text-slate-500">任务分配前已固定占用 · 点击展开查看内容</span>
+          </div>
+          {baseline.sections.map((sec: ContextSection) => (
+            <ContextSectionCard key={sec.id} section={sec} tokenBudget={budget} />
+          ))}
+        </div>
+      )}
+
+      {/* 空项目提示 */}
+      {baseline && baseline.sections.length === 0 && !loading && (
+        <div className="text-center text-sm text-slate-600 py-8">
+          📭 项目工作区暂无上下文资源（未检测到架构文档、代码文件等）
+        </div>
+      )}
     </div>
   );
 }
@@ -538,14 +636,28 @@ export function ContextPage() {
               <TokenBudgetBar snapshot={selectedSnapshot} />
             </div>
 
-            {/* Feature 信息 */}
-            <div className="bg-slate-900/30 rounded-lg border border-slate-800 px-4 py-3">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wider">当前任务</div>
-              <div className="text-sm text-slate-300 mt-1">
-                <span className="font-mono text-forge-400">{selectedSnapshot.featureId}</span>
-                <span className="mx-2 text-slate-600">·</span>
-                Agent: <span className="font-mono text-emerald-400">{selectedSnapshot.agentId}</span>
+            {/* Feature 信息 + 压缩按钮 */}
+            <div className="bg-slate-900/30 rounded-lg border border-slate-800 px-4 py-3 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">当前任务</div>
+                <div className="text-sm text-slate-300 mt-1">
+                  <span className="font-mono text-forge-400">{selectedSnapshot.featureId}</span>
+                  <span className="mx-2 text-slate-600">·</span>
+                  Agent: <span className="font-mono text-emerald-400">{selectedSnapshot.agentId}</span>
+                </div>
               </div>
+              {selectedSnapshot.totalTokens > selectedSnapshot.tokenBudget * 0.7 && (
+                <button
+                  className="px-3 py-1.5 text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                  title="压缩上下文：清理历史消息，释放 token 空间"
+                  onClick={() => {
+                    // 触发压缩（目前是 UI 占位，后续接入后端 compactMessages）
+                    alert('上下文压缩将在下次 Agent 执行时自动触发（当前使用率 > 70%）');
+                  }}
+                >
+                  🗜️ 压缩上下文
+                </button>
+              )}
             </div>
 
             {/* 模块卡片列表 */}
@@ -560,7 +672,7 @@ export function ContextPage() {
             </div>
           </div>
         ) : selected ? (
-          <StandbyPanel member={selected} />
+          <BaselinePanel member={selected} projectId={currentProjectId!} />
         ) : null}
       </div>
     </div>
