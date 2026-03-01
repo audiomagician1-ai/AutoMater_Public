@@ -86,9 +86,7 @@ interface AgentForgeAPI {
       githubRepo?: string;
       githubToken?: string;
     }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
-    /** 设置/更新项目的需求描述 */
     setWish(projectId: string, wish: string): Promise<{ success: boolean }>;
-    /** 启动项目（开始 Agent 编排） */
     start(projectId: string): Promise<{ success: boolean }>;
     list(): Promise<any[]>;
     get(id: string): Promise<any>;
@@ -106,31 +104,70 @@ interface AgentForgeAPI {
     getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
     getReactStates(projectId: string): Promise<Record<string, AgentReactState>>;
   };
+  /** v3.1: 需求队列 */
+  wish: {
+    create(projectId: string, content: string): Promise<{ success: boolean; wishId: string }>;
+    list(projectId: string): Promise<WishItem[]>;
+    get(wishId: string): Promise<WishItem | null>;
+    update(wishId: string, fields: Partial<{ status: string; pm_analysis: string; design_doc: string; content: string }>): Promise<{ success: boolean }>;
+    delete(wishId: string): Promise<{ success: boolean }>;
+  };
+  /** v3.1: 团队管理 */
+  team: {
+    list(projectId: string): Promise<TeamMember[]>;
+    add(projectId: string, member: Partial<TeamMember>): Promise<{ success: boolean; memberId: string }>;
+    update(memberId: string, fields: Partial<TeamMember>): Promise<{ success: boolean }>;
+    delete(memberId: string): Promise<{ success: boolean }>;
+    initDefaults(projectId: string): Promise<{ success: boolean; count?: number }>;
+  };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;
     readFile(projectId: string, relativePath: string): Promise<{ success: boolean; content: string }>;
     getPath(projectId: string): Promise<string | null>;
   };
-  /** v2.0: 事件流 */
   events: {
     query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<any[]>;
     getStats(projectId: string): Promise<any>;
     getTimeline(projectId: string, featureId: string): Promise<any[]>;
     exportNDJSON(projectId: string): Promise<string>;
   };
-  /** v2.0: Mission */
   mission: {
     getStatus(projectId: string): Promise<any>;
     getCheckpoints(projectId: string): Promise<any[]>;
     getProgressReport(projectId: string): Promise<string>;
     detectResumable(): Promise<any[]>;
   };
-  /** v2.0: 跨项目经验 */
   knowledge: {
     getStats(): Promise<any>;
     query(tags: string[]): Promise<any[]>;
   };
   on(channel: string, callback: (...args: any[]) => void): () => void;
+}
+
+/** 需求条目 (v3.1) */
+interface WishItem {
+  id: string;
+  project_id: string;
+  content: string;
+  status: 'pending' | 'analyzing' | 'analyzed' | 'developing' | 'done' | 'rejected';
+  pm_analysis: string | null;
+  design_doc: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 团队成员 (v3.1) */
+interface TeamMember {
+  id: string;
+  project_id: string;
+  role: string;
+  name: string;
+  model: string | null;
+  capabilities: string;  // JSON array string
+  system_prompt: string | null;
+  context_files: string;  // JSON array string
+  max_context_tokens: number;
+  created_at: string;
 }
 
 interface AppSettings {

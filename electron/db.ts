@@ -108,10 +108,42 @@ export async function initDatabase(): Promise<void> {
     db.exec(`ALTER TABLE projects ADD COLUMN github_token TEXT`);
   } catch { /* 列已存在 */ }
 
+  // v3.1: wishes 表 (需求队列)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wishes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      pm_analysis TEXT,
+      design_doc TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+  `);
+
+  // v3.1: team_members 表 (自定义团队成员)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_members (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      name TEXT NOT NULL,
+      model TEXT,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      system_prompt TEXT,
+      context_files TEXT NOT NULL DEFAULT '[]',
+      max_context_tokens INTEGER NOT NULL DEFAULT 128000,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+  `);
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在
   ensureEventTable();
   ensureCheckpointTable();
-  console.log('[DB] v2.0 tables ensured (events, checkpoints)');
+  console.log('[DB] v2.0+ tables ensured');
 }

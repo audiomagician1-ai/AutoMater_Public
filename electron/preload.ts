@@ -44,6 +44,24 @@ contextBridge.exposeInMainWorld('agentforge', {
     getReactStates: (projectId: string) => ipcRenderer.invoke('project:get-react-states', projectId),
   },
 
+  // ── 需求队列 (v3.1) ──
+  wish: {
+    create: (projectId: string, content: string) => ipcRenderer.invoke('wish:create', projectId, content),
+    list: (projectId: string) => ipcRenderer.invoke('wish:list', projectId),
+    get: (wishId: string) => ipcRenderer.invoke('wish:get', wishId),
+    update: (wishId: string, fields: any) => ipcRenderer.invoke('wish:update', wishId, fields),
+    delete: (wishId: string) => ipcRenderer.invoke('wish:delete', wishId),
+  },
+
+  // ── 团队管理 (v3.1) ──
+  team: {
+    list: (projectId: string) => ipcRenderer.invoke('team:list', projectId),
+    add: (projectId: string, member: any) => ipcRenderer.invoke('team:add', projectId, member),
+    update: (memberId: string, fields: any) => ipcRenderer.invoke('team:update', memberId, fields),
+    delete: (memberId: string) => ipcRenderer.invoke('team:delete', memberId),
+    initDefaults: (projectId: string) => ipcRenderer.invoke('team:init-defaults', projectId),
+  },
+
   // ── 工作区文件系统 ──
   workspace: {
     tree: (projectId: string) => ipcRenderer.invoke('workspace:tree', projectId),

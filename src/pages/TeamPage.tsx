@@ -397,12 +397,24 @@ function AgentDetailPanel({ agent, onClose }: { agent: any; onClose: () => void 
 }
 
 // ═══════════════════════════════════════
-// TeamPage — 主页面
+// TeamPage — 主页面 (v3.1: 手动编辑团队)
 // ═══════════════════════════════════════
 export function TeamPage() {
   const { currentProjectId, agentReactStates, contextSnapshots } = useAppStore();
   const [agents, setAgents] = useState<any[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<any>(null);
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [tab, setTab] = useState<'runtime' | 'config'>('config');
+
+  // ── 新增成员表单 ──
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState('developer');
+  const [newModel, setNewModel] = useState('');
+  const [newPrompt, setNewPrompt] = useState('');
+  const [newCaps, setNewCaps] = useState('');
+  const [newMaxTokens, setNewMaxTokens] = useState('128000');
 
   const loadAgents = async () => {
     if (!currentProjectId) return;
@@ -410,9 +422,15 @@ export function TeamPage() {
     setAgents(data || []);
   };
 
-  useEffect(() => { loadAgents(); }, [currentProjectId]);
+  const loadMembers = async () => {
+    if (!currentProjectId) return;
+    const data = await window.agentforge.team.list(currentProjectId);
+    setMembers(data || []);
+  };
+
+  useEffect(() => { loadAgents(); loadMembers(); }, [currentProjectId]);
   useEffect(() => {
-    const timer = setInterval(loadAgents, 3000);
+    const timer = setInterval(() => { loadAgents(); }, 3000);
     return () => clearInterval(timer);
   }, [currentProjectId]);
 
@@ -433,107 +451,322 @@ export function TeamPage() {
     }).catch(() => {});
   }, [currentProjectId]);
 
+  /** 初始化默认团队 */
+  const handleInitDefaults = async () => {
+    if (!currentProjectId) return;
+    await window.agentforge.team.initDefaults(currentProjectId);
+    loadMembers();
+  };
+
+  /** 添加成员 */
+  const handleAddMember = async () => {
+    if (!currentProjectId || !newName.trim()) return;
+    const caps = newCaps.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    await window.agentforge.team.add(currentProjectId, {
+      role: newRole,
+      name: newName.trim(),
+      model: newModel || undefined,
+      capabilities: caps,
+      system_prompt: newPrompt || undefined,
+      max_context_tokens: parseInt(newMaxTokens) || 128000,
+    });
+    setShowAddForm(false);
+    setNewName(''); setNewRole('developer'); setNewModel(''); setNewPrompt(''); setNewCaps(''); setNewMaxTokens('128000');
+    loadMembers();
+  };
+
+  /** 删除成员 */
+  const handleDeleteMember = async (id: string) => {
+    await window.agentforge.team.delete(id);
+    loadMembers();
+  };
+
+  /** 保存编辑 */
+  const handleSaveEdit = async () => {
+    if (!editingMember) return;
+    const caps = typeof editingMember.capabilities === 'string'
+      ? editingMember.capabilities : JSON.stringify(editingMember.capabilities);
+    let capsArr: string[];
+    try { capsArr = JSON.parse(caps); } catch { capsArr = caps.split(/[,，]/).map(s => s.trim()).filter(Boolean); }
+    await window.agentforge.team.update(editingMember.id, {
+      ...editingMember,
+      capabilities: capsArr,
+    });
+    setEditingMember(null);
+    loadMembers();
+  };
+
   if (!currentProjectId) {
-    return (
-      <div className="h-full flex items-center justify-center text-slate-500">
-        <p>加载中...</p>
-      </div>
-    );
+    return <div className="h-full flex items-center justify-center text-slate-500"><p>加载中...</p></div>;
   }
 
   return (
-    <div className="h-full flex flex-col p-6 gap-4">
-      <div className="flex items-center justify-between">
+    <div className="h-full flex flex-col p-6 gap-4 overflow-hidden">
+      <div className="flex items-center justify-between flex-shrink-0">
         <h2 className="text-xl font-bold">虚拟团队</h2>
-        <span className="text-sm text-slate-500">{agents.length} 位成员 · 点击查看上下文详情</span>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto">
-        {agents.map(agent => {
-          const info = ROLE_INFO[agent.role] || { icon: '🤖', title: agent.role };
-          const reactState = agentReactStates.get(agent.id);
-          const snapshot = contextSnapshots.get(agent.id);
-          const latestIter = reactState?.iterations[reactState.iterations.length - 1];
-          const hasContext = !!snapshot || !!reactState;
-
-          return (
-            <button
-              key={agent.id}
-              onClick={() => setSelectedAgent(agent)}
-              className={`text-left bg-slate-900 border rounded-xl p-4 space-y-3 transition-all ${
-                hasContext
-                  ? 'border-forge-500/30 hover:border-forge-400/50 hover:shadow-lg hover:shadow-forge-500/5'
-                  : 'border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              {/* Header */}
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{info.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-slate-200 truncate">{info.title}</div>
-                  <div className="text-xs text-slate-500 font-mono">{agent.id}</div>
-                </div>
-                <div className={`w-2.5 h-2.5 rounded-full ${STATUS_STYLES[agent.status] || 'bg-slate-600'}`}
-                  title={agent.status}
-                />
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-sm font-semibold text-slate-200">{agent.session_count}</div>
-                  <div className="text-[10px] text-slate-500">会话</div>
-                </div>
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-sm font-semibold text-slate-200">
-                    {((agent.total_input_tokens + agent.total_output_tokens) / 1000).toFixed(1)}k
-                  </div>
-                  <div className="text-[10px] text-slate-500">tokens</div>
-                </div>
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-sm font-semibold text-slate-200">${agent.total_cost_usd.toFixed(2)}</div>
-                  <div className="text-[10px] text-slate-500">成本</div>
-                </div>
-              </div>
-
-              {/* Context mini indicator */}
-              {latestIter && (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000) > 0.8
-                          ? 'bg-amber-500' : 'bg-emerald-500'
-                      }`}
-                      style={{ width: `${Math.min((latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000)) * 100, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-slate-500 shrink-0">
-                    {formatTokens(latestIter.totalContextTokens)} ctx
-                  </span>
-                </div>
-              )}
-
-              {/* Current task */}
-              {agent.current_task && (
-                <div className="text-xs text-forge-400 truncate">
-                  🔨 正在处理: {agent.current_task}
-                </div>
-              )}
-
-              {/* Click hint */}
-              {hasContext && (
-                <div className="text-[10px] text-slate-600 text-center">点击查看上下文详情 →</div>
-              )}
+        <div className="flex items-center gap-3">
+          {/* Tab 切换 */}
+          <div className="flex bg-slate-800 rounded-lg p-0.5">
+            <button onClick={() => setTab('config')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'config' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              ⚙ 团队配置
             </button>
-          );
-        })}
-        {agents.length === 0 && (
-          <div className="col-span-full text-center py-12 text-slate-600">
-            尚无 Agent，开始许愿后 AI 团队将自动上线
+            <button onClick={() => setTab('runtime')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'runtime' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              📊 运行状态
+            </button>
           </div>
-        )}
+        </div>
       </div>
+
+      {tab === 'config' ? (
+        /* ══════ 团队配置 ══════ */
+        <div className="flex-1 overflow-y-auto space-y-4">
+          {members.length === 0 ? (
+            <div className="text-center py-16 text-slate-600">
+              <div className="text-4xl mb-3">👥</div>
+              <div className="text-lg text-slate-400 mb-2">尚未配置团队</div>
+              <div className="text-sm mb-6">可以使用默认配置快速初始化，或手动添加成员</div>
+              <div className="flex gap-3 justify-center">
+                <button onClick={handleInitDefaults}
+                  className="px-5 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all">
+                  ⚡ 初始化默认团队
+                </button>
+                <button onClick={() => setShowAddForm(true)}
+                  className="px-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-all">
+                  + 手动添加
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">{members.length} 位成员</span>
+                <button onClick={() => setShowAddForm(true)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors">
+                  + 添加成员
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {members.map(m => {
+                  const info = ROLE_INFO[m.role] || { icon: '🤖', title: m.role };
+                  let caps: string[] = [];
+                  try { caps = JSON.parse(m.capabilities || '[]'); } catch { caps = []; }
+
+                  return (
+                    <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{info.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-slate-200">{m.name}</div>
+                          <div className="text-xs text-slate-500">{info.title} · {m.model || '默认模型'}</div>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => setEditingMember({ ...m })}
+                            className="text-xs px-2 py-1 text-slate-500 hover:text-forge-400 transition-colors">✏️</button>
+                          <button onClick={() => handleDeleteMember(m.id)}
+                            className="text-xs px-2 py-1 text-slate-500 hover:text-red-400 transition-colors">🗑</button>
+                        </div>
+                      </div>
+                      {/* Capabilities */}
+                      <div className="flex flex-wrap gap-1">
+                        {caps.map((c, i) => (
+                          <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{c}</span>
+                        ))}
+                      </div>
+                      {/* System prompt */}
+                      {m.system_prompt && (
+                        <p className="text-[11px] text-slate-500 line-clamp-2">{m.system_prompt}</p>
+                      )}
+                      <div className="text-[10px] text-slate-600">
+                        上下文: {(m.max_context_tokens / 1000).toFixed(0)}k tokens
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── 添加表单 ── */}
+          {showAddForm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAddForm(false)}>
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-slate-200">添加团队成员</h3>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">名称</label>
+                      <input value={newName} onChange={e => setNewName(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
+                        placeholder="开发者 C" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">角色</label>
+                      <select value={newRole} onChange={e => setNewRole(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500">
+                        <option value="pm">产品经理</option>
+                        <option value="architect">架构师</option>
+                        <option value="developer">开发者</option>
+                        <option value="qa">QA 工程师</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="devops">DevOps</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">模型 (留空用全局配置)</label>
+                    <input value={newModel} onChange={e => setNewModel(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
+                      placeholder="gpt-5.3-codex" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">能力标签 (逗号分隔)</label>
+                    <input value={newCaps} onChange={e => setNewCaps(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
+                      placeholder="前端开发, React, TypeScript" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">系统提示词</label>
+                    <textarea value={newPrompt} onChange={e => setNewPrompt(e.target.value)} rows={3}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 resize-y focus:outline-none focus:border-forge-500"
+                      placeholder="你是一位资深前端开发者..." />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">上下文窗口 (tokens)</label>
+                    <input value={newMaxTokens} onChange={e => setNewMaxTokens(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
+                      placeholder="128000" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
+                  <button onClick={handleAddMember} disabled={!newName.trim()}
+                    className="px-4 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm disabled:bg-slate-800 disabled:text-slate-600">添加</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 编辑弹窗 ── */}
+          {editingMember && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setEditingMember(null)}>
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-slate-200">编辑: {editingMember.name}</h3>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">名称</label>
+                      <input value={editingMember.name} onChange={e => setEditingMember({ ...editingMember, name: e.target.value })}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 mb-1 block">角色</label>
+                      <select value={editingMember.role} onChange={e => setEditingMember({ ...editingMember, role: e.target.value })}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500">
+                        <option value="pm">产品经理</option>
+                        <option value="architect">架构师</option>
+                        <option value="developer">开发者</option>
+                        <option value="qa">QA 工程师</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="devops">DevOps</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">模型</label>
+                    <input value={editingMember.model || ''} onChange={e => setEditingMember({ ...editingMember, model: e.target.value })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">能力标签</label>
+                    <input value={(() => { try { return JSON.parse(editingMember.capabilities || '[]').join(', '); } catch { return editingMember.capabilities; } })()}
+                      onChange={e => setEditingMember({ ...editingMember, capabilities: e.target.value })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">系统提示词</label>
+                    <textarea value={editingMember.system_prompt || ''} onChange={e => setEditingMember({ ...editingMember, system_prompt: e.target.value })} rows={3}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 resize-y focus:outline-none focus:border-forge-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">上下文窗口</label>
+                    <input value={editingMember.max_context_tokens} onChange={e => setEditingMember({ ...editingMember, max_context_tokens: parseInt(e.target.value) || 128000 })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setEditingMember(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
+                  <button onClick={handleSaveEdit} className="px-4 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm">保存</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ══════ 运行状态 (原有逻辑) ══════ */
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {agents.map(agent => {
+              const info = ROLE_INFO[agent.role] || { icon: '🤖', title: agent.role };
+              const reactState = agentReactStates.get(agent.id);
+              const snapshot = contextSnapshots.get(agent.id);
+              const latestIter = reactState?.iterations[reactState.iterations.length - 1];
+              const hasContext = !!snapshot || !!reactState;
+
+              return (
+                <button key={agent.id} onClick={() => setSelectedAgent(agent)}
+                  className={`text-left bg-slate-900 border rounded-xl p-4 space-y-3 transition-all ${
+                    hasContext ? 'border-forge-500/30 hover:border-forge-400/50 hover:shadow-lg' : 'border-slate-800 hover:border-slate-700'
+                  }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{info.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-slate-200 truncate">{info.title}</div>
+                      <div className="text-xs text-slate-500 font-mono">{agent.id}</div>
+                    </div>
+                    <div className={`w-2.5 h-2.5 rounded-full ${STATUS_STYLES[agent.status] || 'bg-slate-600'}`} title={agent.status} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-slate-200">{agent.session_count}</div>
+                      <div className="text-[10px] text-slate-500">会话</div>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-slate-200">{((agent.total_input_tokens + agent.total_output_tokens) / 1000).toFixed(1)}k</div>
+                      <div className="text-[10px] text-slate-500">tokens</div>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-slate-200">${agent.total_cost_usd.toFixed(2)}</div>
+                      <div className="text-[10px] text-slate-500">成本</div>
+                    </div>
+                  </div>
+                  {latestIter && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${
+                          latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000) > 0.8 ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`} style={{ width: `${Math.min((latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000)) * 100, 100)}%` }} />
+                      </div>
+                      <span className="text-[10px] text-slate-500 shrink-0">{formatTokens(latestIter.totalContextTokens)} ctx</span>
+                    </div>
+                  )}
+                  {agent.current_task && <div className="text-xs text-forge-400 truncate">🔨 {agent.current_task}</div>}
+                  {hasContext && <div className="text-[10px] text-slate-600 text-center">点击查看详情 →</div>}
+                </button>
+              );
+            })}
+            {agents.length === 0 && (
+              <div className="col-span-full text-center py-12 text-slate-600">
+                <div className="text-3xl mb-2">🤖</div>
+                尚无活跃 Agent<br />
+                <span className="text-slate-500 text-xs">发布需求并启动后，Agent 会自动上线</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Agent Detail Modal */}
       {selectedAgent && (

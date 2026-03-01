@@ -44,7 +44,7 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 export default function TimelinePage() {
-  const { currentProject } = useAppStore();
+  const { currentProjectId } = useAppStore();
   const [tab, setTab] = useState<TabId>('timeline');
   const [events, setEvents] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
@@ -54,7 +54,7 @@ export default function TimelinePage() {
   const [filterType, setFilterType] = useState<string>('all');
   const [loading, setLoading] = useState(false);
 
-  const projectId = currentProject?.id;
+  const projectId = currentProjectId;
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -94,6 +94,9 @@ export default function TimelinePage() {
     return <div className="p-6 text-slate-400">请先选择一个项目</div>;
   }
 
+  // 空状态
+  const isEmpty = events.length === 0 && !loading;
+
   return (
     <div className="h-full flex flex-col bg-slate-900">
       {/* Tab bar */}
@@ -124,8 +127,33 @@ export default function TimelinePage() {
       <div className="flex-1 overflow-auto p-4">
         {loading && <div className="text-slate-400 text-center py-8">加载中...</div>}
 
+        {/* ── 空状态 ── */}
+        {isEmpty && tab === 'timeline' && (
+          <div className="flex flex-col items-center justify-center py-16 gap-4 text-slate-500">
+            <div className="text-5xl">📜</div>
+            <div className="text-lg font-medium text-slate-400">事件时间线</div>
+            <div className="text-sm text-center max-w-md">
+              Agent 开始工作后，所有事件（需求分析、架构设计、代码编写、测试审查）
+              <br />都会按时间顺序记录在这里，支持按类型筛选和统计分析。
+            </div>
+            <div className="grid grid-cols-4 gap-3 mt-4 text-xs">
+              {[
+                { icon: '🧠', label: 'PM 分析' },
+                { icon: '🏗️', label: '架构设计' },
+                { icon: '⚡', label: '代码编写' },
+                { icon: '🔍', label: 'QA 审查' },
+              ].map(item => (
+                <div key={item.label} className="bg-slate-800 rounded-lg px-4 py-3 text-center">
+                  <div className="text-2xl mb-1">{item.icon}</div>
+                  <div className="text-slate-400">{item.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Timeline Tab ── */}
-        {tab === 'timeline' && !loading && (
+        {tab === 'timeline' && !loading && events.length > 0 && (
           <div>
             {/* Filter */}
             <div className="flex items-center gap-2 mb-4 flex-wrap">

@@ -61,11 +61,136 @@ export function setupProjectHandlers() {
     return { success: true, projectId: id, name: displayName, workspacePath };
   });
 
-  // ── 设置/更新项目需求 ──
+  // ── 设置/更新项目需求 (legacy: 更新 projects.wish 字段) ──
   ipcMain.handle('project:set-wish', async (_event, projectId: string, wish: string) => {
     const db = getDb();
     db.prepare(`UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?`).run(wish, projectId);
     return { success: true };
+  });
+
+  // ══════════════ 需求队列 (v3.1) ══════════════
+
+  /** 创建一条新需求 */
+  ipcMain.handle('wish:create', async (_event, projectId: string, content: string) => {
+    const db = getDb();
+    const id = 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    db.prepare(`INSERT INTO wishes (id, project_id, content) VALUES (?, ?, ?)`).run(id, projectId, content);
+    return { success: true, wishId: id };
+  });
+
+  /** 列出项目的所有需求 */
+  ipcMain.handle('wish:list', (_event, projectId: string) => {
+    const db = getDb();
+    return db.prepare('SELECT * FROM wishes WHERE project_id = ? ORDER BY created_at DESC').all(projectId);
+  });
+
+  /** 获取单条需求详情 */
+  ipcMain.handle('wish:get', (_event, wishId: string) => {
+    const db = getDb();
+    return db.prepare('SELECT * FROM wishes WHERE id = ?').get(wishId);
+  });
+
+  /** 更新需求状态 / PM 分析 / 设计文档 */
+  ipcMain.handle('wish:update', (_event, wishId: string, fields: {
+    status?: string; pm_analysis?: string; design_doc?: string; content?: string;
+  }) => {
+    const db = getDb();
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (fields.status !== undefined) { sets.push('status = ?'); vals.push(fields.status); }
+    if (fields.pm_analysis !== undefined) { sets.push('pm_analysis = ?'); vals.push(fields.pm_analysis); }
+    if (fields.design_doc !== undefined) { sets.push('design_doc = ?'); vals.push(fields.design_doc); }
+    if (fields.content !== undefined) { sets.push('content = ?'); vals.push(fields.content); }
+    if (sets.length === 0) return { success: false };
+    sets.push("updated_at = datetime('now')");
+    vals.push(wishId);
+    db.prepare(`UPDATE wishes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  /** 删除需求 */
+  ipcMain.handle('wish:delete', (_event, wishId: string) => {
+    const db = getDb();
+    db.prepare('DELETE FROM wishes WHERE id = ?').run(wishId);
+    return { success: true };
+  });
+
+  // ══════════════ 团队成员 (v3.1) ══════════════
+
+  /** 列出项目的团队成员 */
+  ipcMain.handle('team:list', (_event, projectId: string) => {
+    const db = getDb();
+    return db.prepare('SELECT * FROM team_members WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
+  });
+
+  /** 新增成员 */
+  ipcMain.handle('team:add', (_event, projectId: string, member: {
+    role: string; name: string; model?: string;
+    capabilities?: string[]; system_prompt?: string; context_files?: string[];
+    max_context_tokens?: number;
+  }) => {
+    const db = getDb();
+    const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      id, projectId, member.role, member.name,
+      member.model || null,
+      JSON.stringify(member.capabilities || []),
+      member.system_prompt || null,
+      JSON.stringify(member.context_files || []),
+      member.max_context_tokens || 128000,
+    );
+    return { success: true, memberId: id };
+  });
+
+  /** 更新成员 */
+  ipcMain.handle('team:update', (_event, memberId: string, fields: {
+    role?: string; name?: string; model?: string;
+    capabilities?: string[]; system_prompt?: string; context_files?: string[];
+    max_context_tokens?: number;
+  }) => {
+    const db = getDb();
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (fields.role !== undefined) { sets.push('role = ?'); vals.push(fields.role); }
+    if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
+    if (fields.model !== undefined) { sets.push('model = ?'); vals.push(fields.model); }
+    if (fields.capabilities !== undefined) { sets.push('capabilities = ?'); vals.push(JSON.stringify(fields.capabilities)); }
+    if (fields.system_prompt !== undefined) { sets.push('system_prompt = ?'); vals.push(fields.system_prompt); }
+    if (fields.context_files !== undefined) { sets.push('context_files = ?'); vals.push(JSON.stringify(fields.context_files)); }
+    if (fields.max_context_tokens !== undefined) { sets.push('max_context_tokens = ?'); vals.push(fields.max_context_tokens); }
+    if (sets.length === 0) return { success: false };
+    vals.push(memberId);
+    db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  /** 删除成员 */
+  ipcMain.handle('team:delete', (_event, memberId: string) => {
+    const db = getDb();
+    db.prepare('DELETE FROM team_members WHERE id = ?').run(memberId);
+    return { success: true };
+  });
+
+  /** 批量初始化默认团队 */
+  ipcMain.handle('team:init-defaults', (_event, projectId: string) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT COUNT(*) as count FROM team_members WHERE project_id = ?').get(projectId) as { count: number };
+    if (existing.count > 0) return { success: true, message: 'already initialized' };
+
+    const defaults = [
+      { role: 'pm', name: '产品经理', model: '', capabilities: ['需求分析', '功能拆解', 'PRD 撰写'], system_prompt: '你是一位资深产品经理，擅长将模糊需求转化为可执行的开发任务。' },
+      { role: 'architect', name: '架构师', model: '', capabilities: ['系统设计', '技术选型', 'API 设计'], system_prompt: '你是一位系统架构师，擅长设计可扩展、高性能的软件架构。' },
+      { role: 'developer', name: '开发者 A', model: '', capabilities: ['前端开发', '后端开发', '代码编写'], system_prompt: '你是一位全栈开发者，擅长高质量代码实现。' },
+      { role: 'developer', name: '开发者 B', model: '', capabilities: ['前端开发', '后端开发', '代码编写'], system_prompt: '你是一位全栈开发者，擅长高质量代码实现。' },
+      { role: 'qa', name: 'QA 工程师', model: '', capabilities: ['代码审查', '测试用例', 'Bug 检测'], system_prompt: '你是一位 QA 工程师，擅长发现代码缺陷和潜在问题。' },
+    ];
+    const stmt = db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 128000)`);
+    for (const d of defaults) {
+      const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+      stmt.run(id, projectId, d.role, d.name, d.model, JSON.stringify(d.capabilities), d.system_prompt);
+    }
+    return { success: true, count: defaults.length };
   });
 
   // ── 列出项目 ──
