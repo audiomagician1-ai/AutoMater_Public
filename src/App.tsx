@@ -6,6 +6,7 @@ import { WishPage } from './pages/WishPage';
 import { BoardPage } from './pages/BoardPage';
 import { TeamPage } from './pages/TeamPage';
 import { LogsPage } from './pages/LogsPage';
+import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
@@ -66,6 +67,7 @@ export function App() {
       case 'board': return <BoardPage />;
       case 'team': return <TeamPage />;
       case 'logs': return <LogsPage />;
+      case 'output': return <OutputPage />;
       case 'settings': return <SettingsPage />;
     }
   };

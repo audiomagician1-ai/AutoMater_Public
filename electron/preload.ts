@@ -29,6 +29,14 @@ contextBridge.exposeInMainWorld('agentforge', {
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
     delete: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
+    openWorkspace: (projectId: string) => ipcRenderer.invoke('project:open-workspace', projectId),
+  },
+
+  // ── 工作区文件系统 ──
+  workspace: {
+    tree: (projectId: string) => ipcRenderer.invoke('workspace:tree', projectId),
+    readFile: (projectId: string, relativePath: string) => ipcRenderer.invoke('workspace:read-file', projectId, relativePath),
+    getPath: (projectId: string) => ipcRenderer.invoke('workspace:get-path', projectId),
   },
 
   // ── 事件订阅 (主进程 → 渲染进程) ──

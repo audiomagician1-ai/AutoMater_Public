@@ -10,6 +10,7 @@
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { PM_SYSTEM_PROMPT, DEVELOPER_SYSTEM_PROMPT } from './prompts';
+import { parseFileBlocks, writeFileBlocks, type WrittenFile } from './file-writer';
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -171,6 +172,13 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     return;
   }
 
+  // 确保工作区目录存在
+  const workspacePath = project.workspace_path;
+  if (workspacePath) {
+    const fs = require('fs');
+    fs.mkdirSync(workspacePath, { recursive: true });
+  }
+
   // ═══════════════════════════════════════
   // Phase 1: PM Agent — 需求分析 → Feature List
   // ═══════════════════════════════════════
@@ -264,7 +272,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     const workerId = `dev-${i + 1}`;
     db.prepare('INSERT OR REPLACE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(workerId, projectId, 'developer', 'idle');
     sendToUI(win, 'agent:spawned', { projectId, agentId: workerId, role: 'developer' });
-    workerPromises.push(workerLoop(projectId, workerId, settings, win, signal));
+    workerPromises.push(workerLoop(projectId, workerId, settings, win, signal, workspacePath));
   }
 
   await Promise.all(workerPromises);
@@ -288,7 +296,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 // ═══════════════════════════════════════
 async function workerLoop(
   projectId: string, workerId: string, settings: any,
-  win: BrowserWindow | null, signal: AbortSignal
+  win: BrowserWindow | null, signal: AbortSignal, workspacePath: string | null
 ) {
   const db = getDb();
   const maxRetries = 2;
@@ -323,12 +331,36 @@ async function workerLoop(
           { role: 'system', content: DEVELOPER_SYSTEM_PROMPT },
           {
             role: 'user',
-            content: `请实现以下 Feature:\n\nID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n完成后请明确写出 "${feature.id} COMPLETED"。`,
+            content: `请实现以下 Feature:\n\nID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n请输出所有需要创建/修改的文件。使用如下格式：\n<<<FILE:relative/path/to/file>>>\n文件内容\n<<<END>>>\n\n完成所有文件后明确写出 "${feature.id} COMPLETED"。`,
           },
         ], signal);
 
         const cost = calcCost(settings.workerModel, result.inputTokens, result.outputTokens);
         addLog(projectId, workerId, 'output', `[${feature.id}] Attempt ${attempt}:\n${result.content.slice(0, 2000)}`);
+
+        // 解析并写入文件
+        const fileBlocks = parseFileBlocks(result.content);
+        let writtenFiles: WrittenFile[] = [];
+        if (fileBlocks.length > 0 && workspacePath) {
+          writtenFiles = writeFileBlocks(workspacePath, fileBlocks);
+          const fileList = writtenFiles.map(f => f.relativePath).join(', ');
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `📁 ${feature.id} 写入 ${writtenFiles.length} 个文件: ${fileList}`,
+          });
+          addLog(projectId, workerId, 'files', JSON.stringify(writtenFiles.map(f => f.relativePath)));
+          // 更新 feature 的 affected_files
+          const existingFiles = JSON.parse(feature.affected_files || '[]') as string[];
+          const allFiles = [...new Set([...existingFiles, ...writtenFiles.map(f => f.relativePath)])];
+          db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?").run(JSON.stringify(allFiles), feature.id, projectId);
+          // 通知前端文件变化
+          sendToUI(win, 'workspace:changed', { projectId });
+        } else if (fileBlocks.length === 0) {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `⚠️ ${feature.id} LLM 未输出文件块`,
+          });
+        }
 
         db.prepare(`
           UPDATE agents SET

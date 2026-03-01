@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 
-export type PageId = 'wish' | 'board' | 'team' | 'logs' | 'settings';
+export type PageId = 'wish' | 'board' | 'team' | 'logs' | 'output' | 'settings';
 
 interface LogEntry {
   id: number;

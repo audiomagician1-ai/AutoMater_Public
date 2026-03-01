@@ -1,0 +1,238 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useAppStore } from '../stores/app-store';
+
+// ── 语言检测 ──
+function detectLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    ts: 'TypeScript', tsx: 'TypeScript (React)', js: 'JavaScript', jsx: 'JSX',
+    py: 'Python', rs: 'Rust', go: 'Go', java: 'Java', kt: 'Kotlin',
+    html: 'HTML', css: 'CSS', scss: 'SCSS', json: 'JSON', yaml: 'YAML', yml: 'YAML',
+    md: 'Markdown', sql: 'SQL', sh: 'Shell', bat: 'Batch', ps1: 'PowerShell',
+    toml: 'TOML', xml: 'XML', svg: 'SVG', txt: 'Text', env: 'Env',
+    dockerfile: 'Dockerfile', gitignore: 'Git Ignore',
+  };
+  return map[ext] || ext.toUpperCase() || 'File';
+}
+
+// ── 文件图标 ──
+function fileIcon(name: string, type: 'file' | 'dir'): string {
+  if (type === 'dir') return '📁';
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const icons: Record<string, string> = {
+    ts: '🔷', tsx: '⚛️', js: '🟡', jsx: '⚛️', py: '🐍', rs: '🦀',
+    html: '🌐', css: '🎨', json: '📋', md: '📝', sql: '🗃️', sh: '🐚',
+    yaml: '⚙️', yml: '⚙️', toml: '⚙️',
+  };
+  return icons[ext] || '📄';
+}
+
+// ── 文件树节点 ──
+function TreeNode({
+  node, depth, selectedPath, onSelect
+}: {
+  node: FileNode; depth: number; selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(depth < 2);
+  const isSelected = node.path === selectedPath;
+
+  if (node.type === 'dir') {
+    return (
+      <div>
+        <div
+          className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer rounded text-xs hover:bg-slate-800 transition-colors ${isSelected ? 'bg-slate-800 text-slate-100' : 'text-slate-400'}`}
+          style={{ paddingLeft: `${depth * 14 + 8}px` }}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="text-slate-600 w-3 text-center">{expanded ? '▾' : '▸'}</span>
+          <span>{fileIcon(node.name, 'dir')}</span>
+          <span className="truncate">{node.name}</span>
+        </div>
+        {expanded && node.children?.map(child => (
+          <TreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer rounded text-xs transition-colors ${isSelected ? 'bg-forge-600/20 text-forge-300' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-300'}`}
+      style={{ paddingLeft: `${depth * 14 + 20}px` }}
+      onClick={() => onSelect(node.path)}
+    >
+      <span>{fileIcon(node.name, 'file')}</span>
+      <span className="truncate">{node.name}</span>
+      {node.size !== undefined && (
+        <span className="ml-auto text-slate-600 text-[10px] flex-shrink-0">
+          {node.size < 1024 ? `${node.size}B` : `${(node.size / 1024).toFixed(1)}K`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── 行号 ──
+function CodeView({ content, filename }: { content: string; filename: string }) {
+  const lines = content.split('\n');
+  const lang = detectLanguage(filename);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs">{fileIcon(filename, 'file')}</span>
+          <span className="text-xs text-slate-300 font-mono">{filename}</span>
+        </div>
+        <span className="text-[10px] text-slate-500">{lang} · {lines.length} lines</span>
+      </div>
+      <div className="flex-1 overflow-auto font-mono text-xs leading-5">
+        <table className="w-full">
+          <tbody>
+            {lines.map((line, i) => (
+              <tr key={i} className="hover:bg-slate-800/30">
+                <td className="text-right text-slate-600 select-none px-3 py-0 w-12 border-r border-slate-800/50 align-top">{i + 1}</td>
+                <td className="px-4 py-0 text-slate-300 whitespace-pre-wrap break-all">{line || ' '}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── 统计摘要 ──
+function countFiles(nodes: FileNode[]): { files: number; dirs: number } {
+  let files = 0, dirs = 0;
+  for (const n of nodes) {
+    if (n.type === 'file') files++;
+    else {
+      dirs++;
+      if (n.children) {
+        const sub = countFiles(n.children);
+        files += sub.files;
+        dirs += sub.dirs;
+      }
+    }
+  }
+  return { files, dirs };
+}
+
+export function OutputPage() {
+  const { currentProjectId } = useAppStore();
+  const [tree, setTree] = useState<FileNode[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+
+  const loadTree = useCallback(async () => {
+    if (!currentProjectId) return;
+    const result = await window.agentforge.workspace.tree(currentProjectId);
+    if (result.success) setTree(result.tree);
+  }, [currentProjectId]);
+
+  // 初始加载 + 定时刷新
+  useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => {
+    const t = setInterval(loadTree, 5000);
+    return () => clearInterval(t);
+  }, [loadTree]);
+
+  // 监听工作区变化事件
+  useEffect(() => {
+    const unsub = window.agentforge.on('workspace:changed', (data: any) => {
+      if (data.projectId === currentProjectId) loadTree();
+    });
+    return unsub;
+  }, [currentProjectId, loadTree]);
+
+  const handleSelectFile = async (filePath: string) => {
+    if (!currentProjectId) return;
+    setSelectedFile(filePath);
+    setLoading(true);
+    try {
+      const result = await window.agentforge.workspace.readFile(currentProjectId, filePath);
+      setFileContent(result.success ? result.content : '无法读取文件');
+    } catch {
+      setFileContent('读取失败');
+    }
+    setLoading(false);
+  };
+
+  const handleOpenInExplorer = async () => {
+    if (!currentProjectId) return;
+    await window.agentforge.project.openWorkspace(currentProjectId);
+  };
+
+  if (!currentProjectId) {
+    return (
+      <div className="h-full flex items-center justify-center text-slate-500">
+        <p>请先在许愿台创建一个项目</p>
+      </div>
+    );
+  }
+
+  const stats = countFiles(tree);
+  const selectedFilename = selectedFile?.split('/').pop() ?? '';
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* 顶栏 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-bold">产出</h2>
+          <span className="text-xs text-slate-500">{stats.files} 文件 · {stats.dirs} 目录</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadTree}
+            className="text-xs px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-300 transition-colors"
+          >
+            🔄 刷新
+          </button>
+          <button
+            onClick={handleOpenInExplorer}
+            className="text-xs px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-300 transition-colors"
+          >
+            📂 打开文件夹
+          </button>
+        </div>
+      </div>
+
+      {/* 主体 */}
+      <div className="flex-1 flex min-h-0">
+        {/* 左侧文件树 */}
+        <div className="w-64 border-r border-slate-800 overflow-y-auto flex-shrink-0 py-2">
+          {tree.length === 0 ? (
+            <div className="text-center py-12 text-slate-600 text-xs">
+              <p>暂无文件</p>
+              <p className="mt-1">Agent 开发中会自动生成</p>
+            </div>
+          ) : (
+            tree.map(node => (
+              <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedFile} onSelect={handleSelectFile} />
+            ))
+          )}
+        </div>
+
+        {/* 右侧代码预览 */}
+        <div className="flex-1 overflow-hidden bg-slate-950">
+          {!selectedFile ? (
+            <div className="h-full flex items-center justify-center text-slate-600 text-sm">
+              <div className="text-center space-y-2">
+                <p className="text-4xl">📄</p>
+                <p>选择左侧文件查看内容</p>
+              </div>
+            </div>
+          ) : loading ? (
+            <div className="h-full flex items-center justify-center text-slate-500 text-sm">加载中...</div>
+          ) : (
+            <CodeView content={fileContent} filename={selectedFilename} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

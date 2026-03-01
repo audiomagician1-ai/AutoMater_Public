@@ -3,6 +3,7 @@ import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
 import { setupSettingsHandlers } from './ipc/settings';
+import { setupWorkspaceHandlers } from './ipc/workspace';
 import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
@@ -45,6 +46,7 @@ app.whenReady().then(async () => {
   setupSettingsHandlers();
   setupLLMHandlers();
   setupProjectHandlers();
+  setupWorkspaceHandlers();
 
   createWindow();
 

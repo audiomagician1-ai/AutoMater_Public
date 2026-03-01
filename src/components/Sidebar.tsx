@@ -4,6 +4,7 @@ const navItems: { id: PageId; icon: string; label: string }[] = [
   { id: 'wish', icon: '✨', label: '许愿台' },
   { id: 'board', icon: '📋', label: '看板' },
   { id: 'team', icon: '👥', label: '团队' },
+  { id: 'output', icon: '📦', label: '产出' },
   { id: 'logs', icon: '📜', label: '日志' },
   { id: 'settings', icon: '⚙️', label: '设置' },
 ];

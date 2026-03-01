@@ -2,7 +2,9 @@
  * 项目 IPC — 创建项目、启动 Agent 编排
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, app, shell } from 'electron';
+import path from 'path';
+import fs from 'fs';
 import { getDb } from '../db';
 import { runOrchestrator, stopOrchestrator } from '../engine/orchestrator';
 
@@ -18,12 +20,17 @@ export function setupProjectHandlers() {
     const id = generateId();
     const name = wish.length > 30 ? wish.slice(0, 30) + '...' : wish;
 
-    db.prepare(`
-      INSERT INTO projects (id, name, wish, status, config)
-      VALUES (?, ?, ?, 'initializing', '{}')
-    `).run(id, name, wish);
+    // 创建工作区目录
+    const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
+    const workspacePath = path.join(workspacesRoot, id);
+    fs.mkdirSync(workspacePath, { recursive: true });
 
-    return { success: true, projectId: id, name };
+    db.prepare(`
+      INSERT INTO projects (id, name, wish, status, workspace_path, config)
+      VALUES (?, ?, ?, 'initializing', ?, '{}')
+    `).run(id, name, wish, workspacePath);
+
+    return { success: true, projectId: id, name, workspacePath };
   });
 
   // ── 列出项目 ──
@@ -98,11 +105,28 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:delete', (_event, projectId: string) => {
     stopOrchestrator(projectId);
     const db = getDb();
+    // 获取 workspace 路径以清理磁盘
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     db.prepare('DELETE FROM agent_logs WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM agents WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM features WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+    // 可选：清理工作区磁盘（异步，不阻塞）
+    if (project?.workspace_path && fs.existsSync(project.workspace_path)) {
+      fs.rm(project.workspace_path, { recursive: true, force: true }, () => {});
+    }
     return { success: true };
+  });
+
+  // ── 打开工作区文件夹 ──
+  ipcMain.handle('project:open-workspace', async (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (project?.workspace_path && fs.existsSync(project.workspace_path)) {
+      await shell.openPath(project.workspace_path);
+      return { success: true };
+    }
+    return { success: false, error: '工作区目录不存在' };
   });
 }
 
