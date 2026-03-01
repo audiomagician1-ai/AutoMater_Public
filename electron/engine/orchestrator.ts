@@ -6,14 +6,18 @@
  * 
  * v0.4: 4 阶段流水线 PM → Architect → Developer (上下文感知) → QA 审查
  * v0.6: LLM 流式输出 + Electron 原生通知
+ * v0.9: ReAct 多轮工具调用循环 (Developer Agent)
  */
 
 import { BrowserWindow, Notification } from 'electron';
 import { getDb } from '../db';
-import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT } from './prompts';
+import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_REACT_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks, readWorkspaceFile, type WrittenFile } from './file-writer';
-import { collectDeveloperContext } from './context-collector';
+import { collectDeveloperContext, collectLightContext } from './context-collector';
 import { initGitRepo, commitWorkspace } from './workspace-git';
+import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
+import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
+import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -276,6 +280,188 @@ async function _callAnthropic(
   }
 
   return { content, inputTokens, outputTokens };
+}
+
+// ═══════════════════════════════════════
+// LLM with Tools (Function-Calling) — 非流式
+// ═══════════════════════════════════════
+
+interface ToolCallMessage {
+  role: 'assistant';
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
+}
+
+interface LLMWithToolsResult {
+  message: ToolCallMessage;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * 调用 LLM，带 function-calling tools。
+ * 非流式（tool-use 多轮时流式意义不大）。
+ * 支持 OpenAI 和 Anthropic 两种协议。
+ */
+async function callLLMWithTools(
+  settings: any,
+  model: string,
+  messages: Array<{ role: string; content: any }>,
+  tools: any[],
+  signal?: AbortSignal,
+  maxTokens: number = 16384,
+): Promise<LLMWithToolsResult> {
+  if (signal?.aborted) throw new Error('Aborted');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+  const combinedSignal = signal
+    ? anySignal([signal, controller.signal])
+    : controller.signal;
+
+  try {
+    if (settings.llmProvider === 'anthropic') {
+      return await _callAnthropicWithTools(settings, model, messages, tools, maxTokens, combinedSignal);
+    } else {
+      return await _callOpenAIWithTools(settings, model, messages, tools, maxTokens, combinedSignal);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function _callOpenAIWithTools(
+  settings: any, model: string,
+  messages: Array<{ role: string; content: any }>,
+  tools: any[], maxTokens: number, signal: AbortSignal,
+): Promise<LLMWithToolsResult> {
+  const body: any = {
+    model,
+    messages,
+    tools,
+    temperature: 0.2,
+    max_tokens: maxTokens,
+  };
+
+  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+
+  const data = await res.json() as any;
+  const choice = data.choices[0];
+  return {
+    message: choice.message,
+    inputTokens: data.usage?.prompt_tokens ?? 0,
+    outputTokens: data.usage?.completion_tokens ?? 0,
+  };
+}
+
+async function _callAnthropicWithTools(
+  settings: any, model: string,
+  messages: Array<{ role: string; content: any }>,
+  tools: any[], maxTokens: number, signal: AbortSignal,
+): Promise<LLMWithToolsResult> {
+  // Convert OpenAI tools format to Anthropic format
+  const anthropicTools = tools.map((t: any) => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: t.function.parameters,
+  }));
+
+  const systemMsg = messages.find(m => m.role === 'system');
+  const otherMsgs = messages.filter(m => m.role !== 'system');
+
+  // Anthropic 需要将 tool_result 消息转换格式
+  const anthropicMessages = otherMsgs.map(m => {
+    if (m.role === 'tool') {
+      // OpenAI tool result → Anthropic tool_result
+      return {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: (m as any).tool_call_id,
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        }],
+      };
+    }
+    if (m.role === 'assistant' && (m as any).tool_calls) {
+      // OpenAI assistant with tool_calls → Anthropic with tool_use blocks
+      const content: any[] = [];
+      if (m.content) content.push({ type: 'text', text: m.content });
+      for (const tc of (m as any).tool_calls) {
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.function.name,
+          input: typeof tc.function.arguments === 'string'
+            ? JSON.parse(tc.function.arguments)
+            : tc.function.arguments,
+        });
+      }
+      return { role: 'assistant', content };
+    }
+    return m;
+  });
+
+  const body: any = {
+    model,
+    messages: anthropicMessages,
+    tools: anthropicTools,
+    max_tokens: maxTokens,
+    temperature: 0.2,
+  };
+  if (systemMsg) body.system = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
+
+  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': settings.apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+
+  const data = await res.json() as any;
+
+  // Convert Anthropic response back to OpenAI format
+  let textContent = '';
+  const toolCalls: ToolCallMessage['tool_calls'] = [];
+
+  for (const block of data.content || []) {
+    if (block.type === 'text') {
+      textContent += block.text;
+    } else if (block.type === 'tool_use') {
+      toolCalls.push({
+        id: block.id,
+        type: 'function',
+        function: {
+          name: block.name,
+          arguments: JSON.stringify(block.input),
+        },
+      });
+    }
+  }
+
+  return {
+    message: {
+      role: 'assistant',
+      content: textContent || null,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+    },
+    inputTokens: data.usage?.input_tokens ?? 0,
+    outputTokens: data.usage?.output_tokens ?? 0,
+  };
 }
 
 /** Combine multiple AbortSignals */
@@ -606,11 +792,20 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: '🧪 QA 工程师就绪，等待审查...' });
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(qaId, projectId);
 
+  // 构建 git 配置 + 工具上下文
+  const project2 = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const gitConfig: GitProviderConfig = {
+    mode: project2.git_mode || 'local',
+    workspacePath: workspacePath || '',
+    githubRepo: project2.github_repo,
+    githubToken: project2.github_token,
+  };
+
   for (let i = 0; i < workerCount; i++) {
     const workerId = `dev-${i + 1}`;
     spawnAgent(projectId, workerId, 'developer', win);
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    workerPromises.push(workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath));
+    workerPromises.push(workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig));
   }
 
   await Promise.all(workerPromises);
@@ -641,14 +836,15 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 }
 
 // ═══════════════════════════════════════
-// Worker 循环 (带上下文收集 + QA 审查)
+// Worker 循环 (v0.9: ReAct 多轮工具调用 + Planner + QA 审查)
 // ═══════════════════════════════════════
 async function workerLoop(
   projectId: string, workerId: string, qaId: string, settings: any,
-  win: BrowserWindow | null, signal: AbortSignal, workspacePath: string | null
+  win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string | null, gitConfig: GitProviderConfig
 ) {
   const db = getDb();
-  const maxRetries = 3;
+  const maxQARetries = 3;
 
   while (!signal.aborted) {
     // ── 预算检查 ──
@@ -659,7 +855,6 @@ async function workerLoop(
         content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停`,
       });
       notify('⚠️ AgentForge 预算告警', `项目已花费 $${budget.spent.toFixed(2)}，超过预算 $${budget.budget}，已自动暂停`);
-      // 触发停止
       const ctrl = runningOrchestrators.get(projectId);
       if (ctrl) ctrl.abort();
       break;
@@ -685,82 +880,31 @@ async function workerLoop(
     let passed = false;
     let qaFeedback: string = '';
 
-    for (let attempt = 1; attempt <= maxRetries && !signal.aborted; attempt++) {
+    for (let qaAttempt = 1; qaAttempt <= maxQARetries && !signal.aborted; qaAttempt++) {
       try {
-        // ── 收集上下文 ──
-        let contextBlock = '';
-        if (workspacePath) {
-          const ctx = collectDeveloperContext(workspacePath, projectId, feature);
-          if (ctx.contextText) {
-            contextBlock = `\n\n## 项目上下文 (${ctx.filesIncluded} 个文件, ~${ctx.estimatedTokens} tokens)\n${ctx.contextText}`;
-            sendToUI(win, 'agent:log', {
-              projectId, agentId: workerId,
-              content: `📚 ${feature.id} 上下文: ${ctx.filesIncluded} 文件, ~${ctx.estimatedTokens} tokens`,
-            });
-          }
-        }
+        // ═══ ReAct 开发循环 ═══
+        const reactResult = await reactDeveloperLoop(
+          projectId, workerId, settings, win, signal,
+          workspacePath, gitConfig, feature, qaFeedback
+        );
 
-        // ── QA 反馈（重试时） ──
-        let qaBlock = '';
-        if (qaFeedback) {
-          qaBlock = `\n\n## QA 审查反馈（请根据反馈修改）\n${qaFeedback}`;
-        }
-
-        // ── 调用 LLM 开发 (流式) ──
-        const [onChunk] = createStreamCallback(win, projectId, workerId);
-        sendToUI(win, 'agent:stream-start', { projectId, agentId: workerId, label: `${feature.id} 开发` });
-
-        const result = await callLLM(settings, settings.workerModel, [
-          { role: 'system', content: DEVELOPER_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: `请实现以下 Feature:\n\nID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}${contextBlock}${qaBlock}\n\n请输出所有需要创建/修改的文件。使用如下格式：\n<<<FILE:relative/path/to/file>>>\n文件内容\n<<<END>>>\n\n完成所有文件后明确写出 "${feature.id} COMPLETED"。`,
-          },
-        ], signal, 16384, 2, onChunk);
-
-        sendToUI(win, 'agent:stream-end', { projectId, agentId: workerId });
-
-        const cost = calcCost(settings.workerModel, result.inputTokens, result.outputTokens);
-        addLog(projectId, workerId, 'output', `[${feature.id}] Attempt ${attempt}:\n${result.content.slice(0, 3000)}`);
-        updateAgentStats(workerId, projectId, result.inputTokens, result.outputTokens, cost);
-
-        // ── 解析并写入文件 ──
-        const fileBlocks = parseFileBlocks(result.content);
-        let writtenFiles: WrittenFile[] = [];
-        if (fileBlocks.length > 0 && workspacePath) {
-          writtenFiles = writeFileBlocks(workspacePath, fileBlocks);
-          const fileList = writtenFiles.map(f => f.relativePath).join(', ');
+        if (!reactResult.completed) {
           sendToUI(win, 'agent:log', {
             projectId, agentId: workerId,
-            content: `📁 ${feature.id} 写入 ${writtenFiles.length} 个文件: ${fileList}`,
+            content: `⚠️ ${feature.id} ReAct 循环未完成 (attempt ${qaAttempt}/${maxQARetries})`,
           });
-          addLog(projectId, workerId, 'files', JSON.stringify(writtenFiles.map(f => f.relativePath)));
-          // 更新 affected_files
-          const existingFiles = JSON.parse(feature.affected_files || '[]') as string[];
-          const allFiles = [...new Set([...existingFiles, ...writtenFiles.map(f => f.relativePath)])];
-          db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?").run(JSON.stringify(allFiles), feature.id, projectId);
-          sendToUI(win, 'workspace:changed', { projectId });
-        } else if (fileBlocks.length === 0) {
-          sendToUI(win, 'agent:log', {
-            projectId, agentId: workerId,
-            content: `⚠️ ${feature.id} LLM 未输出文件块 (attempt ${attempt})`,
-          });
-          continue; // 直接重试
-        }
-
-        if (!result.content.toUpperCase().includes('COMPLETED')) {
-          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ ${feature.id} 未明确完成标记, 重试 ${attempt}/${maxRetries}` });
+          if (qaAttempt >= maxQARetries) break;
           continue;
         }
 
-        // ── QA 审查 ──
-        if (writtenFiles.length > 0 && workspacePath) {
+        // ═══ QA 审查 ═══
+        if (reactResult.filesWritten.length > 0 && workspacePath) {
           sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'reviewing', agentId: qaId });
           db.prepare("UPDATE features SET status = 'reviewing' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
           db.prepare("UPDATE agents SET status = 'working', current_task = ? WHERE id = ? AND project_id = ?").run(feature.id, qaId, projectId);
           sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `🔍 审查 ${feature.id}...` });
 
-          const qaResult = await runQAReview(settings, signal, feature, writtenFiles, workspacePath);
+          const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath);
           const qaCost = calcCost(settings.strongModel, qaResult.inputTokens, qaResult.outputTokens);
           updateAgentStats(qaId, projectId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
           db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
@@ -773,7 +917,7 @@ async function workerLoop(
             });
             sendToUI(win, 'agent:log', {
               projectId, agentId: workerId,
-              content: `✅ ${feature.id} 完成! (attempt ${attempt}, dev+qa $${(cost + qaCost).toFixed(4)})`,
+              content: `✅ ${feature.id} 完成! (QA attempt ${qaAttempt}, $${(reactResult.totalCost + qaCost).toFixed(4)})`,
             });
             notify('✅ Feature 完成', `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`);
             break;
@@ -785,17 +929,16 @@ async function workerLoop(
             });
             sendToUI(win, 'agent:log', {
               projectId, agentId: workerId,
-              content: `🔄 ${feature.id} 根据 QA 反馈重做 (${attempt}/${maxRetries})`,
+              content: `🔄 ${feature.id} 根据 QA 反馈重做 (${qaAttempt}/${maxQARetries})`,
             });
-            // 回退状态为 in_progress 以便重做
             db.prepare("UPDATE features SET status = 'in_progress' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
           }
         } else {
-          // 没有文件但说了 COMPLETED —— 勉强通过
+          // task_complete 但没有文件 → 勉强通过
           passed = true;
           sendToUI(win, 'agent:log', {
             projectId, agentId: workerId,
-            content: `✅ ${feature.id} 完成! (attempt ${attempt}, 无文件输出, $${cost.toFixed(4)})`,
+            content: `✅ ${feature.id} 完成 (无文件输出, $${reactResult.totalCost.toFixed(4)})`,
           });
           break;
         }
@@ -803,7 +946,7 @@ async function workerLoop(
         if (signal.aborted) break;
         sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `❌ ${feature.id} 错误: ${err.message}` });
         addLog(projectId, workerId, 'error', `[${feature.id}] ${err.message}`);
-        if (attempt >= maxRetries) break;
+        if (qaAttempt >= maxQARetries) break;
         await sleep(2000);
       }
     }
@@ -826,7 +969,290 @@ async function workerLoop(
 }
 
 // ═══════════════════════════════════════
-// QA 审查
+// ReAct Developer Loop — 多轮工具调用核心
+// ═══════════════════════════════════════
+interface ReactResult {
+  completed: boolean;
+  filesWritten: string[];    // 相对路径列表
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  iterations: number;
+}
+
+async function reactDeveloperLoop(
+  projectId: string, workerId: string, settings: any,
+  win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string | null, gitConfig: GitProviderConfig,
+  feature: any, qaFeedback: string
+): Promise<ReactResult> {
+  const db = getDb();
+  const MAX_ITERATIONS = 25;
+  const model = settings.workerModel;
+  const tools = getToolsForLLM(gitConfig.mode);
+
+  const toolCtx: ToolContext = {
+    workspacePath: workspacePath || '',
+    projectId,
+    gitConfig,
+  };
+
+  let totalCost = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+  let completed = false;
+  const filesWritten = new Set<string>();
+
+  // ── Step 1: 规划 ──
+  sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `📋 ${feature.id} 制定开发计划...` });
+
+  let plan: FeaturePlan | null = null;
+  try {
+    const planCtx = workspacePath
+      ? collectLightContext(workspacePath, projectId, feature, undefined, 2000)
+      : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
+
+    const planResult = await callLLM(settings, model, [
+      { role: 'system', content: PLANNER_FEATURE_PROMPT },
+      {
+        role: 'user',
+        content: `Feature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\nQA 反馈（需修复）:\n${qaFeedback}` : ''}\n\n${planCtx.contextText}`,
+      },
+    ], signal, 4096);
+
+    const planCost = calcCost(model, planResult.inputTokens, planResult.outputTokens);
+    totalCost += planCost;
+    totalIn += planResult.inputTokens;
+    totalOut += planResult.outputTokens;
+    updateAgentStats(workerId, projectId, planResult.inputTokens, planResult.outputTokens, planCost);
+
+    plan = parsePlanFromLLM(planResult.content, feature.id, feature.title || feature.description);
+    const planSummary = plan.steps.map((s, i) => `  ${i + 1}. ${s.description}`).join('\n');
+    sendToUI(win, 'agent:log', {
+      projectId, agentId: workerId,
+      content: `📋 ${feature.id} 计划 (${plan.steps.length} 步):\n${planSummary}`,
+    });
+    addLog(projectId, workerId, 'plan', `[${feature.id}] Plan:\n${planSummary}`);
+  } catch (err: any) {
+    sendToUI(win, 'agent:log', {
+      projectId, agentId: workerId,
+      content: `⚠️ ${feature.id} 规划失败，使用默认计划: ${err.message}`,
+    });
+    plan = parsePlanFromLLM('', feature.id, feature.title || feature.description);
+  }
+
+  // ── Step 2: ReAct 循环 ──
+  // 构建初始消息列表
+  const initialContext = workspacePath
+    ? collectDeveloperContext(workspacePath, projectId, feature, 5000)
+    : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
+
+  const planText = plan ? getPlanSummary(plan) : '';
+
+  const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
+    { role: 'system', content: DEVELOPER_REACT_PROMPT },
+    {
+      role: 'user',
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n## 项目上下文\n${initialContext.contextText}`,
+    },
+  ];
+
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: workerId,
+    content: `🔄 ${feature.id} 开始 ReAct 工具循环 (最多 ${MAX_ITERATIONS} 轮)`,
+  });
+
+  for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
+    // 预算检查
+    const budget = checkBudget(projectId, settings);
+    if (!budget.ok) break;
+
+    try {
+      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
+      const cost = calcCost(model, result.inputTokens, result.outputTokens);
+      totalCost += cost;
+      totalIn += result.inputTokens;
+      totalOut += result.outputTokens;
+      updateAgentStats(workerId, projectId, result.inputTokens, result.outputTokens, cost);
+
+      const msg = result.message;
+
+      // ── 有思考内容，推送到 UI ──
+      if (msg.content) {
+        const shortThought = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `💭 ${feature.id} [${iter}] ${shortThought}`,
+        });
+      }
+
+      // ── 无 tool_calls → 纯文本回复，结束循环 ──
+      if (!msg.tool_calls || msg.tool_calls.length === 0) {
+        // 尝试从文本中解析旧格式的 <<<FILE>>> 块（兼容模式）
+        if (msg.content && workspacePath) {
+          const fileBlocks = parseFileBlocks(msg.content);
+          if (fileBlocks.length > 0) {
+            const written = writeFileBlocks(workspacePath, fileBlocks);
+            for (const w of written) filesWritten.add(w.relativePath);
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `📁 ${feature.id} [兼容模式] 写入 ${written.length} 文件`,
+            });
+            sendToUI(win, 'workspace:changed', { projectId });
+          }
+          if (msg.content.toUpperCase().includes('COMPLETED')) {
+            completed = true;
+          }
+        }
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔚 ${feature.id} ReAct 循环结束 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
+        });
+        break;
+      }
+
+      // ── 执行 tool calls ──
+      // 将 assistant 消息加入历史
+      messages.push({
+        role: 'assistant',
+        content: msg.content,
+        tool_calls: msg.tool_calls,
+      });
+
+      for (const tc of msg.tool_calls) {
+        let toolArgs: Record<string, any>;
+        try {
+          toolArgs = typeof tc.function.arguments === 'string'
+            ? JSON.parse(tc.function.arguments)
+            : tc.function.arguments;
+        } catch {
+          toolArgs = {};
+        }
+
+        const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
+
+        // ── task_complete → 完成 ──
+        if (tc.function.name === 'task_complete') {
+          completed = true;
+          const summary = toolArgs.summary || '完成';
+          const changedFiles = toolArgs.files_changed || [...filesWritten];
+
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `✅ ${feature.id} task_complete: ${summary}`,
+          });
+          addLog(projectId, workerId, 'output', `[${feature.id}] Completed: ${summary}\nFiles: ${changedFiles.join(', ')}`);
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: `任务已标记完成: ${summary}`,
+          });
+          continue;
+        }
+
+        // 执行工具
+        let toolResult: ToolResult;
+        const isAsync = tc.function.name.startsWith('github_');
+        if (isAsync) {
+          toolResult = await executeToolAsync(toolCall, toolCtx);
+        } else {
+          toolResult = executeTool(toolCall, toolCtx);
+        }
+
+        // 推送工具调用日志
+        const argsSummary = tc.function.name === 'write_file'
+          ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')} bytes`
+          : JSON.stringify(toolArgs).slice(0, 150);
+        sendToUI(win, 'agent:tool-call', {
+          projectId, agentId: workerId,
+          tool: tc.function.name,
+          args: argsSummary,
+          success: toolResult.success,
+          outputPreview: toolResult.output.slice(0, 200),
+        });
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
+        });
+
+        // 记录写入的文件
+        if (tc.function.name === 'write_file' && toolResult.success) {
+          filesWritten.add(toolArgs.path);
+          sendToUI(win, 'workspace:changed', { projectId });
+        }
+
+        // 将工具结果加入消息历史
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: toolResult.output.slice(0, 4000), // 限制输出长度
+        });
+      }
+
+      // 如果 task_complete 已触发，结束循环
+      if (completed) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔚 ${feature.id} ReAct 完成 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
+        });
+        break;
+      }
+
+      // ── 消息窗口压缩: 超过 30 条消息时压缩旧的 tool 结果 ──
+      if (messages.length > 30) {
+        compressMessageHistory(messages);
+      }
+
+    } catch (err: any) {
+      if (signal.aborted) break;
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${err.message}`,
+      });
+      addLog(projectId, workerId, 'error', `[${feature.id}] iter ${iter}: ${err.message}`);
+      // 短暂等待后继续
+      await sleep(2000);
+    }
+  }
+
+  // 更新 feature 的 affected_files
+  if (filesWritten.size > 0) {
+    const existingFiles = JSON.parse(feature.affected_files || '[]') as string[];
+    const allFiles = [...new Set([...existingFiles, ...filesWritten])];
+    db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?")
+      .run(JSON.stringify(allFiles), feature.id, projectId);
+  }
+
+  return {
+    completed,
+    filesWritten: [...filesWritten],
+    totalCost,
+    totalInputTokens: totalIn,
+    totalOutputTokens: totalOut,
+    iterations: 0, // not tracked precisely, but available in logs
+  };
+}
+
+/**
+ * 压缩消息历史 — 将旧的 tool 结果截断以控制 context 大小
+ * 保留: system, 最近的用户消息, 最近 10 条消息不动
+ */
+function compressMessageHistory(messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>) {
+  const keepRecent = 10;
+  const cutoff = messages.length - keepRecent;
+  for (let i = 1; i < cutoff; i++) {  // skip system msg at index 0
+    if (messages[i].role === 'tool' && typeof messages[i].content === 'string') {
+      const content = messages[i].content as string;
+      if (content.length > 300) {
+        messages[i].content = content.slice(0, 200) + '\n... [已压缩]';
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════
+// QA 审查 (unchanged from v0.5, uses file paths now)
 // ═══════════════════════════════════════
 interface QAResult {
   verdict: 'pass' | 'fail';
@@ -839,14 +1265,13 @@ interface QAResult {
 
 async function runQAReview(
   settings: any, signal: AbortSignal,
-  feature: any, writtenFiles: WrittenFile[], workspacePath: string
+  feature: any, filesWritten: string[], workspacePath: string
 ): Promise<QAResult> {
-  // 构建审查内容：读取所有写入的文件
   const filesContent: string[] = [];
-  for (const wf of writtenFiles.slice(0, 10)) { // 最多审查 10 个文件
-    const content = readWorkspaceFile(workspacePath, wf.relativePath);
+  for (const filePath of filesWritten.slice(0, 10)) {
+    const content = readWorkspaceFile(workspacePath, filePath);
     if (content) {
-      filesContent.push(`### ${wf.relativePath}\n\`\`\`\n${content}\n\`\`\``);
+      filesContent.push(`### ${filePath}\n\`\`\`\n${content}\n\`\`\``);
     }
   }
 
@@ -873,11 +1298,9 @@ async function runQAReview(
       issues = parsed.issues ?? [];
     }
   } catch {
-    // JSON 解析失败，默认通过
     summary = 'QA 输出格式异常，默认通过';
   }
 
-  // 构建反馈文本供开发者参考
   let feedbackText = `QA 分数: ${score}/100\n${summary}`;
   if (issues.length > 0) {
     feedbackText += '\n\n问题列表:\n' + issues.map((iss: any, i: number) =>
@@ -886,10 +1309,7 @@ async function runQAReview(
   }
 
   return {
-    verdict,
-    score,
-    summary,
-    feedbackText,
+    verdict, score, summary, feedbackText,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   };

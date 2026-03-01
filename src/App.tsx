@@ -48,6 +48,16 @@ export function App() {
       addLog({ projectId: data.projectId, agentId: 'system', content: `❌ 错误: ${data.error}` });
     }));
 
+    // 工具调用事件 (v0.9 ReAct)
+    unsubs.push(window.agentforge.on('agent:tool-call', (data: any) => {
+      const icon = data.success ? '✅' : '❌';
+      addLog({
+        projectId: data.projectId,
+        agentId: data.agentId,
+        content: `🔧 ${data.tool}(${data.args}) → ${icon} ${data.outputPreview}`,
+      });
+    }));
+
     // 流式事件
     unsubs.push(window.agentforge.on('agent:stream-start', (data: any) => {
       startStream(data.agentId, data.label || '');
