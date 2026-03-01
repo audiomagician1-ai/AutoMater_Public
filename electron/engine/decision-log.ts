@@ -80,7 +80,7 @@ function readEntries(workspacePath: string): DecisionEntry[] {
     try {
       entries.push(JSON.parse(trimmed));
     } catch {
-      log.warn('Failed to parse decision log line:', trimmed.slice(0, 100));
+      log.warn('Failed to parse decision log line:', { preview: trimmed.slice(0, 100) });
     }
   }
   return entries;
@@ -168,7 +168,7 @@ export function claimFiles(
       action: 'conflict',
       note: conflicts.map(c => `${c.otherWorkerId} (${c.otherFeatureId}): ${c.overlappingFiles.join(', ')}`).join('; '),
     });
-    log.warn(`File conflicts detected for ${workerId}/${featureId}:`, conflicts);
+    log.warn(`File conflicts detected for ${workerId}/${featureId}:`, { conflicts: conflicts.map(c => `${c.otherWorkerId}(${c.otherFeatureId})`) });
   }
 
   return conflicts;

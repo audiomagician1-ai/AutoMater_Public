@@ -440,7 +440,7 @@ export function TeamPage() {
     window.agentforge.project.getReactStates(currentProjectId).then(data => {
       const store = useAppStore.getState();
       for (const [, state] of Object.entries(data)) {
-        store.updateAgentReactState(state as AgentReactState);
+        store.updateAgentReactState(state as any);
       }
     }).catch(() => {});
     window.agentforge.project.getContextSnapshots(currentProjectId).then(data => {
@@ -466,8 +466,8 @@ export function TeamPage() {
       role: newRole,
       name: newName.trim(),
       model: newModel || undefined,
-      capabilities: caps,
-      system_prompt: newPrompt || undefined,
+      capabilities: JSON.stringify(caps),
+      system_prompt: newPrompt || null,
       max_context_tokens: parseInt(newMaxTokens) || 128000,
     });
     setShowAddForm(false);
@@ -490,7 +490,7 @@ export function TeamPage() {
     try { capsArr = JSON.parse(caps); } catch { capsArr = caps.split(/[,，]/).map(s => s.trim()).filter(Boolean); }
     await window.agentforge.team.update(editingMember.id, {
       ...editingMember,
-      capabilities: capsArr,
+      capabilities: JSON.stringify(capsArr),
     });
     setEditingMember(null);
     loadMembers();

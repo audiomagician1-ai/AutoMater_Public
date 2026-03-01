@@ -16,6 +16,9 @@ import { importProject } from '../engine/project-importer';
 import { collectBaselineContext } from '../engine/context-collector';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 
+// 导入进程的 AbortController 映射（用于取消正在运行的导入）
+const importAbortControllers = new Map<string, AbortController>();
+
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
@@ -210,6 +213,22 @@ function getGitConfig(project: any): GitProviderConfig {
 }
 
 export function setupProjectHandlers() {
+
+  // ── 启动时清理: 重置残留的 analyzing 状态 ──
+  // 应用重启后，之前正在分析的项目进程已丢失，把状态改为 paused 让用户可重新启动
+  try {
+    const db = getDb();
+    const stuckProjects = db.prepare("SELECT id, name FROM projects WHERE status = 'analyzing'").all() as { id: string; name: string }[];
+    if (stuckProjects.length > 0) {
+      console.log(`[project:init] Resetting ${stuckProjects.length} stuck analyzing project(s):`, stuckProjects.map(p => p.name));
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE status = 'analyzing'").run();
+      for (const p of stuckProjects) {
+        addLog(p.id, 'system', 'info', '🔄 应用重启：分析状态已重置，可点击"启动"重新分析');
+      }
+    }
+  } catch (err) {
+    console.error('[project:init] Failed to reset stuck projects:', err);
+  }
 
   // ── 创建项目 ──
   ipcMain.handle('project:create', async (_event, name: string, options?: {
@@ -500,13 +519,20 @@ export function setupProjectHandlers() {
       sendToUI(win, 'project:status', { projectId, status: 'analyzing' });
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📥 检测到导入项目，启动/恢复项目分析...' });
 
+      // 取消之前的导入进程（如果有）
+      const existingAc = importAbortControllers.get(projectId);
+      if (existingAc) { existingAc.abort(); importAbortControllers.delete(projectId); }
+      const ac = new AbortController();
+      importAbortControllers.set(projectId, ac);
+
       (async () => {
         try {
-          console.log(`[IMPORT-DEBUG] IPC: Starting importProject for ${projectId}, path=${proj!.workspace_path}`);
+          if (!proj || !proj.workspace_path) throw new Error('Project or workspace_path missing');
+          console.log(`[IMPORT-DEBUG] IPC: Starting importProject for ${projectId}, path=${proj.workspace_path}`);
           const result = await importProject(
-            proj!.workspace_path,
+            proj.workspace_path,
             projectId,
-            undefined,
+            ac.signal,
             (phase: number, step: string, progress: number) => {
               console.log(`[IMPORT-DEBUG] IPC progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
               sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
@@ -520,10 +546,13 @@ export function setupProjectHandlers() {
           addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
         } catch (err: any) {
           console.error('[IMPORT-DEBUG] IPC: importProject FAILED:', err?.message, err?.stack);
-          console.error('[project:start→importProject] Error:', err);
-          db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
-          sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: `❌ 分析失败: ${err.message}`, progress: 0, done: true, error: true });
-          sendToUI(win, 'project:status', { projectId, status: 'error' });
+          const status = ac.signal.aborted ? 'paused' : 'error';
+          db.prepare(`UPDATE projects SET status = '${status}', updated_at = datetime('now') WHERE id = ?`).run(projectId);
+          const msg = ac.signal.aborted ? '⏸ 分析已中断' : `❌ 分析失败: ${err.message}`;
+          sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: msg, progress: 0, done: true, error: !ac.signal.aborted });
+          sendToUI(win, 'project:status', { projectId, status });
+        } finally {
+          importAbortControllers.delete(projectId);
         }
       })();
       return { success: true };
@@ -539,6 +568,26 @@ export function setupProjectHandlers() {
 
   // ── 停止项目 ──
   ipcMain.handle('project:stop', (_event, projectId: string) => {
+    // 如果有导入进程在跑，取消它
+    const ac = importAbortControllers.get(projectId);
+    if (ac) {
+      console.log(`[IMPORT-DEBUG] project:stop — aborting import for ${projectId}`);
+      ac.abort();
+      // importAbortControllers.delete 会在 analyze-existing 的 finally 中执行
+    }
+
+    // 如果项目状态是 analyzing，强制改为 paused（兜底，防止卡死）
+    const db = getDb();
+    const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+    if (proj?.status === 'analyzing') {
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      const win = BrowserWindow.getAllWindows()[0] ?? null;
+      sendToUI(win, 'project:status', { projectId, status: 'paused' });
+      sendToUI(win, 'project:import-progress', {
+        projectId, phase: -1, step: '⏸ 分析已中断', progress: 0, done: true,
+      });
+    }
+
     stopOrchestrator(projectId);
     return { success: true };
   });
@@ -772,6 +821,16 @@ export function setupProjectHandlers() {
       return { success: false, error: 'Workspace path not found' };
     }
 
+    // 如果已有导入进程在跑，先取消
+    const existingAc = importAbortControllers.get(projectId);
+    if (existingAc) {
+      existingAc.abort();
+      importAbortControllers.delete(projectId);
+    }
+
+    const ac = new AbortController();
+    importAbortControllers.set(projectId, ac);
+
     const win = BrowserWindow.getAllWindows()[0] ?? null;
 
     // 更新状态为 analyzing
@@ -781,12 +840,14 @@ export function setupProjectHandlers() {
     // 异步执行分析（不阻塞 IPC 返回）
     (async () => {
       try {
+        console.log(`[IMPORT-DEBUG] analyze-existing: starting importProject for ${projectId}`);
         const result = await importProject(
           workspacePath,
           projectId,
-          undefined, // no abort signal for now
+          ac.signal,
           (phase: number, step: string, progress: number) => {
             // 推送实时进度到前端
+            console.log(`[IMPORT-DEBUG] analyze-existing progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
             sendToUI(win, 'project:import-progress', {
               projectId,
               phase,
@@ -812,18 +873,23 @@ export function setupProjectHandlers() {
 
         addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
       } catch (err: any) {
-        console.error('[project:analyze-existing] Error:', err);
-        db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
+        console.error('[IMPORT-DEBUG] analyze-existing FAILED:', err?.message, err?.stack);
+        // 被用户取消时不标记为 error，改为 paused 以允许重试
+        const status = ac.signal.aborted ? 'paused' : 'error';
+        db.prepare(`UPDATE projects SET status = '${status}', updated_at = datetime('now') WHERE id = ?`).run(projectId);
+        const msg = ac.signal.aborted ? '⏸ 分析已中断，可重新启动' : `❌ 分析失败: ${err.message}`;
         sendToUI(win, 'project:import-progress', {
           projectId,
           phase: -1,
-          step: `❌ 分析失败: ${err.message}`,
+          step: msg,
           progress: 0,
           done: true,
-          error: true,
+          error: !ac.signal.aborted,
         });
-        sendToUI(win, 'project:status', { projectId, status: 'error' });
-        addLog(projectId, 'project-importer', 'error', `❌ 分析失败: ${err.message}`);
+        sendToUI(win, 'project:status', { projectId, status });
+        addLog(projectId, 'project-importer', ac.signal.aborted ? 'info' : 'error', msg);
+      } finally {
+        importAbortControllers.delete(projectId);
       }
     })();
 

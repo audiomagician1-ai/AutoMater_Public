@@ -95,10 +95,10 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   // ── v5.6: Pre-flight 模型可用性预检 ──
   {
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '🔍 预检: 验证 LLM 模型可用性...' });
-    const modelsToCheck = [...new Set([settings.strongModel, settings.workerModel, settings.fastModel].filter(Boolean))];
+    const modelsToCheck = [...new Set([settings.strongModel, settings.workerModel, settings.fastModel].filter((m): m is string => Boolean(m)))];
     const errors: string[] = [];
     for (const m of modelsToCheck) {
-      const err = await validateModel(settings, m);
+      const err = await validateModel(settings, m!);
       if (err) errors.push(err);
     }
     if (errors.length > 0) {
@@ -318,8 +318,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   const gitConfig: GitProviderConfig = {
     mode: project2.git_mode || 'local',
     workspacePath: workspacePath || '',
-    githubRepo: project2.github_repo,
-    githubToken: project2.github_token,
+    githubRepo: project2.github_repo ?? undefined,
+    githubToken: project2.github_token ?? undefined,
   };
 
   const workerPromises: Promise<void>[] = [];
@@ -387,7 +387,7 @@ async function phasePMAnalysis(
     if (signal.aborted) return null;
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
     const workspacePath = project.workspace_path || '';
-    const gitConfig = { mode: project.git_mode || 'local', workspacePath, githubRepo: project.github_repo, githubToken: project.github_token };
+    const gitConfig = { mode: (project.git_mode || 'local') as 'local' | 'github', workspacePath, githubRepo: project.github_repo ?? undefined, githubToken: project.github_token ?? undefined };
 
     // v5.5: PM 使用 ReAct 循环 — 可以读文件、搜索、发现信息不足时阻塞
     const pmReactResult = await reactAgentLoop({
@@ -1396,7 +1396,7 @@ async function phaseFinalize(
         sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `🌐 已将 ${extracted} 条经验提取到全局经验池` });
       }
     } catch (err) {
-      log.warn('Cross-project experience extraction failed', err);
+      log.warn('Cross-project experience extraction failed', { error: String(err) });
     }
   }
 }

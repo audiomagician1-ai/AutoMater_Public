@@ -9,19 +9,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 
-/** Mission record from DB */
-interface MissionRecord {
-  id: string;
-  type: string;
-  status: string;
-  plan?: string;
-  conclusion?: string;
-  token_usage?: number;
-  cost_usd?: number;
-  created_at?: string;
-  completed_at?: string;
-}
-
 // ═══════════════════════════════════════
 // Mission Types (临时工作流)
 // ═══════════════════════════════════════

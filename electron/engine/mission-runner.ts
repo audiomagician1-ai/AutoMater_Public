@@ -259,11 +259,11 @@ export async function runMission(
     // Parse plan into tasks
     let tasks: Array<{ title: string; input: string }> = [];
     try {
-      const jsonMatch = planResult.text.match(/\[[\s\S]*\]/);
+      const jsonMatch = planResult.content.match(/\[[\s\S]*\]/);
       if (jsonMatch) tasks = JSON.parse(jsonMatch[0]);
     } catch {
       log.warn('Failed to parse planner output as JSON, creating single task');
-      tasks = [{ title: '全量分析', input: planResult.text }];
+      tasks = [{ title: '全量分析', input: planResult.content }];
     }
 
     // Limit tasks
@@ -316,9 +316,9 @@ export async function runMission(
           totalTokens += workerResult.inputTokens + workerResult.outputTokens;
 
           db.prepare("UPDATE mission_tasks SET status = 'passed', output = ?, completed_at = datetime('now') WHERE id = ?")
-            .run(workerResult.text, task.id);
+            .run(workerResult.content, task.id);
 
-          return { taskId: task.id, output: workerResult.text };
+          return { taskId: task.id, output: workerResult.content };
         }),
       );
 
@@ -366,7 +366,7 @@ export async function runMission(
     // ════════════════════════════════════
     // Phase 4: ARCHIVING
     // ════════════════════════════════════
-    const conclusion = judgeResult.text;
+    const conclusion = judgeResult.content;
 
     // Save conclusion to file
     fs.writeFileSync(

@@ -17,12 +17,20 @@ interface ContextSnapshot {
   featureId?: string;
 }
 
-interface AgentReactState {
+/** Agent ReAct 状态 — 使用 api.d.ts 中的全局 AgentReactState 接口 */
+// Store 兼容两种来源：
+//  1. 后端 project:getReactStates → api.d.ts 版 (有 iterations 数组)
+//  2. 前端轻量更新 agent:react-state 事件 → 只有 iteration 数字
+// 这里用联合类型兼容两者
+interface StoreAgentReactState {
   agentId: string;
-  iteration: number;
-  phase: string;
-  toolCalls: any[];
-  lastUpdated: number;
+  featureId?: string;
+  iteration?: number;
+  iterations?: ReactIterationState[];
+  maxContextWindow?: number;
+  phase?: string;
+  toolCalls?: any[];
+  lastUpdated?: number;
 }
 
 /** 外层页面 (无需选中项目) */
@@ -96,8 +104,8 @@ interface AppState {
   clearContextSnapshots: () => void;
 
   // v1.1: Agent ReAct 实时状态
-  agentReactStates: Map<string, AgentReactState>;
-  updateAgentReactState: (state: AgentReactState) => void;
+  agentReactStates: Map<string, StoreAgentReactState>;
+  updateAgentReactState: (state: StoreAgentReactState) => void;
   clearAgentReactStates: () => void;
 
   // v4.4: 通知 badge 计数

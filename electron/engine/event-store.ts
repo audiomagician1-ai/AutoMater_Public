@@ -36,6 +36,8 @@ export type EventType =
   | 'phase:design-doc:end'
   | 'phase:pm-acceptance:end'
   | 'phase:devops:build'
+  | 'change-request:completed'
+  | 'wish:triaged'
   // Feature lifecycle
   | 'feature:locked'
   | 'feature:passed'

@@ -660,7 +660,7 @@ async function compressMessageHistorySmart(
       return;
     }
   } catch (err) {
-    log.warn('LLM summarizer failed, falling back to simple truncation', err);
+    log.warn('LLM summarizer failed, falling back to simple truncation', { error: String(err) });
   }
 
   compressMessageHistorySimple(messages);
@@ -766,7 +766,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     const termCheck = checkReactTermination(guardState, {
       ...DEFAULT_REACT_CONFIG,
       maxIterations,
-      maxTimeMs: maxIterations * timeoutMs,
+      maxWallTimeMs: maxIterations * timeoutMs,
     }, signal.aborted);
     if (!termCheck.shouldContinue) {
       sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 终止: ${termCheck.reason}` });

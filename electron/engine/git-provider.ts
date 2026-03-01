@@ -63,7 +63,7 @@ export function initRepo(config: GitProviderConfig): boolean {
         execSync('git config user.email "agent@agentforge.dev"', { cwd: workspacePath, stdio: 'ignore' });
         execSync('git config user.name "AgentForge"', { cwd: workspacePath, stdio: 'ignore' });
       } catch (err) {
-        log.debug('Git user config failed (non-fatal)', err);
+        log.debug('Git user config failed (non-fatal)', { error: String(err) });
       }
 
       execSync('git add -A', { cwd: workspacePath, stdio: 'ignore' });

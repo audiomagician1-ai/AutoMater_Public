@@ -228,33 +228,35 @@ if (runningOrchestrators.has(projectId)) {
 
 ## 五、实施计划
 
-### Sprint 1（立即）— 解决当前 3 个 Bug
+### Sprint 1（立即）— 解决当前 3 个 Bug ✅ 完成 2026-03-01
 
-| 任务 | 对应 Skill | 代码修改 |
-|---|---|---|
-| 添加模型预检 | #2 pre-flight-check | `orchestrator.ts`: 在 `runOrchestrator` 入口加 `validateModels()` |
-| 防止重复启动 | #3 concurrency-guard | `orchestrator.ts L69-73`: 检查 `runningOrchestrators.has(projectId)` |
-| 模型错误分类 | #4 circuit-breaker | `llm-client.ts`: 400 错误→不重试，直接抛出 `NonRetryableError` |
-| 失败原因记录 | #4 circuit-breaker | `features` 表加 `last_error` 字段，续跑时检查 |
+| 任务 | 对应 Skill | 代码修改 | 状态 |
+|---|---|---|---|
+| 添加模型预检 | #2 pre-flight-check | `orchestrator.ts L95-113`: `validateModel()` 逐个验证 strongModel/workerModel/fastModel | ✅ |
+| 防止重复启动 | #3 concurrency-guard | `orchestrator.ts L72-80` + `agent-manager.ts L26-41` + `OverviewPage.tsx` UI 防抖 | ✅ |
+| 模型错误分类 | #4 circuit-breaker | `llm-client.ts`: `NonRetryableError` class + `throwOnHttpError()` 统一分类 | ✅ |
+| 失败原因记录 | #4 circuit-breaker | `db.ts` v5.6 migration + `orchestrator.ts L161-201` circuit breaker + `react-loop.ts` 两处 break | ✅ |
 
-### Sprint 2（本周）— Skill 文档化
+**修改文件**: `llm-client.ts`, `orchestrator.ts`, `agent-manager.ts`, `react-loop.ts`, `db.ts`, `OverviewPage.tsx`
+
+### Sprint 2（本周）— Skill 文档化 ✅ 完成 2026-03-02
 
 将 #1~#4 整理为正式 Skill 文档存入 `d:\echoagent\agent-memory\skills\`：
-- `electron-main-process-debug.md`
-- `pre-flight-check.md`
-- `concurrency-guard.md`
-- `circuit-breaker.md`
+- ✅ `electron-main-process-debug.md` (S-028) — IPC追踪+并发竞态+SQLite诊断+日志分析checklist
+- ✅ `pre-flight-check.md` (S-029) — validateModel+workspace检查+预检时机+通用规则
+- ✅ `concurrency-guard.md` (S-030) — 三层防护模型(UI debounce → IPC guard → 注册表替换)
+- ✅ `circuit-breaker.md` (S-031) — 三级错误分类+四层实现+DB schema+通用checklist
 
-### Sprint 3（下周）— P1 Skill 补充
+### Sprint 3（进行中）— P1 Skill 补充 ✅ 完成 2026-03-02
 
-- #5 orchestrator-state-machine: 画出完整状态图
-- #6 llm-api-compatibility: 建立模型兼容矩阵
-- #7 react-loop-debug: 定义标准调试 checklist
-- #8 multi-agent-coordination: Worker 协调诊断流程
+- ✅ #5 orchestrator-state-machine (S-032): 完整 Project/Feature 状态图 + 5 Phase 详细流 + Resume 分诊 + 调试 Checklist
+- ✅ #6 llm-api-compatibility (S-033): OpenAI/Anthropic/Azure/Ollama 差异矩阵 + 错误码策略 + Tool-calling 格式转换
+- ✅ #7 react-loop-debug (S-034): 两种 ReAct 循环 + 终止条件 + 逐轮分析 + 上下文窗口 + 高频故障模式
+- ✅ #8 multi-agent-coordination (S-035): Feature 原子锁 + decision-log 冲突检测 + 僵尸锁清理 + 并行效率指标
 
 ### Sprint 4（v1.0 前）— P2 Skill
 
-- #9 ~ #12 根据实际开发需要逐步补充
+- ⬜ #9 ~ #12 根据实际开发需要逐步补充
 
 ---
 

@@ -143,7 +143,7 @@ export async function browserScreenshot(fullPage: boolean = false): Promise<{
 export async function browserSnapshot(): Promise<{ success: boolean; content: string; error?: string }> {
   try {
     const page = await getPage();
-    const snapshot = await page.accessibility.snapshot();
+    const snapshot = await (page as any).accessibility.snapshot();
     const text = formatAccessibilityTree(snapshot, 0);
     return { success: true, content: text.slice(0, 8000) };
   } catch (err: any) {

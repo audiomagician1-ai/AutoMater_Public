@@ -437,11 +437,7 @@ interface MissionTaskRecord {
   completed_at: string | null;
 }
 
-declare global {
-  interface Window {
-    agentforge: AgentForgeAPI;
-  }
+interface Window {
+  agentforge: AgentForgeAPI;
 }
-
-export {};
 

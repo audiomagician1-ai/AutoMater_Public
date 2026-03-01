@@ -121,7 +121,7 @@ export async function runQAReview(
         testResults += `\`\`\`\n${lintOutput}\n\`\`\`\n\n`;
       }
     } catch (err) {
-      log.warn('Lint execution failed during QA', err);
+      log.warn('Lint execution failed during QA', { error: String(err) });
     }
   }
 
