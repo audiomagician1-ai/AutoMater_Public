@@ -12,6 +12,20 @@ import { getDb } from '../db';
 import type { AppSettings } from './types';
 
 // ═══════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════
+
+/**
+ * 规范化 baseUrl：去掉末尾的 /v1、尾部斜杠
+ * 用户可能输入 https://api.openai.com 或 https://xxx/v1
+ */
+function normalizeBaseUrl(url: string): string {
+  let u = url.trim().replace(/\/+$/, '');
+  if (u.endsWith('/v1')) u = u.slice(0, -3);
+  return u;
+}
+
+// ═══════════════════════════════════════
 // Types
 // ═══════════════════════════════════════
 
@@ -168,7 +182,7 @@ async function _callOpenAI(
   const body: any = { model, messages, temperature: 0.3, max_tokens: maxTokens };
   if (stream) body.stream = true;
 
-  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+  const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
     ...fetchOpts,
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
     body: JSON.stringify(body),
@@ -240,7 +254,7 @@ async function _callAnthropic(
   if (systemMsg) body.system = systemMsg.content;
   if (stream) body.stream = true;
 
-  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+  const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/messages`, {
     ...fetchOpts,
     headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
@@ -345,7 +359,7 @@ async function _callOpenAIWithTools(
     max_tokens: maxTokens,
   };
 
-  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+  const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     signal,
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
@@ -439,7 +453,7 @@ async function _callAnthropicWithTools(
   };
   if (systemMsg) body.system = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
 
-  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+  const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/messages`, {
     method: 'POST',
     signal,
     headers: {

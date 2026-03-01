@@ -9,20 +9,22 @@ export interface AppSettings {
   llmProvider: 'openai' | 'anthropic' | 'custom';
   apiKey: string;
   baseUrl: string;
-  strongModel: string;   // PM/Architect 用
-  workerModel: string;   // Developer/QA 用
+  strongModel: string;
+  workerModel: string;
+  fastModel?: string;
   workerCount: number;
   dailyBudgetUsd: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  llmProvider: 'openai',
+  llmProvider: 'custom',
   apiKey: '',
-  baseUrl: 'https://api.openai.com',
-  strongModel: 'gpt-4o',
-  workerModel: 'gpt-4o-mini',
-  workerCount: 3,
-  dailyBudgetUsd: 50,
+  baseUrl: '',
+  strongModel: '',
+  workerModel: '',
+  fastModel: '',
+  workerCount: 0,
+  dailyBudgetUsd: 0,
 };
 
 export function setupSettingsHandlers() {

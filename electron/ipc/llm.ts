@@ -21,6 +21,18 @@ interface ChatRequest {
   maxTokens?: number;
 }
 
+/**
+ * 规范化 baseUrl：去掉末尾的 /v1、/v1/、尾部斜杠
+ * 用户可能输入 https://api.openai.com 或 https://api.openai.com/v1
+ * 内部统一存储为不带 /v1 的形式，拼接时再加
+ */
+function normalizeBaseUrl(url: string): string {
+  let u = url.trim().replace(/\/+$/, '');
+  // 去掉末尾的 /v1
+  if (u.endsWith('/v1')) u = u.slice(0, -3);
+  return u;
+}
+
 function getSettings() {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
@@ -31,9 +43,10 @@ export function setupLLMHandlers() {
 
   // ── 连通性测试 ──
   ipcMain.handle('llm:test-connection', async (_event, provider: LLMProvider) => {
+    const base = normalizeBaseUrl(provider.baseUrl);
     try {
       if (provider.type === 'anthropic') {
-        const res = await fetch(`${provider.baseUrl}/v1/messages`, {
+        const res = await fetch(`${base}/v1/messages`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -48,11 +61,37 @@ export function setupLLMHandlers() {
         });
         return { success: res.ok, status: res.status, message: res.ok ? 'Connected!' : await res.text() };
       } else {
-        // OpenAI 兼容
-        const res = await fetch(`${provider.baseUrl}/v1/models`, {
-          headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+        // OpenAI 兼容 — 先尝试 /v1/models，失败则用轻量 chat 测试
+        try {
+          const res = await fetch(`${base}/v1/models`, {
+            headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+          });
+          if (res.ok) return { success: true, status: res.status, message: 'Connected!' };
+        } catch { /* models endpoint not available, try chat */ }
+
+        // Fallback: 轻量 chat 测试 — 用已保存的模型名，或通用名
+        const savedSettings = getSettings();
+        const testModel = savedSettings.strongModel || savedSettings.workerModel || 'gpt-4o-mini';
+        const res = await fetch(`${base}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: testModel,
+            max_tokens: 5,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
         });
-        return { success: res.ok, status: res.status, message: res.ok ? 'Connected!' : await res.text() };
+        // 即使模型名不对，只要认证通过 (非 401/403) 就算连通
+        if (res.ok) return { success: true, status: res.status, message: 'Connected!' };
+        const text = await res.text();
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, status: res.status, message: `认证失败 (${res.status}): ${text.slice(0, 200)}` };
+        }
+        // 其他错误 (如 404 model not found) 说明认证OK，连接没问题
+        return { success: true, status: res.status, message: 'Connected! (部分端点可能不可用)' };
       }
     } catch (err: any) {
       return { success: false, status: 0, message: err.message };
@@ -61,6 +100,7 @@ export function setupLLMHandlers() {
 
   // ── 列出模型 ──
   ipcMain.handle('llm:list-models', async (_event, provider: LLMProvider) => {
+    const base = normalizeBaseUrl(provider.baseUrl);
     try {
       if (provider.type === 'anthropic') {
         return {
@@ -74,7 +114,7 @@ export function setupLLMHandlers() {
           ],
         };
       }
-      const res = await fetch(`${provider.baseUrl}/v1/models`, {
+      const res = await fetch(`${base}/v1/models`, {
         headers: { 'Authorization': `Bearer ${provider.apiKey}` },
       });
       if (!res.ok) return { success: false, models: [] };
@@ -102,7 +142,8 @@ export function setupLLMHandlers() {
 }
 
 async function chatOpenAI(settings: any, request: ChatRequest) {
-  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+  const base = normalizeBaseUrl(settings.baseUrl);
+  const res = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -133,6 +174,7 @@ async function chatOpenAI(settings: any, request: ChatRequest) {
 }
 
 async function chatAnthropic(settings: any, request: ChatRequest) {
+  const base = normalizeBaseUrl(settings.baseUrl);
   const systemMsg = request.messages.find(m => m.role === 'system');
   const otherMsgs = request.messages.filter(m => m.role !== 'system');
 
@@ -144,7 +186,7 @@ async function chatAnthropic(settings: any, request: ChatRequest) {
   };
   if (systemMsg) body.system = systemMsg.content;
 
-  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+  const res = await fetch(`${base}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
