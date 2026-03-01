@@ -47,6 +47,7 @@ import { emitEvent } from './event-store';
 import { createCheckpoint } from './mission';
 import { extractFromProjectMemory } from './cross-project';
 import { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkConsistency } from './doc-manager';
+import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -100,34 +101,110 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   if (!isResume) {
     // ═══════════════════════════════════════
-    // Phase 1: PM 需求分析 → Feature 清单
+    // 首次运行: 完整的 7 阶段流水线
     // ═══════════════════════════════════════
     const features = await phasePMAnalysis(projectId, project, settings, win, signal);
     if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
-    // ═══════════════════════════════════════
-    // Phase 2: PM 设计文档
-    // ═══════════════════════════════════════
     if (workspacePath) {
       await phasePMDesignDoc(projectId, project, features, settings, win, signal, workspacePath);
       if (signal.aborted) { unregisterOrchestrator(projectId); return; }
     }
 
-    // ═══════════════════════════════════════
-    // Phase 3: Architect 技术架构
-    // ═══════════════════════════════════════
     await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
 
-    // ═══════════════════════════════════════
-    // Phase 4: PM 子需求拆分 + QA 测试规格
-    // ═══════════════════════════════════════
     if (workspacePath) {
       await phaseReqsAndTestSpecs(projectId, features, settings, win, signal, workspacePath);
       if (signal.aborted) { unregisterOrchestrator(projectId); return; }
     }
   } else {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 续跑模式 — 跳过 PM/Architect, 直接进入开发阶段' });
+    // ═══════════════════════════════════════
+    // Phase 0: 需求分诊 (Wish Triage) — 检测隐式变更
+    // ═══════════════════════════════════════
+    // 用户可能只是续跑未完成的 feature, 也可能带了新 wish。
+    // 关键: 新 wish 可能隐含对已有 feature 的变更 — 用户不会主动说"这是变更"。
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — 检查是否有新需求或隐式变更...' });
+
+    // 获取当前 wish (可能被用户更新过)
+    const freshProject = db.prepare('SELECT wish FROM projects WHERE id = ?').get(projectId) as { wish: string };
+    const currentWish = freshProject.wish;
+
+    // 判断是否有新 wish 需要处理 (对比最近一次 wish 是否与现有 features 有偏差)
+    // 如果 workspace 存在且有设计文档, 做分诊; 否则直接续跑
+    let triage: WishTriageResult | null = null;
+
+    if (workspacePath && currentWish?.trim()) {
+      triage = await detectImplicitChanges(
+        projectId, currentWish, settings, win, signal, workspacePath,
+      );
+      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+    }
+
+    if (triage && triage.category !== 'pure_new' && triage.implicitChanges.length > 0) {
+      // ── 检测到隐式变更: 先执行变更流程 ──
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: `🔀 检测到 ${triage.implicitChanges.length} 个隐式变更, 启动变更管理流程...`,
+      });
+
+      // 将隐式变更合成为变更描述
+      const changeDescription = [
+        `用户新需求: ${currentWish}`,
+        '',
+        '检测到的隐式变更:',
+        ...triage.implicitChanges.map(c =>
+          `- ${c.featureId} (${c.featureTitle}): ${c.changeDescription} [${c.severity}]`
+        ),
+        ...(triage.conflicts.length > 0 ? [
+          '',
+          '潜在冲突:',
+          ...triage.conflicts.map(c => `- ${c.description} (涉及: ${c.involvedFeatures.join(', ')})`),
+        ] : []),
+      ].join('\n');
+
+      // 创建变更请求记录
+      const crId = `cr-auto-${Date.now().toString(36)}`;
+      db.prepare("INSERT INTO change_requests (id, project_id, description, status) VALUES (?, ?, ?, 'analyzing')")
+        .run(crId, projectId, changeDescription);
+
+      // 执行级联更新
+      const changeResult = await runChangeRequest(projectId, crId, changeDescription, win, signal);
+      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+
+      if (!changeResult.success) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: 'system',
+          content: `⚠️ 变更管理流程未完全成功: ${changeResult.error}. 继续开发已有任务。`,
+        });
+      }
+    }
+
+    if (triage && triage.newCapabilities.length > 0) {
+      // ── 有新功能: 走 PM 增量分析 → 新增 Feature ──
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: `🆕 检测到 ${triage.newCapabilities.length} 个新功能, 启动增量 PM 分析...`,
+      });
+
+      const incrementalFeatures = await phaseIncrementalPM(
+        projectId, project, triage.newCapabilities, settings, win, signal, workspacePath,
+      );
+      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+
+      // 为新 Feature 生成子需求 + 测试规格
+      if (incrementalFeatures && incrementalFeatures.length > 0 && workspacePath) {
+        await phaseReqsAndTestSpecs(projectId, incrementalFeatures, settings, win, signal, workspacePath);
+        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      }
+    }
+
+    if (!triage || (triage.implicitChanges.length === 0 && triage.newCapabilities.length === 0)) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: '♻️ 无新需求或变更, 继续处理未完成的 Feature...',
+      });
+    }
   }
 
   if (workspacePath) commitWorkspace(workspacePath, 'AgentForge: PM analysis + Architecture + Docs');
@@ -285,6 +362,116 @@ async function phasePMAnalysis(
   createCheckpoint(projectId, `PM 分析完成 (${features.length} Features)`);
 
   return features;
+}
+
+// ═══════════════════════════════════════
+// Phase 0 Helper: 增量 PM 分析 (续跑时新增 Feature)
+// ═══════════════════════════════════════
+
+/**
+ * 增量 PM 分析 — 当分诊检测到新功能时, 只新增 Feature 到已有项目, 不覆盖旧的。
+ * 与 phasePMAnalysis 不同之处:
+ *  - 输入是已筛选过的 newCapabilities (而非原始 wish)
+ *  - 注入已有 Feature 列表作为上下文 (避免重复)
+ *  - 只追加新 Feature, 不清空旧的
+ */
+async function phaseIncrementalPM(
+  projectId: string, project: ProjectRow,
+  newCapabilities: Array<{ title: string; description: string }>,
+  settings: AppSettings, win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string | null,
+): Promise<any[] | null> {
+  const db = getDb();
+  const pmId = `pm-incr-${Date.now().toString(36)}`;
+  spawnAgent(projectId, pmId, 'pm', win);
+
+  // 已有 Feature 列表 — 让 PM 知道不要重复
+  const existingRows = db.prepare("SELECT id, title, status FROM features WHERE project_id = ?")
+    .all(projectId) as Array<{ id: string; title: string; status: string }>;
+  const existingList = existingRows.map(f => `- ${f.id}: ${f.title} [${f.status}]`).join('\n');
+
+  // 计算新 Feature ID 起始号
+  const maxIdNum = existingRows.reduce((max, f) => {
+    const match = f.id.match(/F(\d+)/);
+    return match ? Math.max(max, parseInt(match[1], 10)) : max;
+  }, 0);
+
+  const capsDescription = newCapabilities
+    .map((c, i) => `${i + 1}. ${c.title}: ${c.description}`)
+    .join('\n');
+
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: pmId,
+    content: `🆕 增量分析: 为 ${newCapabilities.length} 个新功能生成 Feature...`,
+  });
+
+  try {
+    const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
+    const result = await callLLM(settings, settings.strongModel, [
+      { role: 'system', content: pmPrompt },
+      {
+        role: 'user',
+        content: [
+          `## 增量需求 — 仅为以下新功能生成 Feature, 不要重复已有的`,
+          '',
+          `### 新功能列表`,
+          capsDescription,
+          '',
+          `### 已有 Feature (不要重复!)`,
+          existingList,
+          '',
+          `Feature ID 请从 F${String(maxIdNum + 1).padStart(3, '0')} 开始编号。`,
+          '直接输出 JSON 数组。',
+        ].join('\n'),
+      },
+    ], signal, 16384);
+
+    const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
+    updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
+
+    const parseResult = parseStructuredOutput(result.content, PM_FEATURE_SCHEMA);
+    if (!parseResult.ok) {
+      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析输出解析失败: ${parseResult.error}` });
+      return null;
+    }
+
+    const newFeatures = parseResult.data;
+    if (newFeatures.length === 0) {
+      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ 增量分析未产生新 Feature' });
+      return null;
+    }
+
+    // 写入 DB (追加, 不覆盖)
+    const insertFeature = db.prepare(
+      `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?)`
+    );
+    db.transaction((items: any[]) => {
+      for (let i = 0; i < items.length; i++) {
+        const f = items[i];
+        insertFeature.run(
+          f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId,
+          f.category || 'core', f.priority ?? 1,
+          f.group_name || f.category || '', f.sub_group || '',
+          f.title || f.description || '', f.description || '',
+          JSON.stringify(f.dependsOn || f.depends_on || []),
+          JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []),
+          f.notes || '',
+        );
+      }
+    })(newFeatures);
+
+    sendToUI(win, 'project:features-ready', { projectId, count: newFeatures.length });
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ 新增 ${newFeatures.length} 个 Feature ($${cost.toFixed(4)})` });
+    emitEvent({ projectId, agentId: pmId, type: 'phase:incremental-pm:end', data: { newCount: newFeatures.length } });
+
+    return newFeatures;
+
+  } catch (err: any) {
+    if (signal.aborted) return null;
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析失败: ${err.message}` });
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════

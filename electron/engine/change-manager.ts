@@ -20,7 +20,7 @@ import { callLLM, calcCost, getSettings } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { spawnAgent, updateAgentStats, getTeamPrompt } from './agent-manager';
 import { writeDoc, readDoc, buildDesignContext, listDocs, checkConsistency } from './doc-manager';
-import { PM_IMPACT_ANALYSIS_PROMPT, PM_UPDATE_DESIGN_PROMPT, QA_UPDATE_TEST_SPEC_PROMPT } from './prompts';
+import { PM_IMPACT_ANALYSIS_PROMPT, PM_UPDATE_DESIGN_PROMPT, QA_UPDATE_TEST_SPEC_PROMPT, PM_WISH_TRIAGE_PROMPT } from './prompts';
 import { parseStructuredOutput } from './output-parser';
 import { emitEvent } from './event-store';
 import { createCheckpoint } from './mission';
@@ -397,5 +397,169 @@ async function updateTestSpecDoc(
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ✅ ${featureId} 测试规格更新至 v${version} ($${cost.toFixed(4)})` });
   } catch (err: any) {
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 测试规格更新失败: ${err.message}` });
+  }
+}
+
+// ═══════════════════════════════════════
+// Implicit Change Detection (v4.3.1)
+// ═══════════════════════════════════════
+
+/**
+ * 需求分诊 (Wish Triage) — 用于检测新 wish 中隐含的对现有需求的变更
+ *
+ * 核心洞察: 用户不会说"我要变更需求"。他们会说"加个多语言功能"——
+ * 但这暗含了对现有 UI 文案、数据模型、验证逻辑的变更。
+ *
+ * 此函数将新 wish 与现有 features/docs 进行语义比对, 输出结构化分诊结果:
+ *  - pure_new: 完全是新功能, 不影响已有 feature
+ *  - has_changes: 既有新功能, 也隐含对旧 feature 的变更
+ *  - pure_change: 没有新功能, 纯粹是对现有功能的修改
+ *
+ * @returns 分诊结果, 包含新增 feature 候选和隐式变更清单
+ */
+export interface WishTriageResult {
+  /** 分诊分类 */
+  category: 'pure_new' | 'has_changes' | 'pure_change';
+  /** 新增的功能描述 (供后续 PM Phase 1 生成新 Feature) */
+  newCapabilities: Array<{
+    title: string;
+    description: string;
+  }>;
+  /** 对现有 Feature 的隐式变更 */
+  implicitChanges: Array<{
+    featureId: string;
+    featureTitle: string;
+    changeDescription: string;
+    severity: 'major' | 'minor';
+  }>;
+  /** 可能的冲突/矛盾 */
+  conflicts: Array<{
+    description: string;
+    involvedFeatures: string[];
+  }>;
+  /** 分诊理由 (human-readable) */
+  reasoning: string;
+}
+
+/** Wish Triage JSON Schema */
+const WISH_TRIAGE_SCHEMA = {
+  topLevel: 'object' as const,
+  fields: {
+    category:         { type: 'string' as const, required: true, enum: ['pure_new', 'has_changes', 'pure_change'], default: 'has_changes' },
+    newCapabilities:  { type: 'array' as const,  required: true, default: [] },
+    implicitChanges:  { type: 'array' as const,  required: true, default: [] },
+    conflicts:        { type: 'array' as const,  required: false, default: [] },
+    reasoning:        { type: 'string' as const, required: true, default: '' },
+  },
+};
+
+export async function detectImplicitChanges(
+  projectId: string,
+  newWish: string,
+  settings: AppSettings,
+  win: BrowserWindow | null,
+  signal: AbortSignal,
+  workspacePath: string,
+): Promise<WishTriageResult | null> {
+  const db = getDb();
+  const pmId = `pm-triage-${Date.now().toString(36)}`;
+
+  sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '🔎 Phase 0: 分诊新需求 — 识别隐式变更...' });
+
+  // 收集现有上下文
+  const existingFeatures = db.prepare(
+    "SELECT id, title, description, status, acceptance_criteria FROM features WHERE project_id = ? ORDER BY priority ASC"
+  ).all(projectId) as Array<{ id: string; title: string; description: string; status: string; acceptance_criteria: string }>;
+
+  const featureList = existingFeatures.map(f => {
+    let criteria = '';
+    try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch {}
+    return `- **${f.id}** [${f.status}]: ${f.title}\n  描述: ${f.description}\n  验收: ${criteria}`;
+  }).join('\n');
+
+  const designContext = buildDesignContext(workspacePath, 4000);
+
+  try {
+    const result = await callLLM(settings, settings.strongModel, [
+      { role: 'system', content: PM_WISH_TRIAGE_PROMPT },
+      {
+        role: 'user',
+        content: [
+          `## 新的用户需求\n${newWish}`,
+          `\n## 现有 Feature 清单 (${existingFeatures.length} 个)\n${featureList}`,
+          designContext ? `\n## 当前设计文档\n${designContext}` : '',
+          `\n请分析此新需求是纯新增、含隐式变更、还是纯变更。输出 JSON。`,
+        ].filter(Boolean).join('\n'),
+      },
+    ], signal, 8192);
+
+    const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
+    updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
+
+    const parseResult = parseStructuredOutput<WishTriageResult>(result.content, WISH_TRIAGE_SCHEMA);
+    if (!parseResult.ok) {
+      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 分诊输出解析失败: ${parseResult.error}. 默认视为 has_changes` });
+      return {
+        category: 'has_changes',
+        newCapabilities: [{ title: '新需求', description: newWish }],
+        implicitChanges: [],
+        conflicts: [],
+        reasoning: '分诊解析失败, 保守处理为含变更',
+      };
+    }
+
+    const triage = parseResult.data;
+
+    // 结果汇报
+    const changeCount = triage.implicitChanges.length;
+    const newCount = triage.newCapabilities.length;
+    const conflictCount = triage.conflicts.length;
+
+    const icon = triage.category === 'pure_new' ? '🆕' : triage.category === 'pure_change' ? '🔄' : '🔀';
+    const details = [
+      `${icon} 分诊结果: **${triage.category}**`,
+      newCount > 0 ? `  🆕 新增功能: ${newCount} 项` : null,
+      changeCount > 0 ? `  🔄 隐式变更: ${changeCount} 个现有 Feature` : null,
+      conflictCount > 0 ? `  ⚠️ 潜在冲突: ${conflictCount} 处` : null,
+      `  💡 ${triage.reasoning}`,
+      `  ($${cost.toFixed(4)})`,
+    ].filter(Boolean).join('\n');
+
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: details });
+    addLog(projectId, pmId, 'output', `Wish Triage: ${JSON.stringify(triage, null, 2).slice(0, 3000)}`);
+
+    // 如果有隐式变更, 逐条通知
+    for (const change of triage.implicitChanges) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: pmId,
+        content: `  🔄 ${change.featureId} (${change.featureTitle}): ${change.changeDescription} [${change.severity}]`,
+      });
+    }
+
+    // 如果有冲突, 警告
+    for (const conflict of triage.conflicts) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: pmId,
+        content: `  ⚡ 冲突: ${conflict.description} (涉及: ${conflict.involvedFeatures.join(', ')})`,
+      });
+    }
+
+    emitEvent({
+      projectId, agentId: pmId, type: 'wish:triaged',
+      data: { category: triage.category, newCount, changeCount, conflictCount },
+    });
+
+    return triage;
+
+  } catch (err: any) {
+    if (signal.aborted) return null;
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 分诊失败: ${err.message}. 默认视为纯新增` });
+    return {
+      category: 'pure_new',
+      newCapabilities: [{ title: '新需求', description: newWish }],
+      implicitChanges: [],
+      conflicts: [],
+      reasoning: `分诊异常 (${err.message}), 保守处理为纯新增`,
+    };
   }
 }
