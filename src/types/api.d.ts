@@ -113,6 +113,10 @@ interface AgentForgeAPI {
     getDesignDoc(projectId: string): Promise<string | null>;
     /** v4.2: 获取文档变更日志 */
     getDocChangelog(projectId: string): Promise<DocChangeEntry[]>;
+    /** v4.4: 列出所有文档元信息 */
+    listAllDocs(projectId: string): Promise<DocListResult>;
+    /** v4.4: 读取单个文档内容 */
+    readDoc(projectId: string, type: 'design' | 'requirement' | 'test_spec', id: string): Promise<string | null>;
     /** v4.3: 提交需求变更 */
     submitChange(projectId: string, description: string): Promise<{ success: boolean; changeRequestId: string }>;
     /** v4.3: 获取变更请求列表 */
@@ -219,6 +223,23 @@ interface ChangeRequestDetail extends ChangeRequestItem {
     impactPercent: number;
   } | null;
   affectedFeatures: string[];
+}
+
+/** 文档元信息 (v4.4) */
+interface DocMeta {
+  type: 'design' | 'requirement' | 'test_spec';
+  id: string;
+  path: string;
+  version: number;
+  updatedAt: string;
+  sizeBytes: number;
+}
+
+/** 文档列表结果 (v4.4) */
+interface DocListResult {
+  design: DocMeta[];
+  requirements: DocMeta[];
+  testSpecs: DocMeta[];
 }
 
 interface AppSettings {

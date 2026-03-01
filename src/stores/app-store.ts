@@ -9,7 +9,7 @@ import { create } from 'zustand';
 /** 外层页面 (无需选中项目) */
 export type GlobalPageId = 'projects' | 'settings';
 /** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'output' | 'logs' | 'context' | 'timeline';
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'output' | 'logs' | 'context' | 'timeline';
 
 interface LogEntry {
   id: number;
@@ -80,6 +80,15 @@ interface AppState {
   agentReactStates: Map<string, AgentReactState>;
   updateAgentReactState: (state: AgentReactState) => void;
   clearAgentReactStates: () => void;
+
+  // v4.4: 通知 badge 计数
+  pendingNotifications: number;
+  incrementNotifications: () => void;
+  clearNotifications: () => void;
+
+  // v4.4: 用户验收弹窗
+  showAcceptancePanel: boolean;
+  setShowAcceptancePanel: (show: boolean) => void;
 }
 
 let logIdCounter = 0;
@@ -165,4 +174,13 @@ export const useAppStore = create<AppState>((set) => ({
     return { agentReactStates: next };
   }),
   clearAgentReactStates: () => set({ agentReactStates: new Map() }),
+
+  // v4.4: 通知 badge
+  pendingNotifications: 0,
+  incrementNotifications: () => set((s) => ({ pendingNotifications: s.pendingNotifications + 1 })),
+  clearNotifications: () => set({ pendingNotifications: 0 }),
+
+  // v4.4: 用户验收弹窗
+  showAcceptancePanel: false,
+  setShowAcceptancePanel: (show) => set({ showAcceptancePanel: show }),
 }));

@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('agentforge', {
       ipcRenderer.invoke('project:get-design-doc', projectId),
     getDocChangelog: (projectId: string) =>
       ipcRenderer.invoke('project:get-doc-changelog', projectId),
+    // v4.4: 文档浏览器
+    listAllDocs: (projectId: string) =>
+      ipcRenderer.invoke('project:list-all-docs', projectId),
+    readDoc: (projectId: string, type: string, id: string) =>
+      ipcRenderer.invoke('project:read-doc', projectId, type, id),
     // v4.3: 需求变更
     submitChange: (projectId: string, description: string) =>
       ipcRenderer.invoke('project:submit-change', projectId, description),

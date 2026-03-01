@@ -9,6 +9,7 @@ const projectNavItems: { id: ProjectPageId; icon: string; label: string }[] = [
   { id: 'overview',  icon: '🗺️', label: '全景' },
   { id: 'wish',      icon: '✨', label: '许愿' },
   { id: 'board',     icon: '📋', label: '看板' },
+  { id: 'docs',      icon: '📄', label: '文档' },
   { id: 'team',      icon: '👥', label: '团队' },
   { id: 'context',   icon: '🧠', label: '上下文' },
   { id: 'timeline',  icon: '⏳', label: '时间线' },
@@ -20,6 +21,7 @@ export function Sidebar() {
   const {
     insideProject, globalPage, projectPage,
     setGlobalPage, setProjectPage, exitProject, settingsConfigured,
+    pendingNotifications, clearNotifications,
   } = useAppStore();
 
   return (
@@ -45,22 +47,33 @@ export function Sidebar() {
           </button>
 
           {/* 项目内导航 */}
-          {projectNavItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setProjectPage(item.id)}
-              className={`
-                w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all text-xs
-                ${projectPage === item.id
-                  ? 'bg-forge-600/20 text-forge-400 shadow-inner'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}
-              `}
-              title={item.label}
-            >
-              <span className="text-base">{item.icon}</span>
-              <span className="text-[10px] leading-none">{item.label}</span>
-            </button>
-          ))}
+          {projectNavItems.map(item => {
+            const hasBadge = item.id === 'overview' && pendingNotifications > 0;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setProjectPage(item.id);
+                  if (hasBadge) clearNotifications();
+                }}
+                className={`
+                  relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all text-xs
+                  ${projectPage === item.id
+                    ? 'bg-forge-600/20 text-forge-400 shadow-inner'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}
+                `}
+                title={item.label}
+              >
+                <span className="text-base">{item.icon}</span>
+                <span className="text-[10px] leading-none">{item.label}</span>
+                {hasBadge && (
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center font-bold animate-pulse">
+                    {pendingNotifications > 9 ? '9+' : pendingNotifications}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </>
       ) : (
         <>

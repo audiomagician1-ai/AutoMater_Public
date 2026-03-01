@@ -533,6 +533,28 @@ export function setupProjectHandlers() {
     return getChangelog(project.workspace_path);
   });
 
+  // ── v4.4: 列出所有文档元信息 ──
+  ipcMain.handle('project:list-all-docs', (_event, projectId: string) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project?.workspace_path) return { design: [], requirements: [], testSpecs: [] };
+
+    const { listDocs } = require('../engine/doc-manager');
+    return {
+      design: listDocs(project.workspace_path, 'design'),
+      requirements: listDocs(project.workspace_path, 'requirement'),
+      testSpecs: listDocs(project.workspace_path, 'test_spec'),
+    };
+  });
+
+  // ── v4.4: 读取单个文档内容 ──
+  ipcMain.handle('project:read-doc', (_event, projectId: string, type: string, id: string) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project?.workspace_path) return null;
+
+    const { readDoc } = require('../engine/doc-manager');
+    return readDoc(project.workspace_path, type, id);
+  });
+
   // ── v4.3: 提交需求变更 ──
   ipcMain.handle('project:submit-change', async (_event, projectId: string, description: string) => {
     const db = getDb();

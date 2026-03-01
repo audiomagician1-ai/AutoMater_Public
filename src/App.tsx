@@ -7,6 +7,8 @@ import { OverviewPage } from './pages/OverviewPage';
 import { WishPage } from './pages/WishPage';
 import { BoardPage } from './pages/BoardPage';
 import { TeamPage } from './pages/TeamPage';
+import { DocsPage } from './pages/DocsPage';
+import { AcceptancePanel } from './components/AcceptancePanel';
 import { LogsPage } from './pages/LogsPage';
 import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -18,7 +20,7 @@ export function App() {
     insideProject, globalPage, projectPage,
     addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured,
     currentProjectId, startStream, appendStream, endStream,
-    updateContextSnapshot,
+    updateContextSnapshot, incrementNotifications, setShowAcceptancePanel,
   } = useAppStore();
   const updateAgentReactState = useAppStore(s => s.updateAgentReactState);
   const [stats, setStats] = useState<any>(null);
@@ -87,6 +89,26 @@ export function App() {
       endStream(data.agentId);
     }));
 
+    // v4.4: 用户验收通知
+    unsubs.push(window.agentforge.on('project:awaiting-acceptance', (data: any) => {
+      incrementNotifications();
+      setShowAcceptancePanel(true);
+      addLog({
+        projectId: data.projectId,
+        agentId: 'system',
+        content: '🔔 项目已进入用户验收阶段，请前往全景页审查并做出决定',
+      });
+      // Electron native notification (renderer can use Notification API)
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('AgentForge — 需要您的验收', {
+          body: '项目开发已完成，等待您的验收决定',
+          icon: undefined,
+        });
+      } else if ('Notification' in window && Notification.permission !== 'denied') {
+        Notification.requestPermission();
+      }
+    }));
+
     // 检查设置
     window.agentforge.settings.get().then(s => {
       if (s.apiKey) setSettingsConfigured(true);
@@ -121,6 +143,7 @@ export function App() {
       case 'wish':     return <WishPage />;
       case 'board':    return <BoardPage />;
       case 'team':     return <TeamPage />;
+      case 'docs':     return <DocsPage />;
       case 'output':   return <OutputPage />;
       case 'logs':     return <LogsPage />;
       case 'context':  return <ContextPage />;
@@ -138,6 +161,7 @@ export function App() {
         </main>
       </div>
       {insideProject && <StatusBar stats={stats} />}
+      {insideProject && <AcceptancePanel />}
     </div>
   );
 }

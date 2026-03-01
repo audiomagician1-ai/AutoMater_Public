@@ -22,6 +22,9 @@ interface Feature {
   id: string; title: string; description: string; priority: number;
   category: string; status: string; depends_on: string; locked_by: string | null;
   group_name?: string; sub_group?: string;
+  pm_verdict?: string;
+  requirement_doc_ver?: number;
+  test_spec_doc_ver?: number;
 }
 
 type ViewLevel = 'module' | 'submodule' | 'feature';
@@ -579,6 +582,169 @@ function StatCard({ icon, label, value, sub }: { icon: string; label: string; va
 }
 
 // ═══════════════════════════════════════
+// 7-Stage Pipeline Bar (v4.4)
+// ═══════════════════════════════════════
+
+/** 7-stage pipeline definition aligned with orchestrator phases */
+const PIPELINE_STAGES = [
+  { key: 'pm_analysis',    label: 'PM 分析',      icon: '🧠', color: 'bg-blue-500' },
+  { key: 'design_doc',     label: '设计文档',     icon: '📐', color: 'bg-violet-500' },
+  { key: 'architecture',   label: '架构设计',     icon: '🏗️', color: 'bg-indigo-500' },
+  { key: 'sub_reqs',       label: '需求拆分+测试', icon: '📋', color: 'bg-cyan-500' },
+  { key: 'development',    label: '开发实现',     icon: '🔨', color: 'bg-amber-500' },
+  { key: 'qa_review',      label: 'QA 审查',      icon: '🧪', color: 'bg-emerald-500' },
+  { key: 'acceptance',     label: '验收',         icon: '🎯', color: 'bg-orange-500' },
+] as const;
+
+/**
+ * Infer which pipeline stage is active based on project status and feature states.
+ * Returns an index (0-based) into PIPELINE_STAGES.
+ */
+function inferPipelineStage(projectStatus: string, features: Feature[]): number {
+  if (!projectStatus || projectStatus === 'idle') return -1;
+
+  const total = features.length;
+  if (total === 0) {
+    // No features yet → still in PM analysis or design phase
+    if (projectStatus === 'initializing') return 0;
+    return 0;
+  }
+
+  const allPassed = features.every(f => f.status === 'passed');
+  const anyDeveloping = features.some(f => f.status === 'in_progress');
+  const anyReviewing = features.some(f => f.status === 'reviewing');
+  const anyFailed = features.some(f => f.status === 'failed');
+  const hasReqDocs = features.some(f => (f.requirement_doc_ver ?? 0) > 0);
+  const hasTestSpecs = features.some(f => (f.test_spec_doc_ver ?? 0) > 0);
+
+  if (projectStatus === 'awaiting_user_acceptance' || allPassed) return 6;
+  if (anyReviewing) return 5;
+  if (anyDeveloping || anyFailed) return 4;
+  if (hasReqDocs || hasTestSpecs) return 3;
+  if (total > 0 && projectStatus === 'developing') return 4;
+  if (projectStatus === 'initializing') return 1;
+  return 2;
+}
+
+function PipelineBar({ projectStatus, features }: { projectStatus: string; features: Feature[] }) {
+  const activeStage = inferPipelineStage(projectStatus, features);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <h4 className="text-[10px] uppercase tracking-wider text-slate-500 mb-3">流水线进度</h4>
+      <div className="flex items-center gap-1">
+        {PIPELINE_STAGES.map((stage, i) => {
+          const isCompleted = i < activeStage;
+          const isActive = i === activeStage;
+          const isFuture = i > activeStage;
+
+          return (
+            <div key={stage.key} className="flex items-center flex-1">
+              {/* Node */}
+              <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
+                <div className={`
+                  w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all
+                  ${isCompleted ? `${stage.color} text-white shadow-lg` : ''}
+                  ${isActive ? `${stage.color} text-white shadow-lg ring-2 ring-white/20 animate-pulse` : ''}
+                  ${isFuture ? 'bg-slate-800 text-slate-600' : ''}
+                `}>
+                  {isCompleted ? '✓' : stage.icon}
+                </div>
+                <span className={`text-[9px] leading-none text-center truncate w-full ${
+                  isActive ? 'text-slate-200 font-medium' : isCompleted ? 'text-slate-400' : 'text-slate-600'
+                }`}>
+                  {stage.label}
+                </span>
+              </div>
+
+              {/* Connector (except after last) */}
+              {i < PIPELINE_STAGES.length - 1 && (
+                <div className={`h-0.5 w-4 flex-shrink-0 ${
+                  i < activeStage ? 'bg-slate-600' : 'bg-slate-800'
+                }`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
+// Document Completion Indicator (v4.4)
+// ═══════════════════════════════════════
+
+function DocCompletionBar({ features, projectId }: { features: Feature[]; projectId: string }) {
+  const [docStats, setDocStats] = useState<{ design: boolean; reqCount: number; testCount: number }>({
+    design: false, reqCount: 0, testCount: 0,
+  });
+
+  useEffect(() => {
+    if (!projectId) return;
+    window.agentforge.project.listAllDocs(projectId).then(docs => {
+      setDocStats({
+        design: (docs?.design?.length ?? 0) > 0,
+        reqCount: docs?.requirements?.length ?? 0,
+        testCount: docs?.testSpecs?.length ?? 0,
+      });
+    }).catch(() => {});
+  }, [projectId]);
+
+  const total = features.length;
+  const reqCoverage = total > 0 ? Math.round((docStats.reqCount / total) * 100) : 0;
+  const testCoverage = total > 0 ? Math.round((docStats.testCount / total) * 100) : 0;
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <h4 className="text-[10px] uppercase tracking-wider text-slate-500 mb-3">文档完成度</h4>
+      <div className="grid grid-cols-3 gap-4">
+        {/* Design doc */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">📐 设计文档</span>
+            <span className={docStats.design ? 'text-emerald-400' : 'text-slate-600'}>
+              {docStats.design ? '✓ 已生成' : '— 待生成'}
+            </span>
+          </div>
+          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-500 ${docStats.design ? 'w-full bg-violet-500' : 'w-0'}`} />
+          </div>
+        </div>
+
+        {/* Requirement docs */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">📋 需求文档</span>
+            <span className="text-slate-500">{docStats.reqCount}/{total}</span>
+          </div>
+          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-500"
+              style={{ width: `${reqCoverage}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Test specs */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">🧪 测试规格</span>
+            <span className="text-slate-500">{docStats.testCount}/{total}</span>
+          </div>
+          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+              style={{ width: `${testCoverage}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
 // Main OverviewPage
 // ═══════════════════════════════════════
 
@@ -593,7 +759,7 @@ const PROJECT_STATUS: Record<string, { text: string; color: string }> = {
 };
 
 export function OverviewPage() {
-  const { currentProjectId, featureStatuses, addLog, settingsConfigured, setGlobalPage, setProjectPage } = useAppStore();
+  const { currentProjectId, featureStatuses, addLog, settingsConfigured, setGlobalPage, setProjectPage, showAcceptancePanel, setShowAcceptancePanel } = useAppStore();
   const [features, setFeatures] = useState<Feature[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
@@ -734,6 +900,33 @@ export function OverviewPage() {
                 sub={[...categoryCount.entries()].map(([k, v]) => `${CATEGORY_BADGE[k] || '📦'}${k}: ${v}`).join('  ')} />
             </div>
           </section>
+        )}
+
+        {/* Pipeline + Doc completion (v4.4) */}
+        {enriched.length > 0 && project && (
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PipelineBar projectStatus={project.status} features={enriched} />
+            <DocCompletionBar features={enriched} projectId={currentProjectId!} />
+          </section>
+        )}
+
+        {/* User acceptance prompt */}
+        {project?.status === 'awaiting_user_acceptance' && !showAcceptancePanel && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🎯</span>
+              <div>
+                <div className="text-sm font-medium text-amber-300">项目等待您的验收</div>
+                <div className="text-xs text-amber-400/60">所有 Feature 已通过开发和 QA 审查, 请做出最终决定</div>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowAcceptancePanel(true)}
+              className="px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium transition-all"
+            >
+              开始验收
+            </button>
+          </div>
         )}
 
         {/* DAG graph */}
