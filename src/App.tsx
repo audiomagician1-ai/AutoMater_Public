@@ -16,6 +16,7 @@ import { ContextPage } from './pages/ContextPage';
 import { WorkflowPage } from './pages/WorkflowPage';
 import TimelinePage from './pages/TimelinePage';
 import { MetaAgentPanel } from './components/MetaAgentPanel';
+import { SessionManager } from './components/SessionManager';
 import { GuidePage } from './pages/GuidePage';
 
 export function App() {
@@ -26,6 +27,7 @@ export function App() {
     updateContextSnapshot, incrementNotifications, setShowAcceptancePanel,
   } = useAppStore();
   const updateAgentReactState = useAppStore(s => s.updateAgentReactState);
+  const addAgentWorkMessage = useAppStore(s => s.addAgentWorkMessage);
   const [stats, setStats] = useState<any>(null);
 
   // 订阅主进程事件
@@ -34,6 +36,29 @@ export function App() {
 
     unsubs.push(window.agentforge.on('agent:log', (data: any) => {
       addLog({ projectId: data.projectId, agentId: data.agentId, content: data.content });
+      // v6.0: 解析为结构化工作消息分发到 agentWorkMessages
+      if (data.agentId && data.agentId !== 'system') {
+        const c: string = data.content || '';
+        const msgId = `wm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const ts = Date.now();
+        if (c.includes('💭')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'think', timestamp: ts, content: c.replace(/^.*?💭\s*/, '') });
+        } else if (c.includes('🔧')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'tool-call', timestamp: ts, content: c });
+        } else if (c.includes('✅') && (c.includes('task_complete') || c.includes('ReAct 完成') || c.includes('ReAct 循环结束'))) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'output', timestamp: ts, content: c });
+        } else if (c.includes('🔬')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'sub-agent', timestamp: ts, content: c });
+        } else if (c.includes('📋') || c.includes('📊') || c.includes('📁') || c.includes('🤖')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'status', timestamp: ts, content: c });
+        } else if (c.includes('⚠️') || c.includes('🛑') || c.includes('❌') || c.includes('🚫')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'error', timestamp: ts, content: c });
+        } else if (c.includes('🔄')) {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'status', timestamp: ts, content: c });
+        } else {
+          addAgentWorkMessage(data.agentId, { id: msgId, type: 'status', timestamp: ts, content: c });
+        }
+      }
     }));
 
     unsubs.push(window.agentforge.on('agent:spawned', (data: any) => {
@@ -69,6 +94,21 @@ export function App() {
         agentId: data.agentId,
         content: `🔧 ${data.tool}(${data.args}) → ${icon} ${data.outputPreview}`,
       });
+      // v6.0: 结构化工具调用消息
+      if (data.agentId) {
+        addAgentWorkMessage(data.agentId, {
+          id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'tool-result',
+          timestamp: Date.now(),
+          content: data.outputPreview || '',
+          tool: {
+            name: data.tool,
+            args: data.args,
+            success: data.success,
+            outputPreview: data.outputPreview,
+          },
+        });
+      }
     }));
 
     // 上下文快照事件 (v1.1)
@@ -170,6 +210,7 @@ export function App() {
       case 'logs':     return <LogsPage />;
       case 'context':  return <ContextPage />;
       case 'timeline': return <TimelinePage />;
+      case 'sessions': return <SessionManager projectId={currentProjectId} visible={true} />;
       case 'guide':    return <GuidePage />;
       default:         return <OverviewPage />;
     }

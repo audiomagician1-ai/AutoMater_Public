@@ -8,6 +8,7 @@ import { setupEventHandlers } from './ipc/events';
 import { setupMcpHandlers, initMcpAndSkills, shutdownMcpAndSkills } from './ipc/mcp';
 import { setupMetaAgentHandlers } from './ipc/meta-agent';
 import { setupMissionHandlers } from './ipc/missions';
+import { setupSessionHandlers } from './ipc/sessions';
 import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
@@ -110,6 +111,7 @@ app.whenReady().then(async () => {
   setupMcpHandlers();
   setupMetaAgentHandlers();
   setupMissionHandlers();
+  setupSessionHandlers();
 
   // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
   initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });

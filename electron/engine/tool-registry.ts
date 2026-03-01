@@ -144,10 +144,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   // ── Shell / Test / Lint ──
   {
     name: 'run_command',
-    description: '在工作区中执行 shell 命令。用于安装依赖(npm install)、运行测试、编译检查等。超时60秒。',
+    description: '在工作区中执行 shell 命令。用于安装依赖(npm install)、运行测试、编译检查等。同步模式超时60秒。background=true 时异步执行(最长30分钟)，返回进程ID供后续查询。',
     parameters: {
       type: 'object',
-      properties: { command: { type: 'string', description: 'Shell 命令' } },
+      properties: {
+        command: { type: 'string', description: 'Shell 命令' },
+        background: { type: 'boolean', description: '是否后台执行(长时间进程如dev server/build)，默认false' },
+        timeout_seconds: { type: 'number', description: '超时秒数(同步默认60，后台默认1800)' },
+      },
       required: ['command'],
     },
   },
@@ -160,6 +164,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'run_lint',
     description: '在沙箱中运行 lint 和类型检查 (自动检测 tsc/eslint/py_compile)。超时 60 秒。',
     parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'check_process',
+    description: '查询后台进程的状态和输出。使用 run_command(background=true) 启动后台进程后，可用此工具查看进度。',
+    parameters: {
+      type: 'object',
+      properties: { process_id: { type: 'string', description: '后台进程 ID (由 run_command 返回)' } },
+      required: ['process_id'],
+    },
   },
 
   // ── Git ──
@@ -649,6 +662,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search', 'fetch_url', 'http_request',
     'spawn_researcher',
     'memory_read', 'memory_append',
+    'check_process',   // v6.0: 查询后台进程状态
     'rfc_propose',     // v5.5: RFC 设计变更提案
     // Computer Use — 调试 GUI/桌面应用
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
@@ -678,7 +692,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',
-    'run_command', 'http_request',
+    'run_command', 'check_process', 'http_request',
     'git_commit', 'git_diff', 'git_log',
     'github_create_issue', 'github_list_issues',
     'memory_read', 'memory_append',

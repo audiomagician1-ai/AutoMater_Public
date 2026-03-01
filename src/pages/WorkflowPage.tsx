@@ -46,6 +46,9 @@ export function WorkflowPage() {
   // Mission state
   const [missions, setMissions] = useState<MissionRecord[]>([]);
   const [launchingMission, setLaunchingMission] = useState(false);
+  const [missionError, setMissionError] = useState<string | null>(null);
+  const [expandedMission, setExpandedMission] = useState<string | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<MissionTaskRecord[]>([]);
 
   // Load missions
   const loadMissions = useCallback(async () => {
@@ -64,8 +67,18 @@ export function WorkflowPage() {
     if (!currentProjectId || launchingMission) return;
     setLaunchingMission(true);
     try {
-      await window.agentforge.ephemeralMission.create(currentProjectId, type, { maxWorkers: 3 });
+      const res = await window.agentforge.ephemeralMission.create(currentProjectId, type, { maxWorkers: 3 });
+      if (!res?.success) {
+        console.error('[Mission] create failed:', res?.error);
+        setMissionError(res?.error || '创建任务失败');
+        return;
+      }
+      // 创建成功 — 立即刷新列表并追踪新 mission
+      setMissionError(null);
       await loadMissions();
+    } catch (err: any) {
+      console.error('[Mission] create error:', err);
+      setMissionError(err.message || '创建任务时出错');
     } finally {
       setLaunchingMission(false);
     }
@@ -77,9 +90,38 @@ export function WorkflowPage() {
   };
 
   const handleDeleteMission = async (id: string) => {
+    if (expandedMission === id) setExpandedMission(null);
     await window.agentforge.ephemeralMission.delete(id);
     loadMissions();
   };
+
+  // 展开/收起 mission 详情 (加载 tasks)
+  const handleToggleMission = async (id: string) => {
+    if (expandedMission === id) {
+      setExpandedMission(null);
+      setExpandedTasks([]);
+      return;
+    }
+    setExpandedMission(id);
+    try {
+      const tasks = await window.agentforge.ephemeralMission.getTasks(id);
+      setExpandedTasks(tasks || []);
+    } catch {
+      setExpandedTasks([]);
+    }
+  };
+
+  // 自动刷新展开面板的 tasks
+  useEffect(() => {
+    if (!expandedMission) return;
+    const t = setInterval(async () => {
+      try {
+        const tasks = await window.agentforge.ephemeralMission.getTasks(expandedMission);
+        setExpandedTasks(tasks || []);
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [expandedMission]);
 
   if (!currentProjectId) {
     return <div className="h-full flex items-center justify-center text-slate-500">请先选择一个项目</div>;
@@ -148,6 +190,14 @@ export function WorkflowPage() {
               </button>
             ))}
           </div>
+
+          {/* 错误提示 */}
+          {missionError && (
+            <div className="mt-2 px-3 py-2 rounded-lg bg-red-900/30 border border-red-700/30 text-red-300 text-[11px] flex items-center justify-between">
+              <span>⚠️ {missionError}</span>
+              <button onClick={() => setMissionError(null)} className="text-red-500 hover:text-red-300 ml-2">✕</button>
+            </div>
+          )}
         </div>
 
         {/* ═══════ 进行中的任务 ═══════ */}
@@ -155,7 +205,15 @@ export function WorkflowPage() {
           <div className="space-y-2">
             <h3 className="text-xs font-bold text-slate-400">⚡ 进行中</h3>
             {activeMissions.map(m => (
-              <MissionCard key={m.id} mission={m} onCancel={handleCancelMission} onDelete={handleDeleteMission} />
+              <MissionCard
+                key={m.id}
+                mission={m}
+                onCancel={handleCancelMission}
+                onDelete={handleDeleteMission}
+                expanded={expandedMission === m.id}
+                onToggle={handleToggleMission}
+                tasks={expandedMission === m.id ? expandedTasks : []}
+              />
             ))}
           </div>
         )}
@@ -165,7 +223,15 @@ export function WorkflowPage() {
           <div className="space-y-2">
             <h3 className="text-xs font-bold text-slate-400">📦 历史记录</h3>
             {historyMissions.map(m => (
-              <MissionCard key={m.id} mission={m} onCancel={handleCancelMission} onDelete={handleDeleteMission} />
+              <MissionCard
+                key={m.id}
+                mission={m}
+                onCancel={handleCancelMission}
+                onDelete={handleDeleteMission}
+                expanded={expandedMission === m.id}
+                onToggle={handleToggleMission}
+                tasks={expandedMission === m.id ? expandedTasks : []}
+              />
             ))}
           </div>
         )}
@@ -197,43 +263,131 @@ const MISSION_STATUS: Record<string, { text: string; color: string; icon: string
   cancelled: { text: '已取消', color: 'text-slate-500', icon: '⏹' },
 };
 
-function MissionCard({ mission: m, onCancel, onDelete }: {
+const TASK_STATUS_STYLE: Record<string, { icon: string; color: string }> = {
+  pending:  { icon: '○', color: 'text-slate-500' },
+  running:  { icon: '◉', color: 'text-amber-400' },
+  passed:   { icon: '✓', color: 'text-emerald-400' },
+  failed:   { icon: '✗', color: 'text-red-400' },
+  skipped:  { icon: '–', color: 'text-slate-600' },
+};
+
+function MissionCard({ mission: m, onCancel, onDelete, expanded, onToggle, tasks }: {
   mission: MissionRecord;
   onCancel: (id: string) => void;
   onDelete: (id: string) => void;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+  tasks: MissionTaskRecord[];
 }) {
   const st = MISSION_STATUS[m.status] || MISSION_STATUS.pending;
   const typeInfo = MISSION_TYPES.find(t => t.type === m.type);
   const isRunning = ['pending', 'planning', 'executing', 'judging'].includes(m.status);
 
+  // 进度条数据
+  const doneTasks = tasks.filter(t => ['passed', 'failed', 'skipped'].includes(t.status)).length;
+  const totalTasks = tasks.length;
+  const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+    <div className={`rounded-lg border transition-all ${
       isRunning ? 'border-cyan-600/30 bg-cyan-900/10' : 'border-slate-800 bg-slate-900/30'
     }`}>
-      <span className="text-lg">{typeInfo?.icon || '🎯'}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-200">{typeInfo?.label || m.type}</span>
-          <span className={`text-[10px] ${st.color}`}>{st.icon} {st.text}</span>
-          {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+      {/* 主行 — 可点击展开 */}
+      <div
+        className="flex items-center gap-3 p-3 cursor-pointer hover:bg-slate-800/30 transition-colors rounded-lg"
+        onClick={() => onToggle(m.id)}
+      >
+        <span className="text-lg">{typeInfo?.icon || '🎯'}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-200">{typeInfo?.label || m.type}</span>
+            <span className={`text-[10px] ${st.color}`}>{st.icon} {st.text}</span>
+            {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+            {totalTasks > 0 && (
+              <span className="text-[9px] text-slate-500">{doneTasks}/{totalTasks}</span>
+            )}
+          </div>
+          {/* 进度条 */}
+          {isRunning && totalTasks > 0 && (
+            <div className="mt-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-cyan-500 rounded-full transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          )}
+          {!expanded && m.conclusion && (
+            <p className="text-[10px] text-slate-500 mt-0.5 truncate">{m.conclusion.slice(0, 100)}...</p>
+          )}
+          <div className="text-[9px] text-slate-600 mt-0.5">
+            {m.token_usage > 0 && <span>{(m.token_usage / 1000).toFixed(1)}k tokens</span>}
+            {m.cost_usd > 0 && <span className="ml-2">${m.cost_usd.toFixed(4)}</span>}
+            <span className="ml-2">{new Date(m.created_at + 'Z').toLocaleString()}</span>
+          </div>
         </div>
-        {m.conclusion && (
-          <p className="text-[10px] text-slate-500 mt-0.5 truncate">{m.conclusion.slice(0, 100)}...</p>
-        )}
-        <div className="text-[9px] text-slate-600 mt-0.5">
-          {m.token_usage > 0 && <span>{(m.token_usage / 1000).toFixed(1)}k tokens</span>}
-          {m.cost_usd > 0 && <span className="ml-2">${m.cost_usd.toFixed(4)}</span>}
-          <span className="ml-2">{new Date(m.created_at + 'Z').toLocaleString()}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className={`text-[10px] transition-transform ${expanded ? 'rotate-180' : ''}`}>▾</span>
+          {isRunning && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onCancel(m.id); }}
+              className="text-[10px] px-2 py-1 rounded bg-red-900/20 text-red-400 hover:bg-red-800/30 transition-colors"
+            >取消</button>
+          )}
+          {!isRunning && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(m.id); }}
+              className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-500 hover:text-red-400 transition-colors"
+            >删除</button>
+          )}
         </div>
       </div>
-      <div className="flex gap-1 shrink-0">
-        {isRunning && (
-          <button onClick={() => onCancel(m.id)} className="text-[10px] px-2 py-1 rounded bg-red-900/20 text-red-400 hover:bg-red-800/30 transition-colors">取消</button>
-        )}
-        {!isRunning && (
-          <button onClick={() => onDelete(m.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-500 hover:text-red-400 transition-colors">删除</button>
-        )}
-      </div>
+
+      {/* 展开面板 — 任务列表 + 结论 */}
+      {expanded && (
+        <div className="px-3 pb-3 pt-0 border-t border-slate-800/50">
+          {/* 任务列表 */}
+          {tasks.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <div className="text-[10px] font-bold text-slate-400 mb-1">📋 任务清单 ({tasks.length})</div>
+              {tasks.map(task => {
+                const ts = TASK_STATUS_STYLE[task.status] || TASK_STATUS_STYLE.pending;
+                return (
+                  <details key={task.id} className="group">
+                    <summary className="flex items-center gap-2 cursor-pointer list-none text-[11px] py-1 hover:bg-slate-800/30 rounded px-1">
+                      <span className={`${ts.color} font-mono`}>{ts.icon}</span>
+                      <span className="text-slate-300 truncate flex-1">{task.title}</span>
+                      <span className={`text-[9px] ${ts.color}`}>{task.status}</span>
+                    </summary>
+                    {task.output && (
+                      <pre className="mt-1 ml-5 text-[10px] text-slate-500 bg-slate-900/60 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
+                        {task.output.length > 2000 ? task.output.slice(0, 2000) + '\n\n... (截断)' : task.output}
+                      </pre>
+                    )}
+                  </details>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 空任务提示 */}
+          {tasks.length === 0 && isRunning && (
+            <div className="text-[10px] text-slate-600 py-2">⏳ 正在规划任务...</div>
+          )}
+          {tasks.length === 0 && !isRunning && !m.conclusion && (
+            <div className="text-[10px] text-slate-600 py-2">暂无任务数据</div>
+          )}
+
+          {/* 结论区 */}
+          {m.conclusion && (
+            <div className="mt-3">
+              <div className="text-[10px] font-bold text-slate-400 mb-1">📝 结论</div>
+              <div className="text-[11px] text-slate-300 bg-slate-900/60 rounded p-3 max-h-60 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed">
+                {m.conclusion}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

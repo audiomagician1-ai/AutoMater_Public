@@ -29,7 +29,7 @@ interface StoreAgentReactState {
 /** 外层页面 (无需选中项目) */
 export type GlobalPageId = 'projects' | 'settings' | 'guide';
 /** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline' | 'guide';
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline' | 'sessions' | 'guide';
 
 interface LogEntry {
   id: number;
@@ -110,9 +110,18 @@ interface AppState {
   showAcceptancePanel: boolean;
   setShowAcceptancePanel: (show: boolean) => void;
 
+  // v6.0: Agent 工作细节消息流 (按 agentId 分组)
+  agentWorkMessages: Map<string, AgentWorkMessage[]>;
+  addAgentWorkMessage: (agentId: string, msg: AgentWorkMessage) => void;
+  clearAgentWorkMessages: (agentId?: string) => void;
+
   // v5.3: 全局右侧元Agent面板
   metaAgentPanelOpen: boolean;
   toggleMetaAgentPanel: () => void;
+
+  // v7.0: 元Agent 管理面板 (Modal)
+  metaAgentSettingsOpen: boolean;
+  setMetaAgentSettingsOpen: (open: boolean) => void;
 
   // v5.4: 元Agent对话消息持久化 (按 projectId 分组, '_global' 为跨项目)
   metaAgentMessages: Map<string, MetaAgentMessage[]>;
@@ -120,6 +129,25 @@ interface AppState {
   clearMetaAgentMessages: (projectId: string) => void;
   /** 更新最后一条 assistant 消息（用于流式/替换 placeholder） */
   updateLastAssistantMessage: (projectId: string, content: string) => void;
+}
+
+/** Agent 工作消息 — 对话式展示思维链、工具调用、输出等 */
+export interface AgentWorkMessage {
+  id: string;
+  type: 'think' | 'tool-call' | 'tool-result' | 'output' | 'status' | 'sub-agent' | 'error' | 'plan';
+  timestamp: number;
+  content: string;
+  /** 工具调用详情 */
+  tool?: {
+    name: string;
+    args: string;
+    success?: boolean;
+    outputPreview?: string;
+  };
+  /** 迭代编号 */
+  iteration?: number;
+  /** 关联 feature */
+  featureId?: string;
 }
 
 /** 元Agent对话消息 */
@@ -225,9 +253,31 @@ export const useAppStore = create<AppState>((set) => ({
   showAcceptancePanel: false,
   setShowAcceptancePanel: (show) => set({ showAcceptancePanel: show }),
 
+  // v6.0: Agent 工作细节消息流
+  agentWorkMessages: new Map(),
+  addAgentWorkMessage: (agentId, msg) => set((s) => {
+    const next = new Map(s.agentWorkMessages);
+    const list = [...(next.get(agentId) || []), msg];
+    // 保留最近 500 条
+    next.set(agentId, list.slice(-500));
+    return { agentWorkMessages: next };
+  }),
+  clearAgentWorkMessages: (agentId?) => set((s) => {
+    if (agentId) {
+      const next = new Map(s.agentWorkMessages);
+      next.delete(agentId);
+      return { agentWorkMessages: next };
+    }
+    return { agentWorkMessages: new Map() };
+  }),
+
   // v5.3: 全局右侧元Agent面板
   metaAgentPanelOpen: false,
   toggleMetaAgentPanel: () => set((s) => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
+
+  // v7.0: 元Agent 管理面板
+  metaAgentSettingsOpen: false,
+  setMetaAgentSettingsOpen: (open) => set({ metaAgentSettingsOpen: open }),
 
   // v5.4: 元Agent对话
   metaAgentMessages: new Map(),

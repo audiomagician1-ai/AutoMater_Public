@@ -1,11 +1,12 @@
 /**
- * Mission IPC handlers — 临时工作流管理接口 (v5.5)
+ * Mission IPC handlers — 临时工作流管理接口 (v6.0)
  */
 
 import { ipcMain, BrowserWindow } from 'electron';
 import {
   createMission, getMission, listMissions, getMissionTasks,
   runMission, cancelMission, cleanupMission, deleteMission,
+  getMissionPatches,
   type MissionType, type MissionConfig,
 } from '../engine/mission-runner';
 
@@ -74,5 +75,10 @@ export function setupMissionHandlers() {
   ipcMain.handle('mission:delete', (_event, missionId: string) => {
     deleteMission(missionId);
     return { success: true };
+  });
+
+  // v6.0: 获取 mission 的修复建议 patches
+  ipcMain.handle('mission:get-patches', (_event, missionId: string) => {
+    return getMissionPatches(missionId);
   });
 }

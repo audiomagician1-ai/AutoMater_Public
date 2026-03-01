@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import { ensureEventTable } from './engine/event-store';
 import { ensureCheckpointTable } from './engine/mission';
+import { ensureSessionsTable } from './engine/conversation-backup';
 
 let db: Database.Database;
 
@@ -222,10 +223,40 @@ export async function initDatabase(): Promise<void> {
     );
   `);
 
+  // v7.0: 元Agent 管理配置表 — 管家的名字/提示词/上下文设定等
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meta_agent_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
+  // v7.0: 元Agent 记忆系统 — 分类持久化记忆
+  //   category: identity / user_profile / lessons / facts / conversation_summary
+  //   - identity: 管家的自我认知(名字/角色/性格)
+  //   - user_profile: 对用户的了解(偏好/称呼/习惯)
+  //   - lessons: 经验教训(自动积累, 大容量)
+  //   - facts: 长期记忆事实(重要事件/决策/约定)
+  //   - conversation_summary: 对话摘要(自动压缩历史)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meta_agent_memories (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'auto',
+      importance INTEGER NOT NULL DEFAULT 5,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_meta_memories_category ON meta_agent_memories(category);
+    CREATE INDEX IF NOT EXISTS idx_meta_memories_importance ON meta_agent_memories(importance DESC);
+  `);
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在
   ensureEventTable();
   ensureCheckpointTable();
-  console.log('[DB] v2.0+ tables ensured');
+  ensureSessionsTable();
+  console.log('[DB] v2.0+ tables ensured (events, checkpoints, sessions)');
 }

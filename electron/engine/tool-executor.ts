@@ -14,7 +14,7 @@ import { execSync } from 'child_process';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues } from './git-provider';
-import { execInSandbox, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
+import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
@@ -29,6 +29,12 @@ import {
   cacheScreenshot, getCachedScreenshot,
 } from './visual-tools';
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
+import { trimToolResult } from './context-collector';
+
+const log = createLogger('tool-executor');
+
+// v6.0: 全局工具输出截断限制
+const TOOL_OUTPUT_MAX_TOKENS = 4000;
 
 // ═══════════════════════════════════════
 // Path Security
@@ -43,10 +49,111 @@ function assertSafePath(filePath: string): { ok: true; normalized: string } | { 
 }
 
 // ═══════════════════════════════════════
+// v6.0: 搜索结果智能排序
+// ═══════════════════════════════════════
+
+/** 路径权重: 关键路径的匹配更重要 */
+const PATH_WEIGHTS: Array<[RegExp, number]> = [
+  [/\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|h)$/i, 1.5],   // 源文件
+  [/index\.|main\.|app\.|server\./i, 1.3],                // 入口文件
+  [/test|spec|__test__/i, 0.8],                           // 测试文件 (略降)
+  [/\.md$/i, 0.6],                                         // 文档
+  [/\.json$|\.yaml$|\.yml$/i, 0.7],                       // 配置
+  [/node_modules|dist|build|\.min\./i, 0.1],              // 产出/vendor (大幅降权)
+];
+
+function getPathWeight(filepath: string): number {
+  for (const [re, w] of PATH_WEIGHTS) {
+    if (re.test(filepath)) return w;
+  }
+  return 1.0;
+}
+
+/**
+ * 对 grep/Select-String 原始输出按文件分组、按匹配密度 × 路径权重排序，
+ * 然后只输出 Top N 个最相关文件的匹配。
+ */
+function rankSearchResults(raw: string, pattern: string, workspacePath: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '无匹配';
+
+  const lines = trimmed.split('\n');
+
+  // Group by file
+  const fileMatches = new Map<string, { lines: string[]; matchCount: number }>();
+
+  for (const line of lines) {
+    // Windows Select-String: "C:\path\file.ts:123:content" or just file paths
+    // Unix grep: "./path/file.ts:123:content"
+    const match = line.match(/^(?:\s*>?\s*)?(.+?)[:\(](\d+)/);
+    if (!match) continue;
+
+    let filepath = match[1].trim();
+    // Normalize path: strip workspacePath prefix for display
+    filepath = filepath.replace(workspacePath, '').replace(/^[\\/]+/, '');
+
+    if (!fileMatches.has(filepath)) {
+      fileMatches.set(filepath, { lines: [], matchCount: 0 });
+    }
+    const entry = fileMatches.get(filepath)!;
+    entry.lines.push(line.trim());
+    // Check if this line is a direct match (not context)
+    if (!line.trim().startsWith('>') && line.includes(pattern.replace(/[.*+?^${}()|[\]\\]/g, ''))) {
+      entry.matchCount++;
+    } else {
+      entry.matchCount += 0.5; // context lines count less
+    }
+  }
+
+  if (fileMatches.size === 0) return trimmed.slice(0, 6000);
+
+  // Score files: matchCount × pathWeight × density
+  const scored = [...fileMatches.entries()].map(([filepath, data]) => {
+    const pathWeight = getPathWeight(filepath);
+    const density = data.matchCount / Math.max(data.lines.length, 1);
+    const score = data.matchCount * pathWeight * (1 + density);
+    return { filepath, data, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Emit top 15 files
+  const output: string[] = [`搜索 "${pattern}" — ${fileMatches.size} 个文件匹配 (按相关性排序):\n`];
+  const topN = scored.slice(0, 15);
+
+  for (const { filepath, data, score } of topN) {
+    output.push(`\n── ${filepath} (${data.matchCount} 处匹配, score=${score.toFixed(1)}) ──`);
+    // Show max 6 lines per file
+    const maxLines = Math.min(data.lines.length, 6);
+    for (let i = 0; i < maxLines; i++) {
+      output.push(data.lines[i]);
+    }
+    if (data.lines.length > maxLines) {
+      output.push(`  ... 和 ${data.lines.length - maxLines} 行更多匹配`);
+    }
+  }
+
+  if (scored.length > 15) {
+    output.push(`\n... 还有 ${scored.length - 15} 个文件有匹配`);
+  }
+
+  return output.join('\n');
+}
+
+// ═══════════════════════════════════════
 // Synchronous Tool Execution
 // ═══════════════════════════════════════
 
 export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
+  const result = executeToolRaw(call, ctx);
+  // v6.0: 全局输出截断 — 防止超长 tool result 浪费上下文窗口
+  if (result.output && result.output.length > TOOL_OUTPUT_MAX_TOKENS * 1.5) {
+    result.output = trimToolResult(result.output, TOOL_OUTPUT_MAX_TOKENS);
+  }
+  return result;
+}
+
+function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
     switch (call.name) {
 
@@ -155,19 +262,43 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
           if (process.platform === 'win32') {
             const escapedPattern = pattern.replace(/'/g, "''");
             const includeFilter = include === '*' ? '' : ` -Include '${include}'`;
-            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist' } | Select-String -Pattern '${escapedPattern}' -Context 2,2 | Select-Object -First 25 | Out-String -Width 200"`;
+            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}' -Context 2,2 | Select-Object -First 50 | Out-String -Width 200"`;
           } else {
-            cmd = `grep -rn --include="${include}" -C 2 "${pattern.replace(/"/g, '\\"')}" . | head -80`;
+            cmd = `grep -rn --include="${include}" -C 2 "${pattern.replace(/"/g, '\\"')}" . | grep -v node_modules | head -120`;
           }
-          const output = execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', maxBuffer: 512 * 1024, timeout: 15000 });
-          return { success: true, output: output.trim().slice(0, 5000) || '无匹配', action: 'search' };
+          const rawOutput = execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024, timeout: 20000 });
+
+          // v6.0: 智能排序 — 按匹配密度 + 文件路径权重排序
+          const ranked = rankSearchResults(rawOutput, pattern, ctx.workspacePath);
+          return { success: true, output: ranked.slice(0, 6000) || '无匹配', action: 'search' };
         } catch (err) {
           return { success: true, output: '无匹配', action: 'search' };
         }
       }
 
       case 'run_command': {
-        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath, timeoutMs: 60_000 };
+        const background = call.arguments.background === true;
+        const timeoutSec = call.arguments.timeout_seconds;
+        const timeoutMs = timeoutSec ? timeoutSec * 1000 : (background ? 1800_000 : 60_000);
+        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath, timeoutMs };
+
+        if (background) {
+          // v6.0: 异步后台执行
+          const handleOrErr = execInSandboxAsync(call.arguments.command, sandboxCfg);
+          if (!isAsyncHandle(handleOrErr)) {
+            // 安全检查失败, 返回同步错误
+            return { success: false, output: handleOrErr.stderr || '命令被拦截', action: 'shell' };
+          }
+          const processId = `proc-${Date.now().toString(36)}`;
+          registerProcess(processId, handleOrErr);
+          return {
+            success: true,
+            output: `后台进程已启动 (PID: ${handleOrErr.pid}, ID: ${processId})\n命令: ${call.arguments.command}\n超时: ${Math.round(timeoutMs / 1000)}s\n\n使用 run_command 查询状态: {"command": "echo __CHECK_PROCESS__${processId}"}`,
+            action: 'shell',
+          };
+        }
+
+        // 同步执行
         const result = execInSandbox(call.arguments.command, sandboxCfg);
         if (result.success) {
           return { success: true, output: (result.stdout || '(无输出)').slice(0, 8000), action: 'shell' };
@@ -176,6 +307,22 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         } else {
           return { success: false, output: `命令失败 (exit ${result.exitCode}):\n${result.stderr.slice(0, 3000)}${result.stdout ? '\n--- stdout ---\n' + result.stdout.slice(0, 2000) : ''}`, action: 'shell' };
         }
+      }
+
+      // v6.0: 查询后台进程状态
+      case 'check_process': {
+        const procId = call.arguments.process_id;
+        const handle = getActiveProcess(procId);
+        if (!handle) {
+          return { success: false, output: `进程 ${procId} 不存在或已结束`, action: 'read' };
+        }
+        const stdout = handle.getStdout();
+        const stderr = handle.getStderr();
+        return {
+          success: true,
+          output: `进程 ${procId} (PID: ${handle.pid}) 仍在运行\n\n--- stdout (最后2000字符) ---\n${stdout.slice(-2000)}\n${stderr ? '\n--- stderr (最后500字符) ---\n' + stderr.slice(-500) : ''}`,
+          action: 'read',
+        };
       }
 
       case 'run_test': {
@@ -395,6 +542,15 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
 // ═══════════════════════════════════════
 
 export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const result = await executeToolAsyncRaw(call, ctx);
+  // v6.0: 全局输出截断
+  if (result.output && result.output.length > TOOL_OUTPUT_MAX_TOKENS * 1.5) {
+    result.output = trimToolResult(result.output, TOOL_OUTPUT_MAX_TOKENS);
+  }
+  return result;
+}
+
+async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   // ── GitHub ──
   if (call.name === 'github_create_issue') {
     const issue = await createIssue(ctx.gitConfig, call.arguments.title, call.arguments.body, call.arguments.labels || []);

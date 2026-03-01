@@ -155,10 +155,22 @@ contextBridge.exposeInMainWorld('agentforge', {
     openDirectory: (title?: string) => ipcRenderer.invoke('dialog:open-directory', title),
   },
 
-  // ── 元Agent对话 (v5.4) ──
+  // ── 元Agent对话 + 管理 (v5.4 → v7.0) ──
   metaAgent: {
     chat: (projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) =>
       ipcRenderer.invoke('meta-agent:chat', projectId, message, history),
+    // Config
+    getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
+    saveConfig: (config: any) => ipcRenderer.invoke('meta-agent:config:save', config),
+    // Memory
+    listMemories: (category?: string, limit?: number) =>
+      ipcRenderer.invoke('meta-agent:memory:list', category, limit),
+    addMemory: (memory: any) => ipcRenderer.invoke('meta-agent:memory:add', memory),
+    updateMemory: (id: string, updates: any) => ipcRenderer.invoke('meta-agent:memory:update', id, updates),
+    deleteMemory: (id: string) => ipcRenderer.invoke('meta-agent:memory:delete', id),
+    searchMemories: (query: string, limit?: number) => ipcRenderer.invoke('meta-agent:memory:search', query, limit),
+    getMemoryStats: () => ipcRenderer.invoke('meta-agent:memory:stats'),
+    clearMemories: (category?: string) => ipcRenderer.invoke('meta-agent:memory:clear', category),
   },
 
   // ── 临时工作流 (v5.5) ──
@@ -171,12 +183,33 @@ contextBridge.exposeInMainWorld('agentforge', {
     cancel: (missionId: string) => ipcRenderer.invoke('mission:cancel', missionId),
     cleanup: (missionId: string) => ipcRenderer.invoke('mission:cleanup', missionId),
     delete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
+    getPatches: (missionId: string) => ipcRenderer.invoke('mission:get-patches', missionId),
   },
 
   // ── 上下文管理 (v5.6) ──
   context: {
     previewBaseline: (projectId: string, role: string, tokenBudget?: number) =>
       ipcRenderer.invoke('context:preview-baseline', projectId, role, tokenBudget),
+  },
+
+  // ── Session / Backup 管理 (v8.0) ──
+  session: {
+    create: (projectId: string | null, agentId: string, agentRole: string) =>
+      ipcRenderer.invoke('session:create', projectId, agentId, agentRole),
+    switch: (sessionId: string) =>
+      ipcRenderer.invoke('session:switch', sessionId),
+    getActive: (projectId: string | null, agentId: string) =>
+      ipcRenderer.invoke('session:get-active', projectId, agentId),
+    list: (projectId: string | null, agentId?: string) =>
+      ipcRenderer.invoke('session:list', projectId, agentId),
+    listAll: (limit?: number) =>
+      ipcRenderer.invoke('session:list-all', limit),
+    readBackup: (sessionId: string) =>
+      ipcRenderer.invoke('session:read-backup', sessionId),
+    backupStats: () =>
+      ipcRenderer.invoke('session:backup-stats'),
+    cleanup: (keepDays?: number) =>
+      ipcRenderer.invoke('session:cleanup', keepDays),
   },
 
   // ── 缩放控制 (v5.2) ──

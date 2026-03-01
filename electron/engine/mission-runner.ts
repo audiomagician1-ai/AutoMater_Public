@@ -53,6 +53,8 @@ export interface MissionConfig {
   maxWorkers?: number;
   /** 用户自定义指令 */
   customInstruction?: string;
+  /** v6.0: 归档策略 — 控制任务完成后如何处理中间数据 */
+  archivePolicy?: 'keep-all' | 'keep-conclusion' | 'delete';
 }
 
 export interface MissionTask {
@@ -226,6 +228,18 @@ export async function runMission(
 
   try {
     // ════════════════════════════════════
+    // v6.0: TTL 超时检查 — 如果任务已过期则立即失败
+    // ════════════════════════════════════
+    const ttlMs = (config.ttlHours || 24) * 3600 * 1000;
+    const startTime = new Date(mission.created_at).getTime();
+    const checkTTL = () => {
+      if (Date.now() - startTime > ttlMs) {
+        throw new Error(`TTL expired: mission exceeded ${config.ttlHours || 24} hours`);
+      }
+    };
+    checkTTL();
+
+    // ════════════════════════════════════
     // Phase 1: PLANNING
     // ════════════════════════════════════
     db.prepare("UPDATE missions SET status = 'planning', started_at = datetime('now') WHERE id = ?").run(missionId);
@@ -281,6 +295,7 @@ export async function runMission(
     emitProgress('📋 Planning', `已规划 ${tasks.length} 个任务`);
 
     if (signal?.aborted) throw new Error('Cancelled');
+    checkTTL();
 
     // ════════════════════════════════════
     // Phase 2: EXECUTING (Workers)
@@ -293,8 +308,11 @@ export async function runMission(
     const tokenBudget = config.tokenBudget || 100000;
 
     // Execute tasks (batched parallel)
+    const allPatches: Array<{ file: string; diff: string; description: string }> = [];
+
     for (let i = 0; i < missionTasks.length; i += maxParallel) {
       if (signal?.aborted) throw new Error('Cancelled');
+      checkTTL();
       if (totalTokens > tokenBudget) {
         emitProgress('⚠️ Budget', `Token 预算用尽 (${totalTokens}/${tokenBudget}), 跳过剩余任务`);
         break;
@@ -318,6 +336,10 @@ export async function runMission(
           db.prepare("UPDATE mission_tasks SET status = 'passed', output = ?, completed_at = datetime('now') WHERE id = ?")
             .run(workerResult.content, task.id);
 
+          // v6.0: 提取 Worker 产出中的 patches (文件修改建议)
+          const taskPatches = extractPatches(workerResult.content, task.title);
+          allPatches.push(...taskPatches);
+
           return { taskId: task.id, output: workerResult.content };
         }),
       );
@@ -333,6 +355,7 @@ export async function runMission(
     }
 
     if (signal?.aborted) throw new Error('Cancelled');
+    checkTTL();
 
     // ════════════════════════════════════
     // Phase 3: JUDGING
@@ -374,6 +397,14 @@ export async function runMission(
       `# Mission: ${type}\n\n${conclusion}\n\n---\nStats: ${JSON.stringify(stats, null, 2)}`,
     );
 
+    // v6.0: 保存 patches
+    if (allPatches.length > 0) {
+      fs.writeFileSync(
+        path.join(missionDir, 'patches.json'),
+        JSON.stringify(allPatches, null, 2),
+      );
+    }
+
     db.prepare(`
       UPDATE missions SET
         status = 'completed',
@@ -384,9 +415,23 @@ export async function runMission(
       WHERE id = ?
     `).run(conclusion, totalTokens, totalCost, missionId);
 
-    emitProgress('✅ Completed', `完成! ${stats.passed}/${stats.totalTasks} 通过, $${totalCost.toFixed(4)}`);
+    emitProgress('✅ Completed', `完成! ${stats.passed}/${stats.totalTasks} 通过, $${totalCost.toFixed(4)}${allPatches.length ? `, ${allPatches.length} 个修复建议` : ''}`);
 
-    return { missionId, conclusion, patches: [], stats };
+    // v6.0: 归档策略
+    const archivePolicy = config.archivePolicy || 'keep-all';
+    if (archivePolicy === 'delete') {
+      // 删除任务明细和工作目录, 只保留 missions 表记录
+      db.prepare('DELETE FROM mission_tasks WHERE mission_id = ?').run(missionId);
+      if (fs.existsSync(missionDir)) fs.rmSync(missionDir, { recursive: true, force: true });
+    } else if (archivePolicy === 'keep-conclusion') {
+      // 删除任务明细, 保留 conclusion 文件
+      db.prepare('DELETE FROM mission_tasks WHERE mission_id = ?').run(missionId);
+      const patchesFile = path.join(missionDir, 'patches.json');
+      // 保留 conclusion.md 和 patches.json, 删除其他
+    }
+    // 'keep-all' — 不做任何清理
+
+    return { missionId, conclusion, patches: allPatches, stats };
 
   } catch (err: any) {
     if (err.message === 'Cancelled') {
@@ -435,4 +480,118 @@ export function deleteMission(missionId: string) {
   const db = getDb();
   cleanupMission(missionId);
   db.prepare('DELETE FROM missions WHERE id = ?').run(missionId);
+}
+
+// ═══════════════════════════════════════
+// v6.0: Patch 提取 — 从 Worker 输出中解析文件修改建议
+// ═══════════════════════════════════════
+
+/**
+ * 从 Worker LLM 输出中提取文件修改建议。
+ * 支持两种格式:
+ * 1. JSON 格式: {"patches": [{"file": "...", "diff": "...", "description": "..."}]}
+ * 2. Markdown diff 格式: ```diff\n--- a/file\n+++ b/file\n@@ ... @@\n```
+ */
+function extractPatches(
+  output: string,
+  taskTitle: string,
+): Array<{ file: string; diff: string; description: string }> {
+  const patches: Array<{ file: string; diff: string; description: string }> = [];
+
+  // Attempt 1: 解析 JSON patches 字段
+  try {
+    const jsonMatch = output.match(/\{[\s\S]*"patches"[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed.patches)) {
+        for (const p of parsed.patches) {
+          if (p.file && (p.diff || p.description)) {
+            patches.push({
+              file: String(p.file),
+              diff: String(p.diff || ''),
+              description: String(p.description || ''),
+            });
+          }
+        }
+        if (patches.length > 0) return patches;
+      }
+    }
+  } catch { /* not valid JSON, try other formats */ }
+
+  // Attempt 2: 解析 Markdown diff 代码块
+  const diffBlocks = output.matchAll(/```diff\n([\s\S]*?)```/g);
+  for (const match of diffBlocks) {
+    const diffContent = match[1];
+    // Extract file name from --- a/file or +++ b/file
+    const fileMatch = diffContent.match(/(?:---|\+\+\+)\s+[ab]\/(.+)/);
+    const file = fileMatch?.[1]?.trim() || 'unknown';
+    patches.push({
+      file,
+      diff: diffContent.trim(),
+      description: `来自任务: ${taskTitle}`,
+    });
+  }
+
+  // Attempt 3: 解析 "fixSuggestion" 字段 (用于 regression_test / code_review)
+  try {
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.fixSuggestion && parsed.file) {
+        patches.push({
+          file: String(parsed.file || 'unknown'),
+          diff: '',
+          description: String(parsed.fixSuggestion),
+        });
+      }
+      // code_review format: issues with file + remediation
+      if (Array.isArray(parsed.issues)) {
+        for (const issue of parsed.issues) {
+          if (issue.file && (issue.remediation || issue.description)) {
+            patches.push({
+              file: String(issue.file),
+              diff: '',
+              description: `[${issue.severity || 'info'}] ${issue.description || ''} → ${issue.remediation || ''}`.trim(),
+            });
+          }
+        }
+      }
+      // security_audit format: vulnerabilities
+      if (Array.isArray(parsed.vulnerabilities)) {
+        for (const vuln of parsed.vulnerabilities) {
+          if (vuln.file) {
+            patches.push({
+              file: String(vuln.file),
+              diff: '',
+              description: `[${vuln.cwe || vuln.severity || 'security'}] ${vuln.description || ''} → ${vuln.remediation || ''}`.trim(),
+            });
+          }
+        }
+      }
+    }
+  } catch { /* not valid JSON */ }
+
+  return patches;
+}
+
+// ═══════════════════════════════════════
+// v6.0: Mission 获取 patches
+// ═══════════════════════════════════════
+
+/** 获取 mission 的所有修复建议 */
+export function getMissionPatches(missionId: string): Array<{ file: string; diff: string; description: string }> {
+  const mission = getMission(missionId);
+  if (!mission) return [];
+
+  const db = getDb();
+  const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as any;
+  if (!project?.workspace_path) return [];
+
+  const patchesFile = path.join(project.workspace_path, '.agentforge', 'missions', missionId, 'patches.json');
+  if (fs.existsSync(patchesFile)) {
+    try {
+      return JSON.parse(fs.readFileSync(patchesFile, 'utf-8'));
+    } catch { /* corrupted file */ }
+  }
+  return [];
 }

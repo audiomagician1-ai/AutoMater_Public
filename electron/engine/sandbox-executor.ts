@@ -1,5 +1,5 @@
 /**
- * Sandbox Executor — 轻量级子进程沙箱 (v5.5)
+ * Sandbox Executor — 轻量级子进程沙箱 (v6.0)
  *
  * 无 Docker 环境下的安全命令执行:
  * 1. 工作目录限制 (cwd 锁定到 workspace)
@@ -10,6 +10,7 @@
  * 6. 路径逃逸防护 (验证 cwd 合法性)
  * 7. 资源限制 (Windows: 进程优先级限制; 通用: 输出截断)
  * 8. 支持 PowerShell / bash
+ * 9. v6.0: 异步执行模式 — spawn + 实时 stdout 流式输出
  */
 
 import { execSync, spawn, type ChildProcess } from 'child_process';
@@ -332,4 +333,192 @@ export function installDeps(config: SandboxConfig): SandboxResult {
   else if (fs.existsSync(path.join(config.workspacePath, 'go.mod'))) cmd = 'go mod download';
 
   return execInSandbox(cmd, { ...config, timeoutMs: config.timeoutMs ?? 300_000 });
+}
+
+// ═══════════════════════════════════════
+// v6.0: 异步执行模式 (长时间进程)
+// ═══════════════════════════════════════
+
+export interface AsyncSandboxHandle {
+  /** 进程 PID */
+  pid: number;
+  /** 进程 Promise — resolve 时返回完整结果 */
+  promise: Promise<SandboxResult>;
+  /** 杀掉进程 */
+  kill: () => void;
+  /** 已经收集的 stdout (实时增长) */
+  getStdout: () => string;
+  /** 已经收集的 stderr (实时增长) */
+  getStderr: () => string;
+  /** 注册实时输出回调 */
+  onData: (cb: (chunk: string, stream: 'stdout' | 'stderr') => void) => void;
+}
+
+/**
+ * 异步执行命令 — 使用 spawn 替代 execSync，支持:
+ * - 长时间进程 (如 npm run dev, docker-compose up)
+ * - 实时 stdout/stderr 流式回调
+ * - 外部取消 (kill)
+ * - AbortSignal 集成
+ */
+export function execInSandboxAsync(
+  command: string,
+  config: SandboxConfig,
+  signal?: AbortSignal,
+): AsyncSandboxHandle | SandboxResult {
+  const start = Date.now();
+
+  // 复用同步模式的安全检查
+  if (isForbidden(command)) {
+    return {
+      success: false, exitCode: -1,
+      stdout: '', stderr: `命令被安全策略拦截: ${command}`,
+      timedOut: false, duration: 0,
+    };
+  }
+
+  if (hasPathTraversal(command, config.workspacePath)) {
+    return {
+      success: false, exitCode: -1,
+      stdout: '', stderr: `命令包含路径逃逸模式，已拦截: ${command.slice(0, 200)}`,
+      timedOut: false, duration: 0,
+    };
+  }
+
+  const wpCheck = validateWorkspacePath(config.workspacePath);
+  if (!wpCheck.ok) {
+    return {
+      success: false, exitCode: -1,
+      stdout: '', stderr: wpCheck.error || '工作路径验证失败',
+      timedOut: false, duration: 0,
+    };
+  }
+
+  const cwd = wpCheck.resolved;
+  const timeout = config.timeoutMs ?? DEFAULT_TIMEOUT;
+  const maxBuffer = config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
+  const env = buildSafeEnv(config.env);
+  const isWindows = process.platform === 'win32';
+
+  // 使用 shell spawn
+  const child: ChildProcess = spawn(command, [], {
+    cwd,
+    env,
+    shell: isWindows ? 'powershell.exe' : '/bin/sh',
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdoutBuf = '';
+  let stderrBuf = '';
+  let killed = false;
+  let timerHandle: ReturnType<typeof setTimeout> | null = null;
+  const dataListeners: Array<(chunk: string, stream: 'stdout' | 'stderr') => void> = [];
+
+  // 收集 stdout
+  child.stdout?.on('data', (chunk: Buffer) => {
+    const text = chunk.toString('utf-8');
+    if (stdoutBuf.length < maxBuffer) {
+      stdoutBuf += text;
+      if (stdoutBuf.length > maxBuffer) stdoutBuf = stdoutBuf.slice(0, maxBuffer);
+    }
+    for (const cb of dataListeners) {
+      try { cb(text, 'stdout'); } catch { /* ignore listener errors */ }
+    }
+  });
+
+  // 收集 stderr
+  child.stderr?.on('data', (chunk: Buffer) => {
+    const text = chunk.toString('utf-8');
+    if (stderrBuf.length < maxBuffer / 2) {
+      stderrBuf += text;
+      if (stderrBuf.length > maxBuffer / 2) stderrBuf = stderrBuf.slice(0, maxBuffer / 2);
+    }
+    for (const cb of dataListeners) {
+      try { cb(text, 'stderr'); } catch { /* ignore listener errors */ }
+    }
+  });
+
+  // 超时控制
+  timerHandle = setTimeout(() => {
+    killed = true;
+    child.kill('SIGTERM');
+    // 给进程 5s 收尾
+    setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already dead */ } }, 5000);
+  }, timeout);
+
+  // AbortSignal 集成
+  if (signal) {
+    const onAbort = () => { killed = true; child.kill('SIGTERM'); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    // Cleanup listener when process exits
+    child.once('exit', () => signal.removeEventListener('abort', onAbort));
+  }
+
+  // Promise — resolve when process exits
+  const promise = new Promise<SandboxResult>((resolve) => {
+    child.once('exit', (code, sig) => {
+      if (timerHandle) clearTimeout(timerHandle);
+      const timedOut = killed && sig === 'SIGTERM';
+      resolve({
+        success: code === 0,
+        exitCode: code ?? -1,
+        stdout: stdoutBuf,
+        stderr: stderrBuf,
+        timedOut,
+        duration: Date.now() - start,
+      });
+    });
+
+    child.once('error', (err) => {
+      if (timerHandle) clearTimeout(timerHandle);
+      resolve({
+        success: false,
+        exitCode: -1,
+        stdout: stdoutBuf,
+        stderr: err.message,
+        timedOut: false,
+        duration: Date.now() - start,
+      });
+    });
+  });
+
+  return {
+    pid: child.pid ?? 0,
+    promise,
+    kill: () => { killed = true; child.kill('SIGTERM'); },
+    getStdout: () => stdoutBuf,
+    getStderr: () => stderrBuf,
+    onData: (cb) => dataListeners.push(cb),
+  };
+}
+
+/** 判断返回值是同步错误还是异步 handle */
+export function isAsyncHandle(result: AsyncSandboxHandle | SandboxResult): result is AsyncSandboxHandle {
+  return 'promise' in result;
+}
+
+// ═══════════════════════════════════════
+// v6.0: 活跃子进程管理
+// ═══════════════════════════════════════
+
+const activeProcesses = new Map<string, AsyncSandboxHandle>();
+
+/** 注册一个异步进程到管理器 */
+export function registerProcess(id: string, handle: AsyncSandboxHandle): void {
+  activeProcesses.set(id, handle);
+  handle.promise.then(() => activeProcesses.delete(id)).catch(() => activeProcesses.delete(id));
+}
+
+/** 获取活跃进程 */
+export function getActiveProcess(id: string): AsyncSandboxHandle | undefined {
+  return activeProcesses.get(id);
+}
+
+/** 杀掉所有活跃子进程 (graceful shutdown) */
+export function killAllProcesses(): void {
+  for (const [id, handle] of activeProcesses) {
+    try { handle.kill(); } catch { /* ignore */ }
+    activeProcesses.delete(id);
+  }
 }

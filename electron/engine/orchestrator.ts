@@ -16,6 +16,7 @@
  */
 
 import { BrowserWindow } from 'electron';
+import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db';
@@ -54,6 +55,7 @@ import { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkCon
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import { claimFiles, releaseFiles, getClaimsSummary, predictAffectedFiles, cleanupDecisionLog } from './decision-log';
 import { incrementalUpdate, scanProjectSkeleton, type ProjectSkeleton } from './project-importer';
+import { backupConversation } from './conversation-backup';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -63,6 +65,112 @@ import type { GitProviderConfig } from './git-provider';
 export { stopOrchestrator } from './agent-manager';
 export { getAgentReactStates, getContextSnapshots } from './react-loop';
 export type { AgentReactState, ReactIterationState, MessageTokenBreakdown, GenericReactConfig, GenericReactResult } from './react-loop';
+
+// ═══════════════════════════════════════
+// Hot-Join: 运行中的 Worker Pool 上下文
+// ═══════════════════════════════════════
+
+/** 每个 developing 项目的热加入上下文 */
+interface HotJoinContext {
+  projectId: string;
+  qaId: string;
+  settings: AppSettings;
+  win: BrowserWindow | null;
+  signal: AbortSignal;
+  workspacePath: string | null;
+  gitConfig: GitProviderConfig;
+  workerPromises: Set<Promise<void>>;
+  /** 已分配的最大 worker 编号 (用于生成唯一 workerId) */
+  nextWorkerSeq: number;
+}
+
+/** 活跃的热加入上下文表 (projectId → HotJoinContext) */
+const hotJoinContexts = new Map<string, HotJoinContext>();
+
+/**
+ * 注册热加入上下文 — 在进入 developing 阶段时调用。
+ * orchestrator 结束后自动清理。
+ */
+function registerHotJoinContext(ctx: HotJoinContext) {
+  hotJoinContexts.set(ctx.projectId, ctx);
+}
+
+function unregisterHotJoinContext(projectId: string) {
+  hotJoinContexts.delete(projectId);
+}
+
+/**
+ * v9.0: 热加入 IPC 事件监听器 (仅需注册一次)
+ * 当 team:add 成功后，project.ts 调用 emitMemberAdded() 触发此监听。
+ * 如果该项目当前处于 developing 阶段，立即 spawn 新 worker。
+ */
+const orchestratorBus = new EventEmitter();
+orchestratorBus.setMaxListeners(20);
+let hotJoinListenerRegistered = false;
+
+/** project.ts 调用此函数触发热加入事件 */
+export function emitMemberAdded(payload: { projectId: string; memberId: string; role: string; name: string }) {
+  orchestratorBus.emit('team:member-added', payload);
+}
+
+export function ensureHotJoinListener() {
+  if (hotJoinListenerRegistered) return;
+  hotJoinListenerRegistered = true;
+
+  orchestratorBus.on('team:member-added', (payload: { projectId: string; memberId: string; role: string; name: string }) => {
+    const { projectId, memberId, role, name } = payload;
+
+    // 只对 developer 角色做热加入 spawn
+    if (role !== 'developer') {
+      log.debug(`Hot-join: ignoring non-developer role "${role}" for project ${projectId}`);
+      return;
+    }
+
+    const ctx = hotJoinContexts.get(projectId);
+    if (!ctx) {
+      log.debug(`Hot-join: no active developing context for project ${projectId}`);
+      return;
+    }
+
+    if (ctx.signal.aborted) {
+      log.debug(`Hot-join: orchestrator already aborted for project ${projectId}`);
+      return;
+    }
+
+    // 验证项目确实在 developing 阶段
+    const db = getDb();
+    const project = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+    if (project?.status !== 'developing') {
+      log.debug(`Hot-join: project ${projectId} not in developing phase (status=${project?.status})`);
+      return;
+    }
+
+    // 分配 worker ID
+    ctx.nextWorkerSeq += 1;
+    const workerId = `dev-hot-${ctx.nextWorkerSeq}`;
+
+    log.info(`Hot-join: spawning new worker "${workerId}" for project ${projectId} (member: ${name} [${memberId}])`);
+    sendToUI(ctx.win, 'agent:log', {
+      projectId,
+      agentId: 'system',
+      content: `🔥 热加入: "${name}" 已上线为 ${workerId}，立即投入开发`,
+    });
+
+    spawnAgent(projectId, workerId, 'developer', ctx.win);
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
+
+    // 启动 workerLoop — 它会自动从 lockNextFeature 领取任务
+    const promise = workerLoop(
+      projectId, workerId, ctx.qaId, ctx.settings, ctx.win, ctx.signal,
+      ctx.workspacePath, ctx.gitConfig,
+    );
+    ctx.workerPromises.add(promise);
+    // 当 workerLoop 结束（正常完成或异常），从集合中移除
+    promise.finally(() => {
+      ctx.workerPromises.delete(promise);
+    });
+  });
+}
 
 // ═══════════════════════════════════════
 // Main Orchestrator Entry Point
@@ -322,14 +430,33 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     githubToken: project2.github_token ?? undefined,
   };
 
-  const workerPromises: Promise<void>[] = [];
+  // v9.0: 注册热加入上下文 — 支持 developing 阶段动态添加 worker
+  ensureHotJoinListener();
+  const workerPromiseSet = new Set<Promise<void>>();
+  const hotJoinCtx: HotJoinContext = {
+    projectId, qaId, settings, win, signal, workspacePath, gitConfig,
+    workerPromises: workerPromiseSet,
+    nextWorkerSeq: workerCount,  // 从已有 worker 数量开始编号
+  };
+  registerHotJoinContext(hotJoinCtx);
+
   for (let i = 0; i < workerCount; i++) {
     const workerId = `dev-${i + 1}`;
     spawnAgent(projectId, workerId, 'developer', win);
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    workerPromises.push(workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig));
+    const p = workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig);
+    workerPromiseSet.add(p);
+    p.finally(() => workerPromiseSet.delete(p));
   }
-  await Promise.all(workerPromises);
+  // 等待所有 worker (含热加入的) 完成
+  // 使用轮询而非 Promise.all, 因为热加入会动态添加 promise
+  while (workerPromiseSet.size > 0 && !signal.aborted) {
+    await Promise.race([...workerPromiseSet]);
+    // race 返回时至少一个 worker 完成/移除了, 继续等待剩余的
+    // 如果热加入又加了新 worker, 下一轮 while 会 pick up
+    await sleep(100);  // 微等以允许 finally 清理
+  }
+  unregisterHotJoinContext(projectId);
 
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
 
@@ -547,6 +674,23 @@ async function phaseIncrementalPM(
     const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
 
+    // v8.0: 备份增量 PM 分析对话
+    backupConversation({
+      projectId,
+      agentId: pmId,
+      agentRole: 'pm',
+      messages: [
+        { role: 'system', content: pmPrompt },
+        { role: 'user', content: `增量分析: ${newCapabilities.length} 个新功能` },
+        { role: 'assistant', content: result.content.slice(0, 50000) },
+      ],
+      totalInputTokens: result.inputTokens,
+      totalOutputTokens: result.outputTokens,
+      totalCost: cost,
+      model: settings.strongModel,
+      completed: true,
+    });
+
     const parseResult = parseStructuredOutput(result.content, PM_FEATURE_SCHEMA);
     if (!parseResult.ok) {
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析输出解析失败: ${parseResult.error}` });
@@ -624,6 +768,23 @@ async function phasePMDesignDoc(
     const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
 
+    // v8.0: 备份 PM 设计文档对话
+    backupConversation({
+      projectId,
+      agentId: pmId,
+      agentRole: 'pm',
+      messages: [
+        { role: 'system', content: designPrompt ?? PM_DESIGN_DOC_PROMPT },
+        { role: 'user', content: `设计文档 (${features.length} features)` },
+        { role: 'assistant', content: result.content.slice(0, 50000) },
+      ],
+      totalInputTokens: result.inputTokens,
+      totalOutputTokens: result.outputTokens,
+      totalCost: cost,
+      model: settings.strongModel,
+      completed: true,
+    });
+
     // 写入 .agentforge/docs/design.md
     const version = writeDoc(workspacePath, 'design', result.content, pmId, '初始版本: PM 生成设计文档');
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ 设计文档已写入 (v${version}, ${result.content.length} chars, $${cost.toFixed(4)})` });
@@ -693,6 +854,24 @@ async function phaseArchitect(
     }
 
     updateAgentStats(archId, projectId, archResult.inputTokens, archResult.outputTokens, archCost);
+
+    // v8.0: 备份架构师对话
+    backupConversation({
+      projectId,
+      agentId: archId,
+      agentRole: 'architect',
+      messages: [
+        { role: 'system', content: archPrompt },
+        { role: 'user', content: `架构+产品设计 (${features.length} features)` },
+        { role: 'assistant', content: archResult.content.slice(0, 50000) },
+      ],
+      totalInputTokens: archResult.inputTokens,
+      totalOutputTokens: archResult.outputTokens,
+      totalCost: archCost,
+      model: settings.strongModel,
+      completed: true,
+    });
+
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(archId);
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
     emitEvent({ projectId, agentId: archId, type: 'phase:architect:end', data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost }, inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost });

@@ -7,7 +7,7 @@ import { ipcMain, BrowserWindow, app, shell, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
-import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactStates } from '../engine/orchestrator';
+import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactStates, emitMemberAdded } from '../engine/orchestrator';
 import { runChangeRequest } from '../engine/change-manager';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
@@ -345,7 +345,7 @@ export function setupProjectHandlers() {
     return db.prepare('SELECT * FROM team_members WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
 
-  /** 新增成员 */
+  /** 新增成员 — v9.0: 成功后发 team:member-added 事件 (热加入) */
   ipcMain.handle('team:add', (_event, projectId: string, member: {
     role: string; name: string; model?: string;
     capabilities?: string[]; system_prompt?: string; context_files?: string[];
@@ -362,6 +362,15 @@ export function setupProjectHandlers() {
       JSON.stringify(member.context_files || []),
       member.max_context_tokens || 128000,
     );
+
+    // v9.0: 事件驱动热加入 — 通知所有窗口 + 主进程编排器
+    const payload = { projectId, memberId: id, role: member.role, name: member.name };
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('team:member-added', payload);
+    }
+    // 触发主进程内部事件 — orchestrator 监听此事件决定是否 spawn worker
+    emitMemberAdded(payload);
+
     return { success: true, memberId: id };
   });
 

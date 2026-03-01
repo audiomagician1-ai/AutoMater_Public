@@ -29,6 +29,7 @@ import { buildCodeGraph, graphSummary } from './code-graph';
 import { readRecentDecisions, formatDecisionsForContext, appendSharedDecision } from './memory-system';
 import { emitEvent } from './event-store';
 import { createLogger } from './logger';
+import { backupConversation } from './conversation-backup';
 import type { GitProviderConfig } from './git-provider';
 
 const log = createLogger('react-loop');
@@ -612,6 +613,31 @@ export async function reactDeveloperLoop(
       .run(JSON.stringify(allFiles), feature.id, projectId);
   }
 
+  // ── v8.0: 对话备份 ──
+  backupConversation({
+    projectId,
+    agentId: workerId,
+    agentRole: 'developer',
+    featureId: feature.id,
+    messages: messages.map(m => ({
+      role: m.role as any,
+      content: m.content,
+      tool_calls: m.tool_calls,
+      tool_call_id: m.tool_call_id,
+    })),
+    reactIterations: reactState.iterations.length,
+    totalInputTokens: totalIn,
+    totalOutputTokens: totalOut,
+    totalCost,
+    model,
+    completed,
+    metadata: {
+      featureTitle: feature.title,
+      featureDescription: feature.description,
+      filesWritten: [...filesWritten],
+    },
+  });
+
   return {
     completed,
     filesWritten: [...filesWritten],
@@ -900,6 +926,30 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       await sleep(2000);
     }
   }
+
+  // ── v8.0: 对话备份 ──
+  backupConversation({
+    projectId,
+    agentId,
+    agentRole: role,
+    messages: messages.map(m => ({
+      role: m.role as any,
+      content: m.content,
+      tool_calls: m.tool_calls,
+      tool_call_id: m.tool_call_id,
+    })),
+    reactIterations: guardState.iteration,
+    totalInputTokens: totalIn,
+    totalOutputTokens: totalOut,
+    totalCost,
+    model,
+    completed,
+    metadata: {
+      blocked,
+      blockReason: blocked ? blockReason : undefined,
+      filesWritten: [...filesWritten],
+    },
+  });
 
   return {
     completed, blocked,

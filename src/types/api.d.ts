@@ -2,6 +2,31 @@
  * Preload API 类型声明 — 渲染进程可用的接口
  */
 
+/** v7.0: 元Agent 管理配置 */
+interface MetaAgentConfig {
+  name: string;
+  userNickname: string;
+  personality: string;
+  systemPrompt: string;
+  contextHistoryLimit: number;
+  contextTokenLimit: number;
+  maxResponseTokens: number;
+  autoMemory: boolean;
+  memoryInjectLimit: number;
+  greeting: string;
+}
+
+/** v7.0: 元Agent 记忆记录 */
+interface MetaAgentMemoryRecord {
+  id: string;
+  category: 'identity' | 'user_profile' | 'lessons' | 'facts' | 'conversation_summary';
+  content: string;
+  source: 'auto' | 'manual' | 'system';
+  importance: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface FileNode {
   name: string;
   path: string;
@@ -137,6 +162,7 @@ interface AgentForgeAPI {
   /** v3.1: 团队管理 */
   team: {
     list(projectId: string): Promise<TeamMember[]>;
+    /** v9.0: 成功后触发 team:member-added IPC 事件 (热加入) */
     add(projectId: string, member: Partial<TeamMember>): Promise<{ success: boolean; memberId: string }>;
     update(memberId: string, fields: Partial<TeamMember>): Promise<{ success: boolean }>;
     delete(memberId: string): Promise<{ success: boolean }>;
@@ -200,7 +226,7 @@ interface AgentForgeAPI {
     openDirectory(title?: string): Promise<{ canceled: boolean; filePaths: string[] }>;
   };
 
-  /** v5.4: 元Agent对话 */
+  /** v5.4 → v7.0: 元Agent对话 + 管理 + 记忆 */
   metaAgent: {
     chat(projectId: string | null, message: string, history?: Array<{ role: string; content: string }>): Promise<{
       reply: string;
@@ -209,17 +235,29 @@ interface AgentForgeAPI {
       tokens?: number;
       cost?: number;
     }>;
+    // Config
+    getConfig(): Promise<MetaAgentConfig>;
+    saveConfig(config: Partial<MetaAgentConfig>): Promise<{ success: boolean; config: MetaAgentConfig }>;
+    // Memory
+    listMemories(category?: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
+    addMemory(memory: { category: string; content: string; source?: string; importance?: number }): Promise<MetaAgentMemoryRecord>;
+    updateMemory(id: string, updates: { content?: string; importance?: number; category?: string }): Promise<{ success: boolean }>;
+    deleteMemory(id: string): Promise<{ success: boolean }>;
+    searchMemories(query: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
+    getMemoryStats(): Promise<{ total: number; byCategory: Record<string, number> }>;
+    clearMemories(category?: string): Promise<{ success: boolean }>;
   };
 
-  /** v5.5: 临时工作流 */
+  /** v6.0: 临时工作流 */
   ephemeralMission: {
-    create(projectId: string, type: string, config?: { scope?: string; tokenBudget?: number; ttlHours?: number; maxWorkers?: number; customInstruction?: string }): Promise<{ success: boolean; missionId?: string; error?: string }>;
+    create(projectId: string, type: string, config?: { scope?: string; tokenBudget?: number; ttlHours?: number; maxWorkers?: number; customInstruction?: string; archivePolicy?: 'keep-all' | 'keep-conclusion' | 'delete' }): Promise<{ success: boolean; missionId?: string; error?: string }>;
     get(missionId: string): Promise<MissionRecord | null>;
     list(projectId: string): Promise<MissionRecord[]>;
     getTasks(missionId: string): Promise<MissionTaskRecord[]>;
     cancel(missionId: string): Promise<{ success: boolean }>;
     cleanup(missionId: string): Promise<{ success: boolean }>;
     delete(missionId: string): Promise<{ success: boolean }>;
+    getPatches(missionId: string): Promise<Array<{ file: string; diff: string; description: string }>>;
   };
 
   /** v5.2: 缩放控制 */
