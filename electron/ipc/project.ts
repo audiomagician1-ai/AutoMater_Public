@@ -7,7 +7,7 @@ import { ipcMain, BrowserWindow, app, shell, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
-import { runOrchestrator, stopOrchestrator } from '../engine/orchestrator';
+import { runOrchestrator, stopOrchestrator, getContextSnapshots } from '../engine/orchestrator';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
 
@@ -195,6 +195,17 @@ export function setupProjectHandlers() {
   // ── GitHub 连接测试 ──
   ipcMain.handle('project:test-github', async (_event, repo: string, token: string) => {
     return testGitHubConnection(repo, token);
+  });
+
+  // ── 获取上下文快照 (v1.1) ──
+  ipcMain.handle('project:get-context-snapshots', (_event, projectId: string) => {
+    const snapshots = getContextSnapshots(projectId);
+    // Map → 普通对象，IPC 不能传 Map
+    const result: Record<string, any> = {};
+    for (const [agentId, snap] of snapshots) {
+      result[agentId] = snap;
+    }
+    return result;
   });
 }
 

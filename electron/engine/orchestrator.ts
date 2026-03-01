@@ -13,7 +13,7 @@ import { BrowserWindow, Notification } from 'electron';
 import { getDb } from '../db';
 import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_REACT_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks, readWorkspaceFile, type WrittenFile } from './file-writer';
-import { collectDeveloperContext, collectLightContext } from './context-collector';
+import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { initGitRepo, commitWorkspace } from './workspace-git';
 import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
@@ -23,6 +23,20 @@ import type { GitProviderConfig } from './git-provider';
 // 运行中的编排器注册表（支持停止）
 // ═══════════════════════════════════════
 const runningOrchestrators = new Map<string, AbortController>();
+
+// v1.1: 上下文快照缓存 (projectId → agentId → snapshot)
+const contextSnapshotCache = new Map<string, Map<string, ContextSnapshot>>();
+
+export function getContextSnapshots(projectId: string): Map<string, ContextSnapshot> {
+  return contextSnapshotCache.get(projectId) ?? new Map();
+}
+
+function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
+  if (!contextSnapshotCache.has(projectId)) {
+    contextSnapshotCache.set(projectId, new Map());
+  }
+  contextSnapshotCache.get(projectId)!.set(snapshot.agentId, snapshot);
+}
 
 export function stopOrchestrator(projectId: string) {
   const ctrl = runningOrchestrators.get(projectId);
@@ -1016,7 +1030,7 @@ async function reactDeveloperLoop(
   let plan: FeaturePlan | null = null;
   try {
     const planCtx = workspacePath
-      ? collectLightContext(workspacePath, projectId, feature, undefined, 2000)
+      ? collectLightContext(workspacePath, projectId, feature, undefined, 2000, workerId)
       : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
 
     const planResult = await callLLM(settings, model, [
@@ -1051,8 +1065,17 @@ async function reactDeveloperLoop(
   // ── Step 2: ReAct 循环 ──
   // 构建初始消息列表
   const initialContext = workspacePath
-    ? collectDeveloperContext(workspacePath, projectId, feature, 5000)
+    ? collectDeveloperContext(workspacePath, projectId, feature, 5000, workerId)
     : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
+
+  // v1.1: 推送上下文快照到 UI
+  if (initialContext.snapshot) {
+    cacheContextSnapshot(projectId, initialContext.snapshot);
+    sendToUI(win, 'agent:context-snapshot', {
+      projectId,
+      snapshot: initialContext.snapshot,
+    });
+  }
 
   const planText = plan ? getPlanSummary(plan) : '';
 

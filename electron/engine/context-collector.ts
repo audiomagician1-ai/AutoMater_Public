@@ -12,6 +12,7 @@
  * 控制总上下文大小不超过指定 token 预算（粗略按字符数估算）
  * v0.8: 新增分层压缩
  * v1.0: 新增 repo-map + AGENTS.md 集成
+ * v1.1: 结构化 ContextSection + ContextSnapshot（可视化上下文管理器）
  */
 
 import fs from 'fs';
@@ -23,6 +24,52 @@ import { generateRepoMap } from './repo-map';
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 1.5);
+}
+
+// ═══════════════════════════════════════
+// v1.1: 结构化上下文数据类型
+// ═══════════════════════════════════════
+
+/** 单个上下文模块 */
+export interface ContextSection {
+  /** 模块唯一 ID (如 'agents-md', 'architecture', 'file-tree') */
+  id: string;
+  /** 人类可读名称 */
+  name: string;
+  /** 来源类型标签 */
+  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'plan' | 'qa-feedback';
+  /** 内容文本 */
+  content: string;
+  /** 字符数 */
+  chars: number;
+  /** 估算 token 数 */
+  tokens: number;
+  /** 是否被截断 */
+  truncated: boolean;
+  /** 包含的文件路径（如适用） */
+  files?: string[];
+  /** token 预算占比 (0-1) */
+  budgetRatio?: number;
+}
+
+/** 完整上下文快照 */
+export interface ContextSnapshot {
+  /** 关联的 Agent ID */
+  agentId: string;
+  /** 关联的 Feature ID */
+  featureId: string;
+  /** 快照时间 */
+  timestamp: number;
+  /** 各模块 */
+  sections: ContextSection[];
+  /** 汇总 */
+  totalChars: number;
+  totalTokens: number;
+  tokenBudget: number;
+  /** 拼接后的完整文本 */
+  contextText: string;
+  /** 包含的文件总数 */
+  filesIncluded: number;
 }
 
 /**
@@ -60,6 +107,7 @@ function formatTreeCompact(nodes: FileNode[], indent: string = ''): string {
   return lines.join('\n');
 }
 
+// 兼容旧接口
 export interface ContextResult {
   /** 拼接好的上下文文本，可直接放入 LLM prompt */
   contextText: string;
@@ -67,47 +115,63 @@ export interface ContextResult {
   estimatedTokens: number;
   /** 包含的文件数 */
   filesIncluded: number;
+  /** v1.1: 结构化快照 (可选, 向后兼容) */
+  snapshot?: ContextSnapshot;
 }
 
 /**
  * 为某个 Feature 收集开发上下文
+ * v1.1: 内部使用 ContextSection[] 结构化构建, 同时返回 ContextSnapshot
  */
 export function collectDeveloperContext(
   workspacePath: string,
   projectId: string,
   feature: any,
-  tokenBudget: number = 6000
+  tokenBudget: number = 6000,
+  agentId?: string
 ): ContextResult {
-  const sections: string[] = [];
+  const sectionList: ContextSection[] = [];
   let totalChars = 0;
   let filesIncluded = 0;
   const charBudget = tokenBudget * 1.5; // 粗略转换
 
+  /** 辅助: 添加一个 section */
+  function addSection(sec: Omit<ContextSection, 'chars' | 'tokens'>) {
+    const chars = sec.content.length;
+    const tokens = estimateTokens(sec.content);
+    sectionList.push({ ...sec, chars, tokens });
+    totalChars += chars;
+    filesIncluded += sec.files?.length ?? 0;
+  }
+
   // ─── 0. AGENTS.md 项目指令 (v1.0, 最高优先) ───
   const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
   if (agentsMd) {
-    const agentsSection = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
-    if (agentsSection.length < charBudget * 0.15) {
-      sections.push(agentsSection);
-      totalChars += agentsSection.length;
-      filesIncluded++;
+    const agentsContent = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
+    if (agentsContent.length < charBudget * 0.15) {
+      addSection({
+        id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
+        content: agentsContent, truncated: false, files: ['.agentforge/AGENTS.md'],
+      });
     }
   }
 
   // ─── 1. 架构文档 (最高优先) ───
   const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
   if (archContent) {
-    const archSection = `## 项目架构文档\n${archContent}`;
-    if (totalChars + archSection.length < charBudget * 0.4) {
-      sections.push(archSection);
-      totalChars += archSection.length;
-      filesIncluded++;
+    const archFull = `## 项目架构文档\n${archContent}`;
+    if (totalChars + archFull.length < charBudget * 0.4) {
+      addSection({
+        id: 'architecture', name: '架构文档 ARCHITECTURE.md', source: 'architecture',
+        content: archFull, truncated: false, files: ['ARCHITECTURE.md'],
+      });
     } else {
-      // 截断架构文档
       const maxLen = Math.floor(charBudget * 0.3);
-      sections.push(`## 项目架构文档 (已截断)\n${archContent.slice(0, maxLen)}\n... [截断]`);
-      totalChars += maxLen;
-      filesIncluded++;
+      addSection({
+        id: 'architecture', name: '架构文档 ARCHITECTURE.md (截断)', source: 'architecture',
+        content: `## 项目架构文档 (已截断)\n${archContent.slice(0, maxLen)}\n... [截断]`,
+        truncated: true, files: ['ARCHITECTURE.md'],
+      });
     }
   }
 
@@ -116,8 +180,10 @@ export function collectDeveloperContext(
   if (tree.length > 0) {
     const treeText = `## 当前文件结构\n\`\`\`\n${formatTreeCompact(tree)}\n\`\`\``;
     if (totalChars + treeText.length < charBudget) {
-      sections.push(treeText);
-      totalChars += treeText.length;
+      addSection({
+        id: 'file-tree', name: '文件目录树', source: 'file-tree',
+        content: treeText, truncated: false,
+      });
     }
   }
 
@@ -126,13 +192,16 @@ export function collectDeveloperContext(
     const repoMap = generateRepoMap(workspacePath, 60, 15, 120);
     if (repoMap) {
       if (totalChars + repoMap.length < charBudget * 0.55) {
-        sections.push(repoMap);
-        totalChars += repoMap.length;
+        addSection({
+          id: 'repo-map', name: 'Repository Map (代码符号索引)', source: 'repo-map',
+          content: repoMap, truncated: false,
+        });
       } else {
-        // 截断 repo map
         const maxLen = Math.floor(charBudget * 0.15);
-        sections.push(repoMap.slice(0, maxLen) + '\n... [repo-map 已截断]');
-        totalChars += maxLen;
+        addSection({
+          id: 'repo-map', name: 'Repository Map (截断)', source: 'repo-map',
+          content: repoMap.slice(0, maxLen) + '\n... [repo-map 已截断]', truncated: true,
+        });
       }
     }
   }
@@ -156,35 +225,42 @@ export function collectDeveloperContext(
     }
   } catch { /* */ }
 
-  // 去重
   depFiles = [...new Set(depFiles)];
 
-  // 读取依赖文件内容（在预算内）
   if (depFiles.length > 0) {
-    const depSection: string[] = ['## 依赖的已有文件'];
+    const depContentParts: string[] = ['## 依赖的已有文件'];
+    const depFileList: string[] = [];
+    let depTruncated = false;
     for (const f of depFiles) {
-      if (totalChars >= charBudget * 0.85) break;
+      if (totalChars >= charBudget * 0.85) { depTruncated = true; break; }
       const content = readWorkspaceFile(workspacePath, f);
       if (content) {
         const fileBlock = `### ${f}\n\`\`\`\n${content}\n\`\`\``;
         if (totalChars + fileBlock.length < charBudget * 0.85) {
-          depSection.push(fileBlock);
+          depContentParts.push(fileBlock);
           totalChars += fileBlock.length;
-          filesIncluded++;
+          depFileList.push(f);
         } else {
-          // 截断大文件
           const remaining = Math.floor(charBudget * 0.85 - totalChars - 50);
           if (remaining > 200) {
-            depSection.push(`### ${f} (已截断)\n\`\`\`\n${content.slice(0, remaining)}\n... [截断]\n\`\`\``);
+            depContentParts.push(`### ${f} (已截断)\n\`\`\`\n${content.slice(0, remaining)}\n... [截断]\n\`\`\``);
             totalChars += remaining;
-            filesIncluded++;
+            depFileList.push(f);
+            depTruncated = true;
           }
           break;
         }
       }
     }
-    if (depSection.length > 1) {
-      sections.push(depSection.join('\n'));
+    if (depContentParts.length > 1) {
+      // totalChars already updated inline; add section without double-counting
+      const depText = depContentParts.join('\n');
+      sectionList.push({
+        id: 'dep-files', name: '依赖 Feature 产出文件', source: 'dependency',
+        content: depText, chars: depText.length, tokens: estimateTokens(depText),
+        truncated: depTruncated, files: depFileList,
+      });
+      filesIncluded += depFileList.length;
     }
   }
 
@@ -193,38 +269,65 @@ export function collectDeveloperContext(
     const allFiles = flattenTree(tree).filter(p => !p.endsWith('/'));
     const keywords = extractKeywords(feature.title + ' ' + feature.description);
 
-    // 找关键词匹配的文件（排除已包含的）
     const depSet = new Set(depFiles);
     const relatedFiles = allFiles
       .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md')
       .filter(f => keywords.some(kw => f.toLowerCase().includes(kw)))
-      .slice(0, 5); // 最多5个
+      .slice(0, 5);
 
     if (relatedFiles.length > 0) {
-      const relSection: string[] = ['## 可能相关的已有文件'];
+      const relContentParts: string[] = ['## 可能相关的已有文件'];
+      const relFileList: string[] = [];
       for (const f of relatedFiles) {
         if (totalChars >= charBudget * 0.95) break;
         const content = readWorkspaceFile(workspacePath, f);
         if (content) {
           const fileBlock = `### ${f}\n\`\`\`\n${content}\n\`\`\``;
           if (totalChars + fileBlock.length < charBudget * 0.95) {
-            relSection.push(fileBlock);
+            relContentParts.push(fileBlock);
             totalChars += fileBlock.length;
-            filesIncluded++;
+            relFileList.push(f);
           }
         }
       }
-      if (relSection.length > 1) {
-        sections.push(relSection.join('\n'));
+      if (relContentParts.length > 1) {
+        const relText = relContentParts.join('\n');
+        sectionList.push({
+          id: 'keyword-files', name: '关键词匹配文件', source: 'keyword-match',
+          content: relText, chars: relText.length, tokens: estimateTokens(relText),
+          truncated: false, files: relFileList,
+        });
+        filesIncluded += relFileList.length;
       }
     }
   }
 
-  const contextText = sections.join('\n\n');
+  // 构建完整上下文文本
+  const contextText = sectionList.map(s => s.content).join('\n\n');
+  const totalTokens = estimateTokens(contextText);
+
+  // 计算每个 section 的预算占比
+  for (const sec of sectionList) {
+    sec.budgetRatio = totalTokens > 0 ? sec.tokens / tokenBudget : 0;
+  }
+
+  const snapshot: ContextSnapshot = {
+    agentId: agentId || 'unknown',
+    featureId: feature.id || 'unknown',
+    timestamp: Date.now(),
+    sections: sectionList,
+    totalChars,
+    totalTokens,
+    tokenBudget,
+    contextText,
+    filesIncluded,
+  };
+
   return {
     contextText,
-    estimatedTokens: estimateTokens(contextText),
+    estimatedTokens: totalTokens,
     filesIncluded,
+    snapshot,
   };
 }
 
@@ -299,31 +402,44 @@ export function compressFileContent(content: string, maxLines: number = 30): str
 /**
  * 为 ReAct 工具循环准备的轻量上下文 (v0.8)
  * 比 collectDeveloperContext 更紧凑: 只给架构摘要 + 文件树 + 计划进度
+ * v1.1: 返回结构化 ContextSnapshot
  */
 export function collectLightContext(
   workspacePath: string,
   projectId: string,
   feature: any,
   planSummary?: string,
-  tokenBudget: number = 3000
+  tokenBudget: number = 3000,
+  agentId?: string
 ): ContextResult {
-  const sections: string[] = [];
+  const sectionList: ContextSection[] = [];
   let totalChars = 0;
   let filesIncluded = 0;
   const charBudget = tokenBudget * 1.5;
 
+  function addSection(sec: Omit<ContextSection, 'chars' | 'tokens'>) {
+    const chars = sec.content.length;
+    const tokens = estimateTokens(sec.content);
+    sectionList.push({ ...sec, chars, tokens });
+    totalChars += chars;
+    filesIncluded += sec.files?.length ?? 0;
+  }
+
   // 1. 计划进度 (最高优先)
   if (planSummary) {
-    sections.push(planSummary);
-    totalChars += planSummary.length;
+    addSection({
+      id: 'plan-summary', name: '开发计划', source: 'plan',
+      content: planSummary, truncated: false,
+    });
   }
 
   // 1.5. AGENTS.md (v1.0)
   const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
   if (agentsMd && totalChars + agentsMd.length < charBudget * 0.2) {
-    sections.push(`## 项目规范\n${agentsMd}`);
-    totalChars += agentsMd.length;
-    filesIncluded++;
+    addSection({
+      id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
+      content: `## 项目规范\n${agentsMd}`, truncated: false, files: ['.agentforge/AGENTS.md'],
+    });
   }
 
   // 2. 架构文档 (压缩版)
@@ -332,9 +448,10 @@ export function collectLightContext(
     const compressed = compressFileContent(archContent, 20);
     const section = `## 项目架构 (压缩)\n${compressed}`;
     if (totalChars + section.length < charBudget * 0.4) {
-      sections.push(section);
-      totalChars += section.length;
-      filesIncluded++;
+      addSection({
+        id: 'architecture', name: '架构文档 (压缩)', source: 'architecture',
+        content: section, truncated: true, files: ['ARCHITECTURE.md'],
+      });
     }
   }
 
@@ -343,15 +460,36 @@ export function collectLightContext(
   if (tree.length > 0) {
     const treeText = `## 文件结构\n${formatTreeCompact(tree)}`;
     if (totalChars + treeText.length < charBudget * 0.6) {
-      sections.push(treeText);
-      totalChars += treeText.length;
+      addSection({
+        id: 'file-tree', name: '文件目录树', source: 'file-tree',
+        content: treeText, truncated: false,
+      });
     }
   }
 
-  const contextText = sections.join('\n\n');
+  const contextText = sectionList.map(s => s.content).join('\n\n');
+  const totalTokens = estimateTokens(contextText);
+
+  for (const sec of sectionList) {
+    sec.budgetRatio = totalTokens > 0 ? sec.tokens / tokenBudget : 0;
+  }
+
+  const snapshot: ContextSnapshot = {
+    agentId: agentId || 'unknown',
+    featureId: feature.id || 'unknown',
+    timestamp: Date.now(),
+    sections: sectionList,
+    totalChars,
+    totalTokens,
+    tokenBudget,
+    contextText,
+    filesIncluded,
+  };
+
   return {
     contextText,
-    estimatedTokens: estimateTokens(contextText),
+    estimatedTokens: totalTokens,
     filesIncluded,
+    snapshot,
   };
 }

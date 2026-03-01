@@ -10,12 +10,14 @@ import { TeamPage } from './pages/TeamPage';
 import { LogsPage } from './pages/LogsPage';
 import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ContextPage } from './pages/ContextPage';
 
 export function App() {
   const {
     insideProject, globalPage, projectPage,
     addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured,
     currentProjectId, startStream, appendStream, endStream,
+    updateContextSnapshot,
   } = useAppStore();
   const [stats, setStats] = useState<any>(null);
 
@@ -56,6 +58,13 @@ export function App() {
         agentId: data.agentId,
         content: `🔧 ${data.tool}(${data.args}) → ${icon} ${data.outputPreview}`,
       });
+    }));
+
+    // 上下文快照事件 (v1.1)
+    unsubs.push(window.agentforge.on('agent:context-snapshot', (data: any) => {
+      if (data.snapshot) {
+        updateContextSnapshot(data.snapshot);
+      }
     }));
 
     // 流式事件
@@ -105,6 +114,7 @@ export function App() {
       case 'team':     return <TeamPage />;
       case 'output':   return <OutputPage />;
       case 'logs':     return <LogsPage />;
+      case 'context':  return <ContextPage />;
       default:         return <OverviewPage />;
     }
   };

@@ -10,6 +10,32 @@ interface FileNode {
   children?: FileNode[];
 }
 
+/** 上下文模块 (v1.1) */
+interface ContextSection {
+  id: string;
+  name: string;
+  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'plan' | 'qa-feedback';
+  content: string;
+  chars: number;
+  tokens: number;
+  truncated: boolean;
+  files?: string[];
+  budgetRatio?: number;
+}
+
+/** 上下文快照 (v1.1) */
+interface ContextSnapshot {
+  agentId: string;
+  featureId: string;
+  timestamp: number;
+  sections: ContextSection[];
+  totalChars: number;
+  totalTokens: number;
+  tokenBudget: number;
+  contextText: string;
+  filesIncluded: number;
+}
+
 interface AgentForgeAPI {
   settings: {
     get(): Promise<AppSettings>;
@@ -36,6 +62,7 @@ interface AgentForgeAPI {
     gitCommit(projectId: string, message: string): Promise<{ success: boolean; hash?: string; pushed?: boolean }>;
     gitLog(projectId: string): Promise<string[]>;
     testGitHub(repo: string, token: string): Promise<{ success: boolean; message: string }>;
+    getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;

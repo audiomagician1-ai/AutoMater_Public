@@ -1,6 +1,7 @@
 /**
  * 全局应用状态 (Zustand)
  * v0.7: 双层导航 — 外层 (项目列表/设置) → 内层 (项目子页)
+ * v1.1: 上下文快照 + Context 页面
  */
 
 import { create } from 'zustand';
@@ -8,7 +9,7 @@ import { create } from 'zustand';
 /** 外层页面 (无需选中项目) */
 export type GlobalPageId = 'projects' | 'settings';
 /** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'output' | 'logs';
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'output' | 'logs' | 'context';
 
 interface LogEntry {
   id: number;
@@ -69,6 +70,11 @@ interface AppState {
   // 设置已配置
   settingsConfigured: boolean;
   setSettingsConfigured: (v: boolean) => void;
+
+  // v1.1: 上下文快照
+  contextSnapshots: Map<string, ContextSnapshot>;
+  updateContextSnapshot: (snapshot: ContextSnapshot) => void;
+  clearContextSnapshots: () => void;
 }
 
 let logIdCounter = 0;
@@ -136,4 +142,13 @@ export const useAppStore = create<AppState>((set) => ({
 
   settingsConfigured: false,
   setSettingsConfigured: (v) => set({ settingsConfigured: v }),
+
+  // v1.1: 上下文快照
+  contextSnapshots: new Map(),
+  updateContextSnapshot: (snapshot) => set((state) => {
+    const next = new Map(state.contextSnapshots);
+    next.set(snapshot.agentId, snapshot);
+    return { contextSnapshots: next };
+  }),
+  clearContextSnapshots: () => set({ contextSnapshots: new Map() }),
 }));
