@@ -1,0 +1,23 @@
+{
+  "name": "agentforge-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Agent Swarm Desktop App — Virtual Software Development Company",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @agentforge/desktop dev",
+    "build": "pnpm -r run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "type-check": "pnpm -r run type-check",
+    "clean": "pnpm -r run clean"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "author": "Tim",
+  "license": "MIT"
+}
