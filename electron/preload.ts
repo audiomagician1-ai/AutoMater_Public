@@ -161,6 +161,18 @@ contextBridge.exposeInMainWorld('agentforge', {
       ipcRenderer.invoke('meta-agent:chat', projectId, message, history),
   },
 
+  // ── 临时工作流 (v5.5) ──
+  ephemeralMission: {
+    create: (projectId: string, type: string, config?: any) =>
+      ipcRenderer.invoke('mission:create', projectId, type, config),
+    get: (missionId: string) => ipcRenderer.invoke('mission:get', missionId),
+    list: (projectId: string) => ipcRenderer.invoke('mission:list', projectId),
+    getTasks: (missionId: string) => ipcRenderer.invoke('mission:get-tasks', missionId),
+    cancel: (missionId: string) => ipcRenderer.invoke('mission:cancel', missionId),
+    cleanup: (missionId: string) => ipcRenderer.invoke('mission:cleanup', missionId),
+    delete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
+  },
+
   // ── 缩放控制 (v5.2) ──
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */

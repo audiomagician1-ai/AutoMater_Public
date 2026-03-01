@@ -211,6 +211,17 @@ interface AgentForgeAPI {
     }>;
   };
 
+  /** v5.5: 临时工作流 */
+  ephemeralMission: {
+    create(projectId: string, type: string, config?: { scope?: string; tokenBudget?: number; ttlHours?: number; maxWorkers?: number; customInstruction?: string }): Promise<{ success: boolean; missionId?: string; error?: string }>;
+    get(missionId: string): Promise<MissionRecord | null>;
+    list(projectId: string): Promise<MissionRecord[]>;
+    getTasks(missionId: string): Promise<MissionTaskRecord[]>;
+    cancel(missionId: string): Promise<{ success: boolean }>;
+    cleanup(missionId: string): Promise<{ success: boolean }>;
+    delete(missionId: string): Promise<{ success: boolean }>;
+  };
+
   /** v5.2: 缩放控制 */
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */
@@ -394,6 +405,36 @@ interface SkillEvolutionDetail {
   source: { type: string; projectId?: string; agentId?: string; timestamp: string };
   createdAt: string;
   updatedAt: string;
+}
+
+/** Mission 记录 (v5.5) */
+interface MissionRecord {
+  id: string;
+  project_id: string;
+  type: string;
+  status: 'pending' | 'planning' | 'executing' | 'judging' | 'completed' | 'failed' | 'cancelled';
+  config: string;
+  plan: string | null;
+  conclusion: string | null;
+  patches: string;
+  token_usage: number;
+  cost_usd: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/** Mission 任务记录 (v5.5) */
+interface MissionTaskRecord {
+  id: string;
+  mission_id: string;
+  title: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+  agent_id: string | null;
+  input: string | null;
+  output: string | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 declare global {

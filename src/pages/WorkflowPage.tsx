@@ -10,6 +10,18 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 
 // ═══════════════════════════════════════
+// Mission Types (临时工作流)
+// ═══════════════════════════════════════
+
+const MISSION_TYPES = [
+  { type: 'regression_test', icon: '🧪', label: '全量回归测试', desc: '对所有 Feature 执行回归测试，生成测试报告' },
+  { type: 'code_review',    icon: '🔍', label: '全量代码审查', desc: '按模块审查代码质量、安全性、性能' },
+  { type: 'retrospective',  icon: '📊', label: '架构复盘',     desc: '多维度分析项目架构，输出改进建议' },
+  { type: 'security_audit', icon: '🔒', label: '安全审计',     desc: 'OWASP Top 10 + CWE 漏洞扫描' },
+  { type: 'perf_benchmark', icon: '⚡', label: '性能基准',     desc: '关键路径性能分析，识别瓶颈' },
+] as const;
+
+// ═══════════════════════════════════════
 // Pipeline stages definition
 // ═══════════════════════════════════════
 
@@ -49,6 +61,46 @@ export function WorkflowPage() {
   const [simState, setSimState] = useState<SimState>('idle');
   const [stageStates, setStageStates] = useState<Record<string, SimStageState>>({});
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
+
+  // Mission state
+  const [missions, setMissions] = useState<MissionRecord[]>([]);
+  const [showMissionPanel, setShowMissionPanel] = useState(false);
+  const [launchingMission, setLaunchingMission] = useState(false);
+
+  // Load missions
+  const loadMissions = useCallback(async () => {
+    if (!currentProjectId) return;
+    const list = await window.agentforge.ephemeralMission.list(currentProjectId);
+    setMissions(list || []);
+  }, [currentProjectId]);
+
+  useEffect(() => { loadMissions(); }, [loadMissions]);
+  useEffect(() => {
+    const t = setInterval(loadMissions, 5000);
+    return () => clearInterval(t);
+  }, [loadMissions]);
+
+  const handleLaunchMission = async (type: string) => {
+    if (!currentProjectId || launchingMission) return;
+    setLaunchingMission(true);
+    try {
+      await window.agentforge.ephemeralMission.create(currentProjectId, type, { maxWorkers: 3 });
+      setShowMissionPanel(false);
+      await loadMissions();
+    } finally {
+      setLaunchingMission(false);
+    }
+  };
+
+  const handleCancelMission = async (id: string) => {
+    await window.agentforge.ephemeralMission.cancel(id);
+    loadMissions();
+  };
+
+  const handleDeleteMission = async (id: string) => {
+    await window.agentforge.ephemeralMission.delete(id);
+    loadMissions();
+  };
 
   // Initialize all as pending
   useEffect(() => {
@@ -100,6 +152,14 @@ export function WorkflowPage() {
           <p className="text-xs text-slate-500 mt-0.5">需求从提出到交付的完整生命周期</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowMissionPanel(!showMissionPanel)}
+            className={`px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2 ${
+              showMissionPanel ? 'bg-cyan-600 text-white' : 'bg-cyan-900/30 hover:bg-cyan-800/40 text-cyan-300 border border-cyan-600/20'
+            }`}
+          >
+            🎯 发起任务
+          </button>
           {simState === 'idle' && (
             <button
               onClick={handleSimulate}
@@ -192,6 +252,86 @@ export function WorkflowPage() {
             );
           })}
         </div>
+
+        {/* ═══════ Mission Launch Panel ═══════ */}
+        {showMissionPanel && (
+          <div className="max-w-4xl mx-auto mt-6">
+            <div className="bg-gradient-to-r from-cyan-900/15 to-slate-900/30 border border-cyan-800/30 rounded-xl p-5">
+              <h3 className="text-sm font-bold text-cyan-300 mb-3">🎯 发起临时任务</h3>
+              <p className="text-[10px] text-slate-500 mb-4">
+                临时工作流具有独立生命周期: Planner 规划 → Workers 并行执行 → Judge 评估。中间产物不影响正式文档，完成后仅保留结论。
+              </p>
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                {MISSION_TYPES.map(mt => (
+                  <button
+                    key={mt.type}
+                    onClick={() => handleLaunchMission(mt.type)}
+                    disabled={launchingMission}
+                    className="group text-left p-3 rounded-lg border border-slate-700/50 hover:border-cyan-500/30 bg-slate-800/30 hover:bg-cyan-900/20 transition-all disabled:opacity-50"
+                  >
+                    <div className="text-lg mb-1">{mt.icon}</div>
+                    <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition-colors">{mt.label}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{mt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ Active & History Missions ═══════ */}
+        {missions.length > 0 && (
+          <div className="max-w-4xl mx-auto mt-6">
+            <h3 className="text-sm font-bold text-slate-300 mb-3">📦 临时任务记录</h3>
+            <div className="space-y-2">
+              {missions.map(m => {
+                const MISSION_STATUS: Record<string, { text: string; color: string; icon: string }> = {
+                  pending:   { text: '等待中', color: 'text-slate-400', icon: '⏳' },
+                  planning:  { text: '规划中', color: 'text-blue-400', icon: '📋' },
+                  executing: { text: '执行中', color: 'text-amber-400', icon: '⚡' },
+                  judging:   { text: '评估中', color: 'text-violet-400', icon: '⚖️' },
+                  completed: { text: '已完成', color: 'text-emerald-400', icon: '✅' },
+                  failed:    { text: '失败', color: 'text-red-400', icon: '❌' },
+                  cancelled: { text: '已取消', color: 'text-slate-500', icon: '⏹' },
+                };
+                const st = MISSION_STATUS[m.status] || MISSION_STATUS.pending;
+                const typeInfo = MISSION_TYPES.find(t => t.type === m.type);
+                const isRunning = ['pending', 'planning', 'executing', 'judging'].includes(m.status);
+
+                return (
+                  <div key={m.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                    isRunning ? 'border-cyan-600/30 bg-cyan-900/10' : 'border-slate-800 bg-slate-900/30'
+                  }`}>
+                    <span className="text-lg">{typeInfo?.icon || '🎯'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-200">{typeInfo?.label || m.type}</span>
+                        <span className={`text-[10px] ${st.color}`}>{st.icon} {st.text}</span>
+                        {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+                      </div>
+                      {m.conclusion && (
+                        <p className="text-[10px] text-slate-500 mt-0.5 truncate">{m.conclusion.slice(0, 100)}...</p>
+                      )}
+                      <div className="text-[9px] text-slate-600 mt-0.5">
+                        {m.token_usage > 0 && <span>{(m.token_usage / 1000).toFixed(1)}k tokens</span>}
+                        {m.cost_usd > 0 && <span className="ml-2">${m.cost_usd.toFixed(4)}</span>}
+                        <span className="ml-2">{new Date(m.created_at + 'Z').toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {isRunning && (
+                        <button onClick={() => handleCancelMission(m.id)} className="text-[10px] px-2 py-1 rounded bg-red-900/20 text-red-400 hover:bg-red-800/30 transition-colors">取消</button>
+                      )}
+                      {!isRunning && (
+                        <button onClick={() => handleDeleteMission(m.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-500 hover:text-red-400 transition-colors">删除</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -172,6 +172,39 @@ export async function initDatabase(): Promise<void> {
     );
   `);
 
+  // v5.5: missions 表 (临时工作流 — 回归测试/代码审查/复盘等)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS missions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      config TEXT DEFAULT '{}',
+      plan TEXT,
+      conclusion TEXT,
+      patches TEXT DEFAULT '[]',
+      token_usage INTEGER DEFAULT 0,
+      cost_usd REAL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS mission_tasks (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      agent_id TEXT,
+      input TEXT,
+      output TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+    );
+  `);
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在

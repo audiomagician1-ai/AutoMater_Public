@@ -120,21 +120,22 @@ export function setupMetaAgentHandlers() {
 
       // Parse structured response
       let intent = 'general';
-      let reply = result.text;
+      const text = result.content ?? '';
+      let reply = text;
       let wishContent = '';
 
       try {
         // Try to extract JSON from response
-        const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           intent = parsed.intent || 'general';
-          reply = parsed.reply || result.text;
+          reply = parsed.reply || text;
           wishContent = parsed.wishContent || '';
         }
       } catch {
         // If JSON parse fails, use raw text as reply
-        reply = result.text.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || result.text;
+        reply = text.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || text;
       }
 
       // ── Intent: wish → Create wish + start pipeline ──
