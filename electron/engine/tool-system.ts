@@ -17,6 +17,7 @@ import { execInSandbox, runTest as sandboxRunTest, runLint as sandboxRunLint, ty
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
+import { takeScreenshot, mouseMove, mouseClick, keyboardType, keyboardHotkey } from './computer-use';
 
 // ═══════════════════════════════════════
 // Tool Interface
@@ -37,7 +38,7 @@ export interface ToolResult {
   success: boolean;
   output: string;
   /** 操作类型 (用于 UI 展示) */
-  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan';
+  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer';
 }
 
 /** 工具执行上下文 */
@@ -349,6 +350,67 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['path', 'edits'],
     },
   },
+
+  // ═══ v2.2: Computer Use 工具 ═══
+
+  {
+    name: 'screenshot',
+    description: '截取当前屏幕截图。返回 base64 PNG 图像。用于查看桌面应用界面、验证 UI 状态、黑盒测试。截图会自动缩放以节省 token。',
+    parameters: {
+      type: 'object',
+      properties: {
+        scale: { type: 'number', description: '缩放比例 (0.5=50%, 0.75=75%, 1=原始尺寸)，默认 0.75', default: 0.75 },
+      },
+    },
+  },
+  {
+    name: 'mouse_click',
+    description: '在指定屏幕坐标执行鼠标点击。配合 screenshot 使用：先截图分析界面，确定目标坐标，再点击。',
+    parameters: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: '屏幕 X 坐标 (像素)' },
+        y: { type: 'number', description: '屏幕 Y 坐标 (像素)' },
+        button: { type: 'string', enum: ['left', 'right', 'middle'], description: '鼠标按键，默认 left', default: 'left' },
+        double_click: { type: 'boolean', description: '是否双击，默认 false', default: false },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'mouse_move',
+    description: '移动鼠标到指定屏幕坐标（不点击）。用于悬停触发工具提示等。',
+    parameters: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: '屏幕 X 坐标' },
+        y: { type: 'number', description: '屏幕 Y 坐标' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'keyboard_type',
+    description: '在当前焦点窗口键入文本。先用 mouse_click 点击目标输入框，再用此工具输入文本。',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要输入的文本' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'keyboard_hotkey',
+    description: '按组合键或特殊键。格式: "modifier+key" 或单个键名。示例: "ctrl+s", "alt+f4", "enter", "tab", "escape", "f5", "ctrl+shift+p"。',
+    parameters: {
+      type: 'object',
+      properties: {
+        combo: { type: 'string', description: '按键组合，如 "ctrl+s"、"enter"、"alt+tab"' },
+      },
+      required: ['combo'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -651,6 +713,64 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: result.success, output: result.output, action: 'edit' };
       }
 
+      // ═══ v2.2: Computer Use 工具 ═══
+
+      case 'screenshot': {
+        const scale = call.arguments.scale ?? 0.75;
+        const result = takeScreenshot(scale);
+        if (!result.success) {
+          return { success: false, output: `截图失败: ${result.error}`, action: 'computer' };
+        }
+        // 返回 base64 图像信息（实际图像需在 orchestrator 中作为 image_url 传给 LLM）
+        return {
+          success: true,
+          output: `[screenshot] ${result.width}x${result.height} PNG (${Math.round(result.base64.length / 1024)}KB base64)`,
+          action: 'computer',
+          // 附加 base64 数据供 orchestrator 使用
+          ...(result.base64 ? { _imageBase64: result.base64 } : {}),
+        } as any;
+      }
+
+      case 'mouse_click': {
+        const x = call.arguments.x;
+        const y = call.arguments.y;
+        const button = call.arguments.button || 'left';
+        const dbl = call.arguments.double_click || false;
+        const result = mouseClick(x, y, button, dbl);
+        return {
+          success: result.success,
+          output: result.success ? `鼠标${dbl ? '双' : ''}点击 (${x}, ${y}) [${button}]` : `点击失败: ${result.error}`,
+          action: 'computer',
+        };
+      }
+
+      case 'mouse_move': {
+        const result = mouseMove(call.arguments.x, call.arguments.y);
+        return {
+          success: result.success,
+          output: result.success ? `鼠标移动到 (${call.arguments.x}, ${call.arguments.y})` : `移动失败: ${result.error}`,
+          action: 'computer',
+        };
+      }
+
+      case 'keyboard_type': {
+        const result = keyboardType(call.arguments.text);
+        return {
+          success: result.success,
+          output: result.success ? `已键入 ${call.arguments.text.length} 字符` : `键入失败: ${result.error}`,
+          action: 'computer',
+        };
+      }
+
+      case 'keyboard_hotkey': {
+        const result = keyboardHotkey(call.arguments.combo);
+        return {
+          success: result.success,
+          output: result.success ? `已按下 ${call.arguments.combo}` : `按键失败: ${result.error}`,
+          action: 'computer',
+        };
+      }
+
       default:
         return { success: false, output: `未知工具: ${call.name}` };
     }
@@ -771,7 +891,8 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'run_command', 'run_test', 'run_lint',
     'web_search', 'fetch_url', 'http_request',
     'memory_read', 'memory_append',
-    // v2.2+: screenshot, mouse_click, etc.
+    // v2.2: Computer Use 工具
+    'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
     // v2.3+: browser_launch, browser_navigate, etc.
   ],
   devops: [

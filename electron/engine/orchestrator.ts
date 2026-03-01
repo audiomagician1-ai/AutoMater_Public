@@ -475,12 +475,34 @@ async function _callAnthropicWithTools(
   const anthropicMessages = otherMsgs.map(m => {
     if (m.role === 'tool') {
       // OpenAI tool result → Anthropic tool_result
+      // v2.2: 支持 multimodal content (图像)
+      const toolContent = m.content;
+      let anthropicToolContent: any;
+      if (Array.isArray(toolContent)) {
+        // Multimodal content (text + image)
+        anthropicToolContent = toolContent.map((block: any) => {
+          if (block.type === 'image_url' && block.image_url?.url) {
+            // Anthropic 使用 source.type = 'base64'
+            const dataMatch = block.image_url.url.match(/^data:([^;]+);base64,(.+)/);
+            if (dataMatch) {
+              return {
+                type: 'image',
+                source: { type: 'base64', media_type: dataMatch[1], data: dataMatch[2] },
+              };
+            }
+          }
+          if (block.type === 'text') return { type: 'text', text: block.text };
+          return { type: 'text', text: JSON.stringify(block) };
+        });
+      } else {
+        anthropicToolContent = typeof toolContent === 'string' ? toolContent : JSON.stringify(toolContent);
+      }
       return {
         role: 'user',
         content: [{
           type: 'tool_result',
           tool_use_id: (m as any).tool_call_id,
-          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+          content: anthropicToolContent,
         }],
       };
     }
@@ -1492,11 +1514,24 @@ ${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(',
         }
 
         // 将工具结果加入消息历史
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: toolResult.output.slice(0, 4000), // 限制输出长度
-        });
+        // v2.2: screenshot 返回图像时，使用 multimodal content (image_url)
+        if (tc.function.name === 'screenshot' && (toolResult as any)._imageBase64) {
+          const base64 = (toolResult as any)._imageBase64;
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: [
+              { type: 'text', text: toolResult.output },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
+            ] as any,
+          });
+        } else {
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: toolResult.output.slice(0, 4000), // 限制输出长度
+          });
+        }
       }
 
       // ═══ v1.1: 推送 Agent ReAct 迭代状态 ═══
