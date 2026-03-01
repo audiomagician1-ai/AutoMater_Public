@@ -172,6 +172,7 @@ export async function scanProjectSkeleton(
   onProgress?: ImportProgressCallback,
 ): Promise<ProjectSkeleton> {
   const t0 = Date.now();
+  console.log('[IMPORT-DEBUG] Phase 0: Starting static scan —', workspacePath);
   log.info('Phase 0: Starting static scan', { workspacePath });
   onProgress?.(0, '检测技术栈...', 0.05);
 
@@ -196,6 +197,7 @@ export async function scanProjectSkeleton(
   let totalLOC = 0;
   await collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
   for (const v of Object.values(locByExt)) totalLOC += v;
+  console.log(`[IMPORT-DEBUG] Phase 0: Collected ${allFiles.length} files, ${totalLOC} LOC in ${Date.now() - t0}ms`);
 
   if (allFiles.length >= MAX_SCAN_FILES) {
     log.warn('Phase 0: File count hit limit', { limit: MAX_SCAN_FILES, truncated: true });
@@ -214,6 +216,7 @@ export async function scanProjectSkeleton(
   // 4. Code Graph (async — 不阻塞主线程)
   const graph = await buildCodeGraph(workspacePath, 2000);
 
+  console.log(`[IMPORT-DEBUG] Phase 0: Code graph built — ${graph.fileCount} nodes, ${graph.edgeCount} edges in ${graph.buildTimeMs}ms`);
   log.info('Phase 0: Code graph built', { nodes: graph.fileCount, edges: graph.edgeCount, ms: graph.buildTimeMs });
   await yieldToEventLoop();
   onProgress?.(0, `依赖图完成 (${graph.fileCount} 节点, ${graph.edgeCount} 边)，推断入口文件...`, 0.7);
@@ -285,6 +288,7 @@ export async function summarizeModules(
 
   // v5.4: 项目分析是高价值低频任务,统一用 strongModel 确保兼容性和质量
   const model = settings.strongModel;
+  console.log(`[IMPORT-DEBUG] Phase 1: ${skeleton.modules.length} modules, model=${model}`);
 
   log.info('Phase 1: Starting module summarization', {
     moduleCount: skeleton.modules.length,
@@ -641,17 +645,20 @@ export async function importProject(
   architectureMd: string;
   docsGenerated: number;
 }> {
+  console.log('[IMPORT-DEBUG] === Project Import Start ===', { workspacePath, projectId });
   log.info('=== Project Import Start ===', { workspacePath, projectId });
   const t0Import = Date.now();
 
   // Phase 0: 静态扫描 (async, 带进度回调)
   log.info('Phase 0: Starting...');
   const skeleton = await scanProjectSkeleton(workspacePath, onProgress);
+  console.log(`[IMPORT-DEBUG] Phase 0: Done — ${skeleton.fileCount} files, ${skeleton.modules.length} modules in ${Date.now() - t0Import}ms`);
   log.info('Phase 0: Done', { files: skeleton.fileCount, modules: skeleton.modules.length, ms: Date.now() - t0Import });
 
   // Phase 1: 模块摘要
   log.info('Phase 1: Starting module summarization...');
   const summaries = await summarizeModules(workspacePath, skeleton, signal, onProgress);
+  console.log(`[IMPORT-DEBUG] Phase 1: Done — ${summaries.length} summaries in ${Date.now() - t0Import}ms`);
   log.info('Phase 1: Done', { summaries: summaries.length, ms: Date.now() - t0Import });
 
   // Phase 2: 架构合成
@@ -659,6 +666,7 @@ export async function importProject(
   const { architectureMd } = await synthesizeArchitecture(
     workspacePath, skeleton, summaries, signal, onProgress,
   );
+  console.log(`[IMPORT-DEBUG] Phase 2: Done in ${Date.now() - t0Import}ms`);
   log.info('Phase 2: Done', { ms: Date.now() - t0Import });
 
   // Phase 3: 文档填充
@@ -666,6 +674,7 @@ export async function importProject(
   const { docsGenerated } = await populateDocuments(
     workspacePath, projectId, skeleton, summaries, architectureMd, signal, onProgress,
   );
+  console.log(`[IMPORT-DEBUG] Phase 3: Done — ${docsGenerated} docs in ${Date.now() - t0Import}ms`);
   log.info('Phase 3: Done', { docs: docsGenerated, ms: Date.now() - t0Import });
 
   log.info('=== Project Import Complete ===', {

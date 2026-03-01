@@ -502,11 +502,13 @@ export function setupProjectHandlers() {
 
       (async () => {
         try {
+          console.log(`[IMPORT-DEBUG] IPC: Starting importProject for ${projectId}, path=${proj!.workspace_path}`);
           const result = await importProject(
-            proj.workspace_path,
+            proj!.workspace_path,
             projectId,
             undefined,
             (phase: number, step: string, progress: number) => {
+              console.log(`[IMPORT-DEBUG] IPC progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
               sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
             },
           );
@@ -517,6 +519,7 @@ export function setupProjectHandlers() {
           sendToUI(win, 'project:status', { projectId, status: 'paused' });
           addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
         } catch (err: any) {
+          console.error('[IMPORT-DEBUG] IPC: importProject FAILED:', err?.message, err?.stack);
           console.error('[project:start→importProject] Error:', err);
           db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
           sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: `❌ 分析失败: ${err.message}`, progress: 0, done: true, error: true });
