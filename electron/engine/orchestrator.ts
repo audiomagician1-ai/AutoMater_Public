@@ -5,9 +5,10 @@
  * 无后端服务、无 sidecar
  * 
  * v0.4: 4 阶段流水线 PM → Architect → Developer (上下文感知) → QA 审查
+ * v0.6: LLM 流式输出 + Electron 原生通知
  */
 
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, Notification } from 'electron';
 import { getDb } from '../db';
 import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks, readWorkspaceFile, type WrittenFile } from './file-writer';
@@ -39,21 +40,37 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o-mini':                 { input: 0.00015, output: 0.0006 },
   'gpt-4-turbo':                 { input: 0.01,    output: 0.03 },
   'gpt-3.5-turbo':               { input: 0.0005,  output: 0.0015 },
+  'o1':                          { input: 0.015,   output: 0.06 },
+  'o1-mini':                     { input: 0.003,   output: 0.012 },
+  'o3-mini':                     { input: 0.0011,  output: 0.0044 },
   'claude-sonnet-4-20250514':    { input: 0.003,   output: 0.015 },
   'claude-opus-4-20250514':      { input: 0.015,   output: 0.075 },
   'claude-3-5-sonnet-20241022':  { input: 0.003,   output: 0.015 },
   'claude-3-5-haiku-20241022':   { input: 0.001,   output: 0.005 },
+  'claude-3-7-sonnet-20250219':  { input: 0.003,   output: 0.015 },
+  'deepseek-chat':               { input: 0.00014, output: 0.00028 },
+  'deepseek-reasoner':           { input: 0.00055, output: 0.0022 },
 };
 
+/** 未知模型的兜底定价 */
+const FALLBACK_PRICING = { input: 0.002, output: 0.008 };
+
 function calcCost(model: string, inputTokens: number, outputTokens: number): number {
-  const p = MODEL_PRICING[model];
-  if (!p) return 0;
+  const p = MODEL_PRICING[model] ?? FALLBACK_PRICING;
   return (inputTokens / 1000) * p.input + (outputTokens / 1000) * p.output;
 }
 
 // ═══════════════════════════════════════
-// LLM 调用
+// LLM 调用 (支持流式 + 非流式)
 // ═══════════════════════════════════════
+interface LLMResult {
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+type StreamCallback = (chunk: string) => void;
+
 function getSettings() {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
@@ -65,13 +82,14 @@ async function callLLM(
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
   maxTokens: number = 16384,
-  retries: number = 2
-) {
+  retries: number = 2,
+  onChunk?: StreamCallback
+): Promise<LLMResult> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) throw new Error('Aborted');
     try {
-      return await _callLLMOnce(settings, model, messages, signal, maxTokens);
+      return await _callLLMOnce(settings, model, messages, signal, maxTokens, onChunk);
     } catch (err: any) {
       lastError = err;
       if (signal?.aborted) throw err;
@@ -90,43 +108,48 @@ async function _callLLMOnce(
   settings: any, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
-  maxTokens: number = 16384
-) {
-  // 超时保护: 120秒
+  maxTokens: number = 16384,
+  onChunk?: StreamCallback
+): Promise<LLMResult> {
+  // 超时保护: 180秒 (流式需要更长时间)
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);
+  const timeout = setTimeout(() => controller.abort(), 180000);
   const combinedSignal = signal
     ? anySignal([signal, controller.signal])
     : controller.signal;
 
+  const useStream = !!onChunk;
+
   try {
     const fetchOpts: RequestInit = { method: 'POST', signal: combinedSignal };
 
-  if (settings.llmProvider === 'anthropic') {
-    const systemMsg = messages.find(m => m.role === 'system');
-    const otherMsgs = messages.filter(m => m.role !== 'system');
-    const body: any = { model, messages: otherMsgs, max_tokens: maxTokens, temperature: 0.3 };
-    if (systemMsg) body.system = systemMsg.content;
+    if (settings.llmProvider === 'anthropic') {
+      return await _callAnthropic(settings, model, messages, maxTokens, fetchOpts, useStream, onChunk);
+    } else {
+      return await _callOpenAI(settings, model, messages, maxTokens, fetchOpts, useStream, onChunk);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
-    const res = await fetch(`${settings.baseUrl}/v1/messages`, {
-      ...fetchOpts,
-      headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
-    const data = await res.json() as any;
-    return {
-      content: data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''),
-      inputTokens: data.usage?.input_tokens ?? 0,
-      outputTokens: data.usage?.output_tokens ?? 0,
-    };
-  } else {
-    const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
-      ...fetchOpts,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-      body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: maxTokens }),
-    });
-    if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+async function _callOpenAI(
+  settings: any, model: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number, fetchOpts: RequestInit,
+  stream: boolean, onChunk?: StreamCallback
+): Promise<LLMResult> {
+  const body: any = { model, messages, temperature: 0.3, max_tokens: maxTokens };
+  if (stream) body.stream = true;
+
+  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+    ...fetchOpts,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+
+  if (!stream) {
     const data = await res.json() as any;
     return {
       content: data.choices[0].message.content ?? '',
@@ -134,9 +157,125 @@ async function _callLLMOnce(
       outputTokens: data.usage?.completion_tokens ?? 0,
     };
   }
-  } finally {
-    clearTimeout(timeout);
+
+  // ── 流式解析 (SSE) ──
+  let content = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? ''; // 保留不完整的最后一行
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (!trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) {
+          content += delta;
+          onChunk?.(delta);
+        }
+        // 部分 provider 在最后一个 chunk 带 usage
+        if (json.usage) {
+          inputTokens = json.usage.prompt_tokens ?? inputTokens;
+          outputTokens = json.usage.completion_tokens ?? outputTokens;
+        }
+      } catch { /* skip malformed JSON */ }
+    }
   }
+
+  // 如果 provider 没有在流式中返回 usage，粗估
+  if (outputTokens === 0) {
+    outputTokens = Math.ceil(content.length / 3.5);
+  }
+
+  return { content, inputTokens, outputTokens };
+}
+
+async function _callAnthropic(
+  settings: any, model: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number, fetchOpts: RequestInit,
+  stream: boolean, onChunk?: StreamCallback
+): Promise<LLMResult> {
+  const systemMsg = messages.find(m => m.role === 'system');
+  const otherMsgs = messages.filter(m => m.role !== 'system');
+  const body: any = { model, messages: otherMsgs, max_tokens: maxTokens, temperature: 0.3 };
+  if (systemMsg) body.system = systemMsg.content;
+  if (stream) body.stream = true;
+
+  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+    ...fetchOpts,
+    headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+
+  if (!stream) {
+    const data = await res.json() as any;
+    return {
+      content: data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''),
+      inputTokens: data.usage?.input_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+    };
+  }
+
+  // ── 流式解析 (Anthropic SSE) ──
+  let content = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        // Anthropic events: message_start, content_block_delta, message_delta, message_stop
+        if (json.type === 'content_block_delta') {
+          const delta = json.delta?.text;
+          if (delta) {
+            content += delta;
+            onChunk?.(delta);
+          }
+        } else if (json.type === 'message_start' && json.message?.usage) {
+          inputTokens = json.message.usage.input_tokens ?? 0;
+        } else if (json.type === 'message_delta' && json.usage) {
+          outputTokens = json.usage.output_tokens ?? 0;
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  if (outputTokens === 0) {
+    outputTokens = Math.ceil(content.length / 3.5);
+  }
+
+  return { content, inputTokens, outputTokens };
 }
 
 /** Combine multiple AbortSignals */
@@ -150,7 +289,7 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 // ═══════════════════════════════════════
-// UI 推送 + DB 日志
+// UI 推送 + DB 日志 + 系统通知
 // ═══════════════════════════════════════
 function sendToUI(win: BrowserWindow | null, channel: string, data: any) {
   try { win?.webContents.send(channel, data); } catch { /* closed */ }
@@ -161,6 +300,52 @@ function addLog(projectId: string, agentId: string, type: string, content: strin
     const db = getDb();
     db.prepare('INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, ?, ?, ?)').run(projectId, agentId, type, content);
   } catch { /* ignore during shutdown */ }
+}
+
+/** 发送 Electron 系统原生通知 */
+function notify(title: string, body: string) {
+  try {
+    if (Notification.isSupported()) {
+      new Notification({ title, body, silent: false }).show();
+    }
+  } catch { /* non-fatal */ }
+}
+
+/**
+ * 创建流式回调: 每攒 N 个字符向 UI 推送一次 agent:stream 事件
+ * 返回 [onChunk callback, getAccumulated]
+ */
+function createStreamCallback(
+  win: BrowserWindow | null,
+  projectId: string,
+  agentId: string,
+  flushInterval: number = 80
+): [StreamCallback, () => string] {
+  let accumulated = '';
+  let buffer = '';
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = () => {
+    if (buffer.length > 0) {
+      sendToUI(win, 'agent:stream', { projectId, agentId, chunk: buffer });
+      buffer = '';
+    }
+    timer = null;
+  };
+
+  const onChunk = (chunk: string) => {
+    accumulated += chunk;
+    buffer += chunk;
+    // 立即刷新换行符，否则定时刷新
+    if (chunk.includes('\n') || buffer.length > 200) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      flush();
+    } else if (!timer) {
+      timer = setTimeout(flush, flushInterval);
+    }
+  };
+
+  return [onChunk, () => { flush(); return accumulated; }];
 }
 
 function spawnAgent(projectId: string, id: string, role: string, win: BrowserWindow | null) {
@@ -274,10 +459,15 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     try {
       if (signal.aborted) return;
 
+      const [onChunk] = createStreamCallback(win, projectId, pmId);
+      sendToUI(win, 'agent:stream-start', { projectId, agentId: pmId, label: 'PM 需求分析' });
+
       const pmResult = await callLLM(settings, settings.strongModel, [
         { role: 'system', content: PM_SYSTEM_PROMPT },
         { role: 'user', content: `用户需求:\n${project.wish}\n\n请分析此需求，拆解为 Feature 清单。直接输出 JSON 数组，不要用 markdown 代码块包裹。` },
-      ], signal);
+      ], signal, 16384, 2, onChunk);
+
+      sendToUI(win, 'agent:stream-end', { projectId, agentId: pmId });
 
       const pmCost = calcCost(settings.strongModel, pmResult.inputTokens, pmResult.outputTokens);
       addLog(projectId, pmId, 'output', pmResult.content);
@@ -347,10 +537,15 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     try {
       const featureSummary = features.map(f => `- ${f.id}: ${f.title || f.description}`).join('\n');
+      const [onChunk] = createStreamCallback(win, projectId, archId);
+      sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构设计' });
+
       const archResult = await callLLM(settings, settings.strongModel, [
         { role: 'system', content: ARCHITECT_SYSTEM_PROMPT },
         { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单:\n${featureSummary}\n\n请设计项目技术架构，输出 ARCHITECTURE.md 文件。` },
-      ], signal);
+      ], signal, 16384, 2, onChunk);
+
+      sendToUI(win, 'agent:stream-end', { projectId, agentId: archId });
 
       const archCost = calcCost(settings.strongModel, archResult.inputTokens, archResult.outputTokens);
       addLog(projectId, archId, 'output', archResult.content.slice(0, 3000));
@@ -432,6 +627,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `🏁 项目完成! ${stats.passed}/${stats.total} features 通过` });
   db.prepare("UPDATE agents SET status = 'idle' WHERE project_id = ?").run(projectId);
 
+  notify(
+    finalStatus === 'delivered' ? '🎉 项目已交付!' : '⏸️ 项目暂停',
+    `${stats.passed}/${stats.total} features 已完成`
+  );
+
   // Git commit: 最终产出
   if (workspacePath) {
     commitWorkspace(workspacePath, `AgentForge: Delivered ${stats.passed}/${stats.total} features`);
@@ -458,6 +658,7 @@ async function workerLoop(
         projectId, agentId: workerId,
         content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停`,
       });
+      notify('⚠️ AgentForge 预算告警', `项目已花费 $${budget.spent.toFixed(2)}，超过预算 $${budget.budget}，已自动暂停`);
       // 触发停止
       const ctrl = runningOrchestrators.get(projectId);
       if (ctrl) ctrl.abort();
@@ -505,14 +706,19 @@ async function workerLoop(
           qaBlock = `\n\n## QA 审查反馈（请根据反馈修改）\n${qaFeedback}`;
         }
 
-        // ── 调用 LLM 开发 ──
+        // ── 调用 LLM 开发 (流式) ──
+        const [onChunk] = createStreamCallback(win, projectId, workerId);
+        sendToUI(win, 'agent:stream-start', { projectId, agentId: workerId, label: `${feature.id} 开发` });
+
         const result = await callLLM(settings, settings.workerModel, [
           { role: 'system', content: DEVELOPER_SYSTEM_PROMPT },
           {
             role: 'user',
             content: `请实现以下 Feature:\n\nID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}${contextBlock}${qaBlock}\n\n请输出所有需要创建/修改的文件。使用如下格式：\n<<<FILE:relative/path/to/file>>>\n文件内容\n<<<END>>>\n\n完成所有文件后明确写出 "${feature.id} COMPLETED"。`,
           },
-        ], signal, 16384);
+        ], signal, 16384, 2, onChunk);
+
+        sendToUI(win, 'agent:stream-end', { projectId, agentId: workerId });
 
         const cost = calcCost(settings.workerModel, result.inputTokens, result.outputTokens);
         addLog(projectId, workerId, 'output', `[${feature.id}] Attempt ${attempt}:\n${result.content.slice(0, 3000)}`);
@@ -569,6 +775,7 @@ async function workerLoop(
               projectId, agentId: workerId,
               content: `✅ ${feature.id} 完成! (attempt ${attempt}, dev+qa $${(cost + qaCost).toFixed(4)})`,
             });
+            notify('✅ Feature 完成', `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`);
             break;
           } else {
             qaFeedback = qaResult.feedbackText;

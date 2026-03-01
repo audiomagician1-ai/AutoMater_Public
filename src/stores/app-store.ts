@@ -12,6 +12,16 @@ interface LogEntry {
   agentId: string;
   content: string;
   timestamp: number;
+  /** 流式日志: 标记此条是否正在接收流式内容 */
+  streaming?: boolean;
+}
+
+/** 活跃的流式会话 */
+interface StreamSession {
+  agentId: string;
+  label: string;
+  content: string;
+  startedAt: number;
 }
 
 interface AppState {
@@ -27,6 +37,12 @@ interface AppState {
   logs: LogEntry[];
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
+
+  // 流式日志
+  activeStreams: Map<string, StreamSession>;
+  startStream: (agentId: string, label: string) => void;
+  appendStream: (agentId: string, chunk: string) => void;
+  endStream: (agentId: string) => void;
 
   // Features 实时状态
   featureStatuses: Map<string, string>;
@@ -55,6 +71,26 @@ export const useAppStore = create<AppState>((set) => ({
     logs: [...state.logs.slice(-500), { ...log, id: ++logIdCounter, timestamp: Date.now() }],
   })),
   clearLogs: () => set({ logs: [] }),
+
+  // ── 流式日志 ──
+  activeStreams: new Map(),
+  startStream: (agentId, label) => set((state) => {
+    const next = new Map(state.activeStreams);
+    next.set(agentId, { agentId, label, content: '', startedAt: Date.now() });
+    return { activeStreams: next };
+  }),
+  appendStream: (agentId, chunk) => set((state) => {
+    const session = state.activeStreams.get(agentId);
+    if (!session) return {};
+    const next = new Map(state.activeStreams);
+    next.set(agentId, { ...session, content: session.content + chunk });
+    return { activeStreams: next };
+  }),
+  endStream: (agentId) => set((state) => {
+    const next = new Map(state.activeStreams);
+    next.delete(agentId);
+    return { activeStreams: next };
+  }),
 
   featureStatuses: new Map(),
   updateFeatureStatus: (featureId, status) => set((state) => {

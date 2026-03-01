@@ -10,7 +10,7 @@ import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
-  const { currentPage, addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured, currentProjectId } = useAppStore();
+  const { currentPage, addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured, currentProjectId, startStream, appendStream, endStream } = useAppStore();
   const [stats, setStats] = useState<any>(null);
 
   // 订阅主进程事件
@@ -40,6 +40,19 @@ export function App() {
 
     unsubs.push(window.agentforge.on('agent:error', (data: any) => {
       addLog({ projectId: data.projectId, agentId: 'system', content: `❌ 错误: ${data.error}` });
+    }));
+
+    // ── 流式事件 ──
+    unsubs.push(window.agentforge.on('agent:stream-start', (data: any) => {
+      startStream(data.agentId, data.label || '');
+    }));
+
+    unsubs.push(window.agentforge.on('agent:stream', (data: any) => {
+      appendStream(data.agentId, data.chunk);
+    }));
+
+    unsubs.push(window.agentforge.on('agent:stream-end', (data: any) => {
+      endStream(data.agentId);
     }));
 
     // 检查设置

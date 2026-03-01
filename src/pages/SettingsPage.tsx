@@ -8,7 +8,7 @@ const PROVIDER_PRESETS: Record<string, { baseUrl: string; models: string[] }> = 
   },
   anthropic: {
     baseUrl: 'https://api.anthropic.com',
-    models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-7-sonnet-20250219', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
   },
   custom: {
     baseUrl: 'http://localhost:11434',
@@ -202,6 +202,29 @@ export function SettingsPage() {
             <span>1 (省钱)</span>
             <span>8 (快速)</span>
           </div>
+        </section>
+
+        {/* Daily Budget */}
+        <section className="space-y-2">
+          <label className="text-sm font-medium text-slate-300">
+            每日预算上限: <span className="text-amber-400">${settings.dailyBudgetUsd}</span>
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={200}
+            step={1}
+            value={settings.dailyBudgetUsd}
+            onChange={e => setSettings(prev => ({ ...prev, dailyBudgetUsd: parseInt(e.target.value) }))}
+            className="w-full accent-amber-500"
+          />
+          <div className="flex justify-between text-xs text-slate-600">
+            <span>$1 (测试)</span>
+            <span>$200 (正式项目)</span>
+          </div>
+          <p className="text-xs text-slate-600 mt-1">
+            超过预算后自动暂停所有 Agent 并发送通知
+          </p>
         </section>
 
         {/* Save */}
