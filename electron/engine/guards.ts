@@ -14,6 +14,9 @@
  * v3.0: 新模块 — 从"信任 LLM 遵守 prompt"升级为"程序强制执行"
  */
 
+import fs from 'fs';
+import path from 'path';
+
 // ═══════════════════════════════════════
 // 1. Tool Call Guard — 参数校验 + 速率控制
 // ═══════════════════════════════════════
@@ -582,8 +585,6 @@ export function gateArchitectToDeveloper(workspacePath: string | null): GateChec
     return { passed: true }; // 无 workspace 时跳过
   }
 
-  const fs = require('fs');
-  const path = require('path');
   const archPath = path.join(workspacePath, 'ARCHITECTURE.md');
   if (!fs.existsSync(archPath)) {
     return { passed: false, reason: 'ARCHITECTURE.md not found in workspace' };

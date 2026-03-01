@@ -6,8 +6,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && electron-builder",
     "build:vite": "vite build",
+    "build:prepare": "node scripts/prepare-build.js",
+    "build": "vite build && node scripts/prepare-build.js && electron-builder",
     "electron:dev": "vite",
     "preview": "vite preview"
   },
@@ -59,9 +60,12 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "node_modules/better-sqlite3/**/*",
-      "node_modules/bindings/**/*",
-      "node_modules/file-uri-to-path/**/*"
+      "node_modules/**/*",
+      "!node_modules/.pnpm",
+      "!node_modules/*/{test,tests,__tests__}/**",
+      "!node_modules/*/{.git,.github}/**",
+      "!node_modules/*/CHANGELOG*",
+      "!node_modules/*/*.md"
     ],
     "asar": true,
     "asarUnpack": [

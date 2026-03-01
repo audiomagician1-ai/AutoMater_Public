@@ -13,6 +13,7 @@
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { execInSandbox, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole } from './memory-system';
+import { execSync } from 'child_process';
 import type { ToolContext } from './tool-system';
 
 // ═══════════════════════════════════════
@@ -72,7 +73,6 @@ const MINI_TOOLS: MiniTool[] = [
   {
     name: 'search_files',
     execute(args, ctx) {
-      const { execSync } = require('child_process');
       try {
         const pattern = (args.pattern || '').replace(/'/g, "''");
         const cmd = process.platform === 'win32'
