@@ -26,9 +26,9 @@ interface AgentReactState {
 }
 
 /** 外层页面 (无需选中项目) */
-export type GlobalPageId = 'projects' | 'settings';
+export type GlobalPageId = 'projects' | 'settings' | 'guide';
 /** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline';
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline' | 'guide';
 
 interface LogEntry {
   id: number;

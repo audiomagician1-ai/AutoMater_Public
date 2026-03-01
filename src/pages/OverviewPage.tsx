@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
 import dagre from 'dagre';
+import { TechBackground } from '../components/TechBackground';
 
 // ═══════════════════════════════════════
 // Types
@@ -573,9 +574,9 @@ function ProgressRing({ value, size = 100, label, color = '#5c7cfa' }: { value: 
 
 function StatCard({ icon, label, value, sub }: { icon: string; label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-1">
-      <div className="flex items-center gap-2 text-xs text-slate-500"><span>{icon}</span><span>{label}</span></div>
-      <div className="text-lg font-bold text-slate-200">{value}</div>
+    <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-4 space-y-1 hover:border-slate-700/80 hover:bg-slate-900/90 transition-all duration-300 hover:shadow-lg hover:shadow-black/20 group">
+      <div className="flex items-center gap-2 text-xs text-slate-500"><span className="group-hover:scale-110 transition-transform">{icon}</span><span>{label}</span></div>
+      <div className="text-lg font-bold text-slate-200 animate-count">{value}</div>
       {sub && <div className="text-[10px] text-slate-600">{sub}</div>}
     </div>
   );
@@ -630,7 +631,7 @@ function PipelineBar({ projectStatus, features }: { projectStatus: string; featu
   const activeStage = inferPipelineStage(projectStatus, features);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+    <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-4 hover:border-slate-700/60 transition-all duration-300">
       <h4 className="text-[10px] uppercase tracking-wider text-slate-500 mb-3">流水线进度</h4>
       <div className="flex items-center gap-1">
         {PIPELINE_STAGES.map((stage, i) => {
@@ -696,7 +697,7 @@ function DocCompletionBar({ features, projectId }: { features: Feature[]; projec
   const testCoverage = total > 0 ? Math.round((docStats.testCount / total) * 100) : 0;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+    <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-4 hover:border-slate-700/60 transition-all duration-300">
       <h4 className="text-[10px] uppercase tracking-wider text-slate-500 mb-3">文档完成度</h4>
       <div className="grid grid-cols-3 gap-4">
         {/* Design doc */}
@@ -822,9 +823,15 @@ export function OverviewPage() {
   const noWish = project && !isActive && !canResume && !project.wish?.trim();
 
   return (
-    <div className="h-full flex flex-col overflow-y-auto">
+    <div className="h-full flex flex-col overflow-y-auto relative">
+      {/* 科技感动态背景 */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <TechBackground intensity={isActive ? 1.5 : 0.6} />
+        {/* 渐变遮罩保证内容可读性 */}
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-950/40 via-slate-950/80 to-slate-950/95" />
+      </div>
       {/* ═══════ Command Center Header ═══════ */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-2">
+      <div className="flex-shrink-0 px-6 pt-6 pb-2 relative z-10">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-xl font-bold">指挥中心</h2>
           <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300 transition-colors" title="刷新">🔄</button>
@@ -832,7 +839,7 @@ export function OverviewPage() {
       </div>
 
       {/* ═══════ Compact Control Bar ═══════ */}
-      <div className="flex-shrink-0 mx-6 mb-4">
+      <div className="flex-shrink-0 mx-6 mb-4 relative z-10">
         <div className={`relative overflow-hidden rounded-2xl border transition-all duration-500 ${
           isActive
             ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/50 via-slate-900 to-cyan-950/50'
@@ -905,7 +912,7 @@ export function OverviewPage() {
         </div>
       </div>
 
-      <div className="flex-1 px-6 pb-6 space-y-6">
+      <div className="flex-1 px-6 pb-6 space-y-6 relative z-10">
         {/* Skeleton placeholder modules when no features yet */}
         {enriched.length === 0 && !isActive && (
           <div className="space-y-6">

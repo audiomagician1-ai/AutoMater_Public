@@ -2,6 +2,7 @@ import { useAppStore, type ProjectPageId, type GlobalPageId } from '../stores/ap
 
 const globalNavItems: { id: GlobalPageId; icon: string; label: string }[] = [
   { id: 'projects', icon: '📁', label: '项目' },
+  { id: 'guide',    icon: '📖', label: '教程' },
   { id: 'settings', icon: '⚙️', label: '设置' },
 ];
 
@@ -16,6 +17,7 @@ const projectNavItems: { id: ProjectPageId; icon: string; label: string }[] = [
   { id: 'timeline',  icon: '⏳', label: '时间线' },
   { id: 'output',    icon: '📦', label: '产出' },
   { id: 'logs',      icon: '📜', label: '日志' },
+  { id: 'guide',     icon: '📖', label: '教程' },
 ];
 
 export function Sidebar() {
@@ -26,14 +28,18 @@ export function Sidebar() {
   } = useAppStore();
 
   return (
-    <aside className="w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-3 gap-1 flex-shrink-0">
+    <aside className="w-16 bg-slate-900/95 backdrop-blur-sm border-r border-slate-800/80 flex flex-col items-center py-3 gap-1 flex-shrink-0 relative">
+      {/* Subtle gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-b from-forge-500/[0.02] via-transparent to-slate-900/50 pointer-events-none" />
+
       {/* 品牌 Logo */}
       <div
-        className="w-10 h-10 rounded-xl bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center text-sm font-bold shadow-lg shadow-forge-500/20 mb-3 cursor-pointer select-none"
+        className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center text-sm font-bold shadow-lg shadow-forge-500/20 mb-3 cursor-pointer select-none hover:shadow-forge-500/40 hover:scale-105 transition-all duration-300 z-10"
         title="AgentForge"
         onClick={() => { if (insideProject) exitProject(); else setGlobalPage('projects'); }}
       >
         F
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-white/0 to-white/10 pointer-events-none" />
       </div>
 
       {insideProject ? (
@@ -58,10 +64,10 @@ export function Sidebar() {
                   if (hasBadge) clearNotifications();
                 }}
                 className={`
-                  relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all text-xs
+                  relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 text-xs group
                   ${projectPage === item.id
-                    ? 'bg-forge-600/20 text-forge-400 shadow-inner'
-                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}
+                    ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'}
                 `}
                 title={item.label}
               >
@@ -84,10 +90,10 @@ export function Sidebar() {
               key={item.id}
               onClick={() => setGlobalPage(item.id)}
               className={`
-                w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all text-xs
+                w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 text-xs group
                 ${globalPage === item.id
-                  ? 'bg-forge-600/20 text-forge-400 shadow-inner'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}
+                  ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'}
               `}
               title={item.label}
             >
@@ -99,20 +105,25 @@ export function Sidebar() {
       )}
 
       {/* 底部状态指示 */}
-      <div className="mt-auto flex flex-col items-center gap-2 mb-2">
+      <div className="mt-auto flex flex-col items-center gap-2 mb-2 z-10">
         {insideProject && (
           <button
             onClick={() => setGlobalPage('settings')}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-all"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-all duration-200"
             title="设置"
           >
             ⚙️
           </button>
         )}
-        <div
-          className={`w-2.5 h-2.5 rounded-full ${settingsConfigured ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}
-          title={settingsConfigured ? 'LLM 已连接' : '请先配置 LLM'}
-        />
+        <div className="relative">
+          <div
+            className={`w-2.5 h-2.5 rounded-full transition-all duration-500 ${settingsConfigured ? 'bg-emerald-400 shadow-lg shadow-emerald-400/50' : 'bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50'}`}
+            title={settingsConfigured ? 'LLM 已连接' : '请先配置 LLM'}
+          />
+          {settingsConfigured && (
+            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-20" />
+          )}
+        </div>
       </div>
     </aside>
   );

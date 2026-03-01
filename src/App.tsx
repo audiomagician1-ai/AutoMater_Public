@@ -16,6 +16,7 @@ import { ContextPage } from './pages/ContextPage';
 import { WorkflowPage } from './pages/WorkflowPage';
 import TimelinePage from './pages/TimelinePage';
 import { MetaAgentPanel } from './components/MetaAgentPanel';
+import { GuidePage } from './pages/GuidePage';
 
 export function App() {
   const {
@@ -148,6 +149,7 @@ export function App() {
       // 外层: 项目列表 / 设置
       switch (globalPage) {
         case 'settings': return <SettingsPage />;
+        case 'guide':    return <GuidePage />;
         case 'projects':
         default: return <ProjectsPage />;
       }
@@ -164,6 +166,7 @@ export function App() {
       case 'logs':     return <LogsPage />;
       case 'context':  return <ContextPage />;
       case 'timeline': return <TimelinePage />;
+      case 'guide':    return <GuidePage />;
       default:         return <OverviewPage />;
     }
   };

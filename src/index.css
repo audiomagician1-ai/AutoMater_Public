@@ -33,3 +33,128 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* ═══════════════════════════════════════
+   全局动效系统
+   ═══════════════════════════════════════ */
+
+/* 页面切换淡入 */
+main > * {
+  animation: pageEnter 0.3s ease-out;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 按钮 hover 光晕 */
+button {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* 卡片悬浮动效 */
+.hover-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 呼吸灯效果 */
+@keyframes breathe {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.animate-breathe {
+  animation: breathe 3s ease-in-out infinite;
+}
+
+/* 渐变流光边框 */
+@keyframes borderGlow {
+  0% { border-color: rgba(92, 124, 250, 0.2); }
+  50% { border-color: rgba(92, 124, 250, 0.5); }
+  100% { border-color: rgba(92, 124, 250, 0.2); }
+}
+.animate-border-glow {
+  animation: borderGlow 3s ease-in-out infinite;
+}
+
+/* 数字计数器动画 */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-count {
+  animation: countUp 0.5s ease-out;
+}
+
+/* 脉冲光环 */
+@keyframes pulseRing {
+  0% { transform: scale(0.8); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 0; }
+  100% { transform: scale(0.8); opacity: 0; }
+}
+.animate-pulse-ring::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  animation: pulseRing 2s ease-out infinite;
+}
+
+/* 水平滑入动画 */
+@keyframes slideInRight {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in {
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* 闪烁高亮（用于新增项目等） */
+@keyframes flashHighlight {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(92, 124, 250, 0.1); }
+}
+.animate-flash {
+  animation: flashHighlight 0.6s ease-in-out 2;
+}
+
+/* Shimmer 骨架屏加载效果 */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.03) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* 微妙浮动 */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
