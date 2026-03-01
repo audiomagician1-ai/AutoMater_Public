@@ -22,6 +22,7 @@ import { ipcMain } from 'electron';
 import { getDb } from '../db';
 import { mcpManager, type McpServerConfig, type McpToolInfo } from '../engine/mcp-client';
 import { skillManager, type SkillScanResult } from '../engine/skill-loader';
+import { skillEvolution } from '../engine/skill-evolution';
 import { createLogger } from '../engine/logger';
 
 const log = createLogger('ipc:mcp');
@@ -173,6 +174,33 @@ export function setupMcpHandlers(): void {
       description: d.description,
     }));
   });
+
+  // ── Skill Evolution (v5.1) ──
+
+  ipcMain.handle('skill-evolution:get-index', () => {
+    return skillEvolution.getIndex();
+  });
+
+  ipcMain.handle('skill-evolution:get-overview', () => {
+    return skillEvolution.getOverview();
+  });
+
+  ipcMain.handle('skill-evolution:get-skill', (_event, skillId: string) => {
+    return skillEvolution.loadSkill(skillId);
+  });
+
+  ipcMain.handle('skill-evolution:get-knowledge', (_event, skillId: string) => {
+    return skillEvolution.loadKnowledge(skillId);
+  });
+
+  ipcMain.handle('skill-evolution:deprecate', (_event, skillId: string, reason: string) => {
+    const ok = skillEvolution.deprecate(skillId, reason);
+    return { success: ok };
+  });
+
+  ipcMain.handle('skill-evolution:get-ranked', () => {
+    return skillEvolution.getRankedSkills();
+  });
 }
 
 function formatScanResult(result: SkillScanResult) {
@@ -196,7 +224,7 @@ function formatScanResult(result: SkillScanResult) {
  * 失败不阻塞启动。
  */
 export async function initMcpAndSkills(): Promise<void> {
-  // 1. 加载技能目录
+  // 1. 加载技能目录 (静态外部 skills)
   const skillDir = loadSkillDirectory();
   if (skillDir) {
     try {
@@ -205,6 +233,15 @@ export async function initMcpAndSkills(): Promise<void> {
     } catch (err: any) {
       log.warn('Failed to load skill directory on startup', { error: err.message });
     }
+  }
+
+  // 2. 初始化技能进化系统 (自主习得的 skills)
+  try {
+    skillEvolution.ensureInitialized();
+    const overview = skillEvolution.getOverview();
+    log.info('Skill evolution initialized', { total: overview.total, byMaturity: overview.byMaturity });
+  } catch (err: any) {
+    log.warn('Failed to initialize skill evolution', { error: err.message });
   }
 
   // 2. 自动连接 enabled 的 MCP 服务器

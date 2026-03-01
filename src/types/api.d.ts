@@ -182,6 +182,16 @@ interface AgentForgeAPI {
     reload(): Promise<{ success: boolean; loaded: number; skills: SkillSummary[]; errors: Array<{ file: string; error: string }> }>;
     list(): Promise<SkillSummary[]>;
   };
+
+  /** v5.1: Skill 进化系统 */
+  skillEvolution: {
+    getIndex(): Promise<SkillEvolutionEntry[]>;
+    getOverview(): Promise<SkillEvolutionOverview>;
+    getSkill(id: string): Promise<SkillEvolutionDetail | null>;
+    getKnowledge(id: string): Promise<string | null>;
+    deprecate(id: string, reason: string): Promise<{ success: boolean }>;
+    getRanked(): Promise<Array<SkillEvolutionEntry & { score: number }>>;
+  };
 }
 
 /** 需求条目 (v3.1) */
@@ -312,6 +322,50 @@ interface SkillSummary {
   name: string;
   description: string;
   sourceFile?: string;
+}
+
+/** Skill 进化索引条目 (v5.1) */
+interface SkillEvolutionEntry {
+  id: string;
+  name: string;
+  trigger: string;
+  tags: string[];
+  maturity: 'draft' | 'proven' | 'stable' | 'deprecated';
+  version: number;
+  usedCount: number;
+  successRate: number;
+  lastUsed: string | null;
+}
+
+/** Skill 进化概览 (v5.1) */
+interface SkillEvolutionOverview {
+  total: number;
+  byMaturity: Record<string, number>;
+  totalUsages: number;
+  avgSuccessRate: number;
+}
+
+/** Skill 进化完整详情 (v5.1) */
+interface SkillEvolutionDetail {
+  id: string;
+  name: string;
+  description: string;
+  trigger: string;
+  tags: string[];
+  maturity: 'draft' | 'proven' | 'stable' | 'deprecated';
+  version: number;
+  stats: {
+    usedCount: number;
+    successCount: number;
+    lastUsed: string | null;
+    projectIds: string[];
+    userRating: number;
+    recentFeedback: Array<{ timestamp: string; agentId: string; feedback: string; success: boolean }>;
+  };
+  history: Array<{ version: number; timestamp: string; author: string; changeNote: string }>;
+  source: { type: string; projectId?: string; agentId?: string; timestamp: string };
+  createdAt: string;
+  updatedAt: string;
 }
 
 declare global {

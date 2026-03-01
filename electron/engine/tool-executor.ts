@@ -278,6 +278,20 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: result.success, output: result.success ? `已按下 ${call.arguments.combo}` : `按键失败: ${result.error}`, action: 'computer' };
       }
 
+      // ── Skill Evolution (v5.1) ──
+      case 'skill_acquire': {
+        return executeSkillAcquire(call, ctx);
+      }
+      case 'skill_search': {
+        return executeSkillSearch(call);
+      }
+      case 'skill_improve': {
+        return executeSkillImprove(call);
+      }
+      case 'skill_record_usage': {
+        return executeSkillRecordUsage(call, ctx);
+      }
+
       // Async tools — sync entry returns placeholder
       case 'github_create_issue':
       case 'github_list_issues':
@@ -512,5 +526,131 @@ async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
     };
   } catch (err: any) {
     return { success: false, output: `Skill execution error: ${err.message}` };
+  }
+}
+
+// ═══════════════════════════════════════
+// Skill Evolution Tool Implementations (v5.1)
+// ═══════════════════════════════════════
+
+function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
+  try {
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const args = call.arguments;
+
+    if (!args.name || !args.description || !args.trigger || !args.knowledge) {
+      return { success: false, output: 'skill_acquire 需要 name, description, trigger, knowledge 参数' };
+    }
+
+    const skill = skillEvolution.acquire({
+      name: args.name,
+      description: args.description,
+      trigger: args.trigger,
+      tags: args.tags || [],
+      knowledge: args.knowledge,
+      execution: { type: 'prompt', promptTemplate: args.knowledge },
+      source: {
+        type: 'agent_acquired',
+        projectId: ctx.projectId,
+        agentId: (call.arguments as any)._agentId || 'unknown',
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    return {
+      success: true,
+      output: `✅ 新技能已习得:\n  ID: ${skill.id}\n  名称: ${skill.name}\n  成熟度: ${skill.maturity}\n  触发: ${skill.trigger}\n  标签: ${skill.tags.join(', ') || '无'}\n\n技能将在匹配的未来任务中自动推荐。使用 ≥3 次且成功率 ≥70% 后自动晋升为 proven。`,
+      action: 'write',
+    };
+  } catch (err: any) {
+    return { success: false, output: `技能习得失败: ${err.message}` };
+  }
+}
+
+function executeSkillSearch(call: ToolCall): ToolResult {
+  try {
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const query = call.arguments.query || '';
+    const maxResults = call.arguments.max_results ?? 3;
+
+    const matches = skillEvolution.searchSkills(query, { maxResults });
+
+    if (matches.length === 0) {
+      return { success: true, output: `未找到与 "${query}" 相关的技能。你可以在发现可复用模式时用 skill_acquire 习得新技能。`, action: 'read' };
+    }
+
+    const sections: string[] = [`找到 ${matches.length} 个相关技能:`];
+
+    for (const match of matches) {
+      const knowledge = skillEvolution.loadKnowledge(match.skill.id);
+      sections.push([
+        `\n### ${match.skill.id}: ${match.skill.name}`,
+        `成熟度: ${match.skill.maturity} | 使用: ${match.skill.usedCount}次 | 成功率: ${Math.round(match.skill.successRate * 100)}%`,
+        `触发: ${match.skill.trigger}`,
+        `匹配: ${match.matchReason} (相关度: ${match.relevance}%)`,
+        knowledge ? `\n${knowledge.slice(0, 1500)}` : '',
+      ].join('\n'));
+    }
+
+    return { success: true, output: sections.join('\n'), action: 'read' };
+  } catch (err: any) {
+    return { success: false, output: `技能搜索失败: ${err.message}` };
+  }
+}
+
+function executeSkillImprove(call: ToolCall): ToolResult {
+  try {
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const args = call.arguments;
+
+    if (!args.skill_id || !args.change_note) {
+      return { success: false, output: 'skill_improve 需要 skill_id 和 change_note 参数' };
+    }
+
+    const skill = skillEvolution.improve(args.skill_id, {
+      knowledge: args.knowledge,
+      trigger: args.trigger,
+      changeNote: args.change_note,
+      author: (args as any)._agentId ? `agent:${(args as any)._agentId}` : 'agent:unknown',
+    });
+
+    if (!skill) {
+      return { success: false, output: `技能 ${args.skill_id} 不存在` };
+    }
+
+    return {
+      success: true,
+      output: `✅ 技能已改进:\n  ID: ${skill.id}\n  名称: ${skill.name}\n  版本: v${skill.version}\n  变更: ${args.change_note}`,
+      action: 'write',
+    };
+  } catch (err: any) {
+    return { success: false, output: `技能改进失败: ${err.message}` };
+  }
+}
+
+function executeSkillRecordUsage(call: ToolCall, ctx: ToolContext): ToolResult {
+  try {
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const args = call.arguments;
+
+    if (!args.skill_id || args.success === undefined) {
+      return { success: false, output: 'skill_record_usage 需要 skill_id 和 success 参数' };
+    }
+
+    skillEvolution.recordUsage(
+      args.skill_id,
+      ctx.projectId,
+      args.success,
+      args.feedback,
+      (args as any)._agentId,
+    );
+
+    return {
+      success: true,
+      output: `已记录技能 ${args.skill_id} 使用结果: ${args.success ? '✅ 成功' : '❌ 失败'}${args.feedback ? ` (反馈: ${args.feedback})` : ''}`,
+      action: 'write',
+    };
+  } catch (err: any) {
+    return { success: false, output: `记录使用失败: ${err.message}` };
   }
 }

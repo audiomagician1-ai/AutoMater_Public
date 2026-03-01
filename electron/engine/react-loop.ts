@@ -285,6 +285,19 @@ export async function reactDeveloperLoop(
     sharedDecisionsText = formatDecisionsForContext(decisions, workerId);
   }
 
+  // v5.1: 技能自动匹配 — 搜索与当前任务相关的已习得技能
+  let skillContextText = '';
+  try {
+    const { buildSkillContext } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const taskDesc = `${feature.title} ${feature.description} ${feature.acceptance_criteria || ''}`;
+    skillContextText = buildSkillContext(taskDesc, 2);
+    if (skillContextText) {
+      log.debug('Matched skills for feature', { featureId: feature.id, length: skillContextText.length });
+    }
+  } catch {
+    // skill-evolution 模块可能未初始化, 跳过
+  }
+
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
   const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
@@ -293,7 +306,7 @@ export async function reactDeveloperLoop(
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 

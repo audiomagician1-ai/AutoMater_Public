@@ -517,6 +517,62 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['assertion'],
     },
   },
+
+  // ── Skill Evolution (v5.1) ──
+  {
+    name: 'skill_acquire',
+    description: '习得新技能：当你发现一个可复用的多步骤模式/流程时，用此工具将其提炼为技能。技能会跨项目共享，帮助未来的任务。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '技能名称（简短，<20字）' },
+        description: { type: 'string', description: '技能描述（<50字）' },
+        trigger: { type: 'string', description: '触发条件描述（什么场景下应使用此技能，<30字）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '分类标签（如 ["typescript","testing"]）' },
+        knowledge: { type: 'string', description: '详细步骤说明（Markdown 格式，200-500字，包含具体的操作步骤和注意事项）' },
+      },
+      required: ['name', 'description', 'trigger', 'knowledge'],
+    },
+  },
+  {
+    name: 'skill_search',
+    description: '搜索已有技能：输入当前任务描述，查找相关的已习得技能和经验。返回匹配的技能列表及其知识文档。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词或任务描述' },
+        max_results: { type: 'number', description: '最大结果数，默认 3', default: 3 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'skill_improve',
+    description: '改进已有技能：基于新的经验更新技能的步骤说明、触发条件或标签。每次改进自动版本递增。',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_id: { type: 'string', description: '要改进的技能 ID（如 SK-001）' },
+        knowledge: { type: 'string', description: '更新后的知识文档（Markdown 格式）' },
+        trigger: { type: 'string', description: '更新后的触发条件（可选）' },
+        change_note: { type: 'string', description: '本次改进说明（<50字）' },
+      },
+      required: ['skill_id', 'change_note'],
+    },
+  },
+  {
+    name: 'skill_record_usage',
+    description: '记录技能使用结果：在使用了某个技能后，报告使用结果（成功/失败）和反馈。帮助系统追踪技能有效性并自动晋升成熟度。',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_id: { type: 'string', description: '使用的技能 ID' },
+        success: { type: 'boolean', description: '使用是否成功' },
+        feedback: { type: 'string', description: '使用反馈或改进建议（可选）' },
+      },
+      required: ['skill_id', 'success'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -555,6 +611,8 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'browser_network', 'browser_close',
     // 视觉验证
     'analyze_image', 'compare_screenshots', 'visual_assert',
+    // 技能进化 (v5.1)
+    'skill_acquire', 'skill_search', 'skill_improve', 'skill_record_usage',
   ],
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -567,6 +625,8 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
     'browser_network', 'browser_close',
     'analyze_image', 'compare_screenshots', 'visual_assert',
+    // 技能进化 (v5.1)
+    'skill_search', 'skill_record_usage',
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',

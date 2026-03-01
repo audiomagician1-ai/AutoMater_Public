@@ -136,5 +136,15 @@ contextBridge.exposeInMainWorld('agentforge', {
     reload: () => ipcRenderer.invoke('skill:reload'),
     list: () => ipcRenderer.invoke('skill:list'),
   },
+
+  // ── Skill 进化系统 (v5.1) ──
+  skillEvolution: {
+    getIndex: () => ipcRenderer.invoke('skill-evolution:get-index'),
+    getOverview: () => ipcRenderer.invoke('skill-evolution:get-overview'),
+    getSkill: (id: string) => ipcRenderer.invoke('skill-evolution:get-skill', id),
+    getKnowledge: (id: string) => ipcRenderer.invoke('skill-evolution:get-knowledge', id),
+    deprecate: (id: string, reason: string) => ipcRenderer.invoke('skill-evolution:deprecate', id, reason),
+    getRanked: () => ipcRenderer.invoke('skill-evolution:get-ranked'),
+  },
 });
 
