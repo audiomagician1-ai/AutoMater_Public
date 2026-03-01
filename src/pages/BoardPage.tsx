@@ -8,7 +8,8 @@ type Feature = {
 
 const STATUS_COLS = [
   { key: 'todo',        label: '待做',   color: 'bg-slate-500',   ring: 'ring-slate-500/30' },
-  { key: 'in_progress', label: '进行中', color: 'bg-blue-500',    ring: 'ring-blue-500/30' },
+  { key: 'in_progress', label: '开发中', color: 'bg-blue-500',    ring: 'ring-blue-500/30' },
+  { key: 'reviewing',   label: '审查中', color: 'bg-amber-500',   ring: 'ring-amber-500/30' },
   { key: 'passed',      label: '已完成', color: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
   { key: 'failed',      label: '失败',   color: 'bg-red-500',     ring: 'ring-red-500/30' },
 ];
