@@ -200,6 +200,17 @@ interface AgentForgeAPI {
     openDirectory(title?: string): Promise<{ canceled: boolean; filePaths: string[] }>;
   };
 
+  /** v5.4: 元Agent对话 */
+  metaAgent: {
+    chat(projectId: string | null, message: string, history?: Array<{ role: string; content: string }>): Promise<{
+      reply: string;
+      intent: 'wish' | 'query' | 'workflow' | 'general';
+      wishCreated?: boolean;
+      tokens?: number;
+      cost?: number;
+    }>;
+  };
+
   /** v5.2: 缩放控制 */
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */

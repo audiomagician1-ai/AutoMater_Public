@@ -112,6 +112,23 @@ interface AppState {
   // v5.3: 全局右侧元Agent面板
   metaAgentPanelOpen: boolean;
   toggleMetaAgentPanel: () => void;
+
+  // v5.4: 元Agent对话消息持久化 (按 projectId 分组, '_global' 为跨项目)
+  metaAgentMessages: Map<string, MetaAgentMessage[]>;
+  addMetaAgentMessage: (projectId: string, msg: MetaAgentMessage) => void;
+  clearMetaAgentMessages: (projectId: string) => void;
+  /** 更新最后一条 assistant 消息（用于流式/替换 placeholder） */
+  updateLastAssistantMessage: (projectId: string, content: string) => void;
+}
+
+/** 元Agent对话消息 */
+export interface MetaAgentMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  /** 标记: 此消息是否触发了需求创建 */
+  triggeredWish?: boolean;
 }
 
 let logIdCounter = 0;
@@ -210,4 +227,31 @@ export const useAppStore = create<AppState>((set) => ({
   // v5.3: 全局右侧元Agent面板
   metaAgentPanelOpen: false,
   toggleMetaAgentPanel: () => set((s) => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
+
+  // v5.4: 元Agent对话
+  metaAgentMessages: new Map(),
+  addMetaAgentMessage: (projectId, msg) => set((s) => {
+    const next = new Map(s.metaAgentMessages);
+    const list = [...(next.get(projectId) || []), msg];
+    // 保留最近 200 条
+    next.set(projectId, list.slice(-200));
+    return { metaAgentMessages: next };
+  }),
+  clearMetaAgentMessages: (projectId) => set((s) => {
+    const next = new Map(s.metaAgentMessages);
+    next.delete(projectId);
+    return { metaAgentMessages: next };
+  }),
+  updateLastAssistantMessage: (projectId, content) => set((s) => {
+    const next = new Map(s.metaAgentMessages);
+    const list = [...(next.get(projectId) || [])];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].role === 'assistant') {
+        list[i] = { ...list[i], content };
+        break;
+      }
+    }
+    next.set(projectId, list);
+    return { metaAgentMessages: next };
+  }),
 }));

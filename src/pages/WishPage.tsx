@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useAppStore } from '../stores/app-store';
+import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
 
 // ═══════════════════════════════════════
 // Constants
@@ -25,21 +25,26 @@ const WISH_STATUS: Record<string, { text: string; color: string; icon: string }>
   rejected:   { text: '已拒绝',   color: 'text-red-400',     icon: '❌' },
 };
 
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
-
 // ═══════════════════════════════════════
 // Meta Agent Chat Panel — 元Agent对话区
 // ═══════════════════════════════════════
 
+const GREETING: MetaAgentMessage = {
+  id: 'greeting',
+  role: 'assistant',
+  content: '你好！我是元Agent管家，你的一站式项目助手。你可以：\n• 直接告诉我你的需求想法，我会自动创建并启动开发\n• 查询任何项目的设计文档、技术架构、进度状态\n• 调整工作流程、查看团队配置\n有什么需要？',
+  timestamp: Date.now(),
+};
+
 function MetaAgentChat({ compact = false }: { compact?: boolean }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: '0', role: 'assistant', content: '你好！我是元Agent管家，你的一站式项目助手。你可以：\n• 提交需求想法，我帮你转发给团队\n• 查询任何项目的设计文档、技术架构、进度状态\n• 调整工作流程、查看团队配置\n有什么需要？', timestamp: Date.now() },
-  ]);
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const messagesMap = useAppStore(s => s.metaAgentMessages);
+  const addMessage = useAppStore(s => s.addMetaAgentMessage);
+  const updateLastAssistant = useAppStore(s => s.updateLastAssistantMessage);
+
+  const chatKey = currentProjectId || '_global';
+  const messages = messagesMap.get(chatKey) || [];
+
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -50,22 +55,55 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
-    const userMsg: ChatMessage = { id: String(Date.now()), role: 'user', content: input.trim(), timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
+    const userMsg: MetaAgentMessage = {
+      id: String(Date.now()),
+      role: 'user',
+      content: input.trim(),
+      timestamp: Date.now(),
+    };
+    addMessage(chatKey, userMsg);
     setInput('');
     setSending(true);
-    // Simulate meta-agent response (placeholder — will connect to real LLM)
-    setTimeout(() => {
-      const reply: ChatMessage = {
-        id: String(Date.now() + 1),
-        role: 'assistant',
-        content: `收到："${userMsg.content.slice(0, 50)}${userMsg.content.length > 50 ? '...' : ''}"。我来处理——如果是需求类请求，我会转交 PM 进行分诊；如果是查询项目设计/技术细节，我会为你调取相关文档。请稍候...`,
-        timestamp: Date.now(),
-      };
-      setMessages(prev => [...prev, reply]);
+
+    // Add placeholder
+    const placeholderMsg: MetaAgentMessage = {
+      id: String(Date.now() + 1),
+      role: 'assistant',
+      content: '思考中...',
+      timestamp: Date.now(),
+    };
+    addMessage(chatKey, placeholderMsg);
+
+    try {
+      // Build history for LLM
+      const history = messages.slice(-20).map(m => ({
+        role: m.role as string,
+        content: m.content,
+      }));
+
+      const result = await window.agentforge.metaAgent.chat(
+        currentProjectId,
+        userMsg.content,
+        history,
+      );
+
+      // Replace placeholder with real reply
+      updateLastAssistant(chatKey, result.reply);
+
+      // If wish was created, notify the wish list to refresh
+      if (result.wishCreated) {
+        // Trigger a refresh by dispatching a custom event
+        window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));
+      }
+    } catch (err: any) {
+      updateLastAssistant(chatKey, `❌ 请求失败: ${err.message || '未知错误'}。请检查 LLM 设置。`);
+    } finally {
       setSending(false);
-    }, 800);
+    }
   };
+
+  // Include greeting if no messages yet
+  const displayMessages = messages.length === 0 ? [GREETING] : messages;
 
   return (
     <div className="flex flex-col h-full">
@@ -74,31 +112,34 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-forge-500 to-indigo-600 flex items-center justify-center text-sm">🤖</div>
           <div>
             <div className="text-sm font-bold text-slate-200">元Agent · 项目管家</div>
-            <div className="text-[10px] text-slate-500">需求转发 · 项目汇报 · 工作流管理</div>
+            <div className="text-[10px] text-slate-500">需求创建 · 项目查询 · 工作流管理</div>
           </div>
         </div>
       )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.map(msg => (
+        {displayMessages.map(msg => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
               msg.role === 'user'
                 ? 'bg-forge-600/20 text-forge-200 rounded-br-md'
                 : 'bg-slate-800/80 text-slate-300 rounded-bl-md'
             }`}>
               {msg.content}
+              {msg.triggeredWish && (
+                <div className="mt-1 text-[10px] text-emerald-400">✅ 已创建需求</div>
+              )}
               <div className={`text-[9px] mt-1 ${msg.role === 'user' ? 'text-forge-400/50 text-right' : 'text-slate-600'}`}>
                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           </div>
         ))}
-        {sending && (
+        {sending && messages.length > 0 && messages[messages.length - 1]?.content === '思考中...' && (
           <div className="flex justify-start">
             <div className="bg-slate-800/80 rounded-2xl rounded-bl-md px-4 py-2.5 text-sm text-slate-500">
-              <span className="animate-pulse">思考中...</span>
+              <span className="animate-pulse">🧠 元Agent 思考中...</span>
             </div>
           </div>
         )}
@@ -112,15 +153,16 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder={compact ? '发消息...' : '告诉管家你的想法、需求或问题...'}
+            placeholder={compact ? '发消息...' : '告诉管家你的需求想法、问题或指令...'}
             className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
+            disabled={sending}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || sending}
             className="px-3 py-2 rounded-xl bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
           >
-            ↑
+            {sending ? '...' : '↑'}
           </button>
         </div>
       </div>
@@ -162,6 +204,12 @@ export function WishPage() {
   useEffect(() => {
     const t = setInterval(() => { loadWishes(); }, 5000);
     return () => clearInterval(t);
+  }, [loadWishes]);
+  // 元Agent创建需求后刷新列表
+  useEffect(() => {
+    const handler = () => { loadWishes(); };
+    window.addEventListener('meta-agent:wish-created', handler);
+    return () => window.removeEventListener('meta-agent:wish-created', handler);
   }, [loadWishes]);
 
   const selected = wishes.find(w => w.id === selectedWishId) || null;

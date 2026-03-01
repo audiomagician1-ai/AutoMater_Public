@@ -155,6 +155,12 @@ contextBridge.exposeInMainWorld('agentforge', {
     openDirectory: (title?: string) => ipcRenderer.invoke('dialog:open-directory', title),
   },
 
+  // ── 元Agent对话 (v5.4) ──
+  metaAgent: {
+    chat: (projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) =>
+      ipcRenderer.invoke('meta-agent:chat', projectId, message, history),
+  },
+
   // ── 缩放控制 (v5.2) ──
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */
