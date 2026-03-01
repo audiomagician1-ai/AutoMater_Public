@@ -541,7 +541,7 @@ export function setupProjectHandlers() {
           const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
           db.prepare("UPDATE projects SET status = 'paused', wish = ?, updated_at = datetime('now') WHERE id = ?")
             .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, projectId);
-          sendToUI(win, 'project:import-progress', { projectId, phase: 4, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true });
+          sendToUI(win, 'project:import-progress', { projectId, phase: 2, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true });
           sendToUI(win, 'project:status', { projectId, status: 'paused' });
           addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
         } catch (err: any) {
@@ -864,7 +864,7 @@ export function setupProjectHandlers() {
 
         sendToUI(win, 'project:import-progress', {
           projectId,
-          phase: 4,
+          phase: 2,
           step: `✅ 分析完成! ${summary}`,
           progress: 1.0,
           done: true,

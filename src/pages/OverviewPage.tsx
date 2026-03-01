@@ -1173,17 +1173,15 @@ export function OverviewPage() {
                 </span>
               </div>
               <span className="text-[10px] text-slate-500 font-mono">
-                Phase {importProgress?.phase ?? 0}/3
+                Step {Math.min((importProgress?.phase ?? 0) + 1, 2)}/2
               </span>
             </div>
 
             {/* Phase 指示器 */}
-            <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-4">
               {[
-                { phase: 0, label: '静态扫描', icon: '🔍', desc: '目录 / LOC / 依赖图' },
-                { phase: 1, label: '模块摘要', icon: '📝', desc: 'Worker 模型分层摘要' },
-                { phase: 2, label: '架构合成', icon: '🏗️', desc: 'Strong 模型架构文档' },
-                { phase: 3, label: '文档填充', icon: '📋', desc: '设计 / 需求 / 测试规格' },
+                { phase: 0, label: '收集快照', icon: '📸', desc: '目录树 / 配置 / 符号索引' },
+                { phase: 1, label: 'AI 分析', icon: '🤖', desc: '大模型理解项目 → 生成文档' },
               ].map((p) => {
                 const current = importProgress?.phase ?? -1;
                 const isDone = current > p.phase || (current === p.phase && importProgress?.done && !importProgress?.error);

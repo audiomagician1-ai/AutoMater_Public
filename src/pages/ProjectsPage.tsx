@@ -245,19 +245,13 @@ export function ProjectsPage() {
 
               {/* 导入流程说明 */}
               <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
-                <p className="text-[10px] text-slate-500 font-medium">导入分析流程：</p>
-                <div className="grid grid-cols-4 gap-1 text-[10px]">
+                <p className="text-[10px] text-slate-500 font-medium">导入分析流程 (v6.0 快速理解)：</p>
+                <div className="grid grid-cols-2 gap-1 text-[10px]">
                   <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 0 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    Phase 0<br />静态扫描
+                    📸 收集快照<br />目录 / 配置 / 符号
                   </div>
                   <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 1 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    Phase 1<br />模块摘要
-                  </div>
-                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 2 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    Phase 2<br />架构合成
-                  </div>
-                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 3 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    Phase 3<br />文档填充
+                    🤖 AI 分析<br />大模型理解 → 文档
                   </div>
                 </div>
                 {importProgress && (

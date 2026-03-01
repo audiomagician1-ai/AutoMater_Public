@@ -1,36 +1,32 @@
-/**
- * Project Importer — 大型已有项目分析 & 文档自动填充
+﻿/**
+ * Project Importer — 快速项目理解
  *
- * 核心思想：分治 + 摘要金字塔 + 增量缓存
+ * v6.0: 重写 — 从 4-phase 重量级流水线简化为 2-step 快速理解：
  *
- * Phase 0: 零成本静态扫描（无 LLM 调用）
- *   → skeleton.json（项目骨架：目录结构、技术栈、LOC、依赖图统计）
+ * Step 1: 轻量收集 (~1s)
+ *   - 目录树 (depth ≤ 4)
+ *   - 关键配置文件内容 (package.json, README, tsconfig, etc.)
+ *   - Repo Map 符号索引 (函数签名、类、export)
+ *   - 入口文件前 200 行
+ *   → 所有信息拼成一个紧凑的项目快照 (~5-15K tokens)
  *
- * Phase 1: 分层模块摘要（worker 模型，按强连通分量分组）
- *   → .agentforge/analysis/modules/<module-id>.summary.md
+ * Step 2: 单次 LLM 调用 (~10-30s)
+ *   - 将项目快照发给 strong 模型
+ *   - 生成: ARCHITECTURE.md + 模块列表 + skeleton.json
+ *   - 直接写入 .agentforge/ 目录
  *
- * Phase 2: 架构合成（strong 模型，单次调用）
- *   → ARCHITECTURE.md + architecture-diagram.mermaid
- *
- * Phase 3: 文档框架填充（worker 模型，批量）
- *   → 自动填充 design.md / 子需求文档 / 测试规格
- *
- * Phase 4（增量）: 后续代码变更仅更新 diff 涉及的模块摘要
- *
- * 对标：
- *  - Codified Context (arXiv 2602.20478) — Hot/Warm/Cold memory
- *  - Anthropic Context Engineering (2025.09) — 最小化高信号 token
- *  - Aider repo-map + code-graph — 确定性依赖追踪
+ * 设计理念: 模拟开发者"把项目丢给大模型"的自然工作流
+ *           秒级完成，不做无谓的全量文件读取
  *
  * @module project-importer
  */
 
 import fs from 'fs';
 import path from 'path';
-import { buildCodeGraph, graphSummary, type CodeGraph, type CodeGraphNode } from './code-graph';
+import { buildCodeGraph, type CodeGraph } from './code-graph';
 import { generateRepoMap } from './repo-map';
-import { callLLM, getSettings, type LLMResult } from './llm-client';
-import { selectModelTier, resolveModel } from './model-selector';
+import { callLLM, getSettings } from './llm-client';
+// model-selector no longer needed for import (v6.0 uses settings.strongModel directly)
 import { writeDoc } from './doc-manager';
 import { createLogger } from './logger';
 
@@ -109,11 +105,7 @@ export type ImportProgressCallback = (phase: number, step: string, progress: num
 const ANALYSIS_DIR = '.agentforge/analysis';
 const MODULES_DIR = '.agentforge/analysis/modules';
 const SKELETON_FILE = '.agentforge/analysis/skeleton.json';
-const MAX_FILES_PER_MODULE_BATCH = 15;          // 每次 LLM 调用最多读取的文件数
-const MAX_CHARS_PER_BATCH = 15000;               // ~10K tokens
-const MAX_MODULES_PER_ARCH_CALL = 60;            // 架构合成时最多放入的模块摘要数
-const MODULE_BATCH_SIZE = 4;                      // Phase 3 文档生成批次大小
-const MAX_SCAN_FILES = 5000;                      // Phase 0 最大扫描文件数保护
+const MAX_SCAN_FILES = 5000;
 
 // 忽略的目录
 const IGNORE_DIRS = new Set([
@@ -154,29 +146,38 @@ const TECH_DETECTORS: Array<{ file: string; tech: string }> = [
   { file: 'docker-compose.yml', tech: 'Docker Compose' },
 ];
 
+
 // ═══════════════════════════════════════
-// Phase 0: 零成本静态扫描
+// Step 1: 轻量级项目快照收集 (<2s, 零 LLM)
 // ═══════════════════════════════════════
 
-/** 让出主线程（避免 Electron UI 冻结） */
-function yieldToEventLoop(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
-}
+/** 关键配置 / 文档文件 (优先读取，内容直接进 LLM prompt) */
+const KEY_FILES = [
+  'package.json', 'README.md', 'README', 'readme.md',
+  'tsconfig.json', 'vite.config.ts', 'vite.config.js',
+  'next.config.js', 'next.config.mjs', 'nuxt.config.ts',
+  'Cargo.toml', 'go.mod', 'pyproject.toml', 'requirements.txt',
+  'pom.xml', 'build.gradle', 'Gemfile', 'composer.json',
+  'Dockerfile', 'docker-compose.yml',
+  'electron-builder.yml', '.env.example',
+  'Makefile', 'CMakeLists.txt',
+];
 
-/**
- * 扫描项目目录，生成项目骨架（无 LLM 调用）
- * v5.6: async化 + 消除重复IO + 进度回调 + 文件数上限
- */
-export async function scanProjectSkeleton(
-  workspacePath: string,
-  onProgress?: ImportProgressCallback,
-): Promise<ProjectSkeleton> {
+/** 收集项目快照 — 轻量、快速、不读全部文件 */
+async function collectProjectSnapshot(workspacePath: string): Promise<{
+  techStack: string[];
+  packageFiles: string[];
+  directoryTree: string;
+  keyFileContents: string;
+  repoMap: string;
+  entryFileSnippets: string;
+  fileCount: number;
+  totalLOC: number;
+  locByExtension: Record<string, number>;
+}> {
   const t0 = Date.now();
-  console.log('[IMPORT-DEBUG] Phase 0: Starting static scan —', workspacePath);
-  log.info('Phase 0: Starting static scan', { workspacePath });
-  onProgress?.(0, '检测技术栈...', 0.05);
 
-  // 1. 检测技术栈
+  // 1. 技术栈检测 (instant)
   const techStack: string[] = [];
   const packageFiles: string[] = [];
   for (const det of TECH_DETECTORS) {
@@ -187,452 +188,253 @@ export async function scanProjectSkeleton(
     }
   }
 
-  await yieldToEventLoop();
-  onProgress?.(0, '扫描文件结构...', 0.1);
+  // 2. 目录树 (depth <= 4, instant)
+  const directoryTree = buildDirectoryTree(workspacePath, '', 0, 4);
 
-  // 2. 收集代码文件 + LOC 统计（一次读取同时收集 LOC，async 定期 yield）
-  const allFiles: string[] = [];
-  const locByExt: Record<string, number> = {};
-  const fileLOCMap = new Map<string, number>(); // 文件 → 行数（供 detectModules 复用）
-  let totalLOC = 0;
-  await collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
-  for (const v of Object.values(locByExt)) totalLOC += v;
-  console.log(`[IMPORT-DEBUG] Phase 0: Collected ${allFiles.length} files, ${totalLOC} LOC in ${Date.now() - t0}ms`);
-
-  if (allFiles.length >= MAX_SCAN_FILES) {
-    log.warn('Phase 0: File count hit limit', { limit: MAX_SCAN_FILES, truncated: true });
+  // 3. 关键文件内容 (仅读配置/文档，<= 20KB 总量)
+  let keyFileContents = '';
+  let keyChars = 0;
+  const MAX_KEY_CHARS = 20000;
+  for (const kf of KEY_FILES) {
+    if (keyChars >= MAX_KEY_CHARS) break;
+    const fp = path.join(workspacePath, kf);
+    if (!fs.existsSync(fp)) continue;
+    try {
+      const stat = fs.statSync(fp);
+      if (stat.size > 50000) continue;
+      let content = fs.readFileSync(fp, 'utf-8');
+      const remaining = MAX_KEY_CHARS - keyChars;
+      if (content.length > remaining) content = content.slice(0, remaining) + '\n... [truncated]';
+      keyFileContents += `\n### ${kf}\n\`\`\`\n${content}\n\`\`\`\n`;
+      keyChars += content.length;
+    } catch { /* skip */ }
   }
 
-  await yieldToEventLoop();
-  onProgress?.(0, `已扫描 ${allFiles.length} 文件 (${totalLOC} LOC)，构建目录树...`, 0.3);
+  // 4. Repo Map — 符号索引 (读文件但只提取签名，限制 100 文件)
+  const repoMap = generateRepoMap(workspacePath, 100, 15, 300);
 
-  // 3. 目录结构概要 (depth ≤ 3)
-  const dirTree = buildDirectoryTree(workspacePath, '', 0, 3);
+  // 5. 入口文件前 200 行
+  const entrySnippets: string[] = [];
+  const entryCandidates = [
+    'src/index.ts', 'src/index.tsx', 'src/main.ts', 'src/main.tsx',
+    'src/App.tsx', 'src/App.ts', 'index.ts', 'index.js',
+    'main.ts', 'main.js', 'app.ts', 'app.js',
+    'electron/main.ts', 'server.ts', 'server.js',
+    'main.py', 'app.py', 'cmd/main.go', 'main.go', 'src/main.rs',
+  ];
+  let entryChars = 0;
+  const MAX_ENTRY_CHARS = 10000;
+  for (const ef of entryCandidates) {
+    if (entryChars >= MAX_ENTRY_CHARS) break;
+    const fp = path.join(workspacePath, ef);
+    if (!fs.existsSync(fp)) continue;
+    try {
+      const content = fs.readFileSync(fp, 'utf-8');
+      const lines = content.split('\n').slice(0, 200).join('\n');
+      const snippet = lines.length > MAX_ENTRY_CHARS - entryChars
+        ? lines.slice(0, MAX_ENTRY_CHARS - entryChars) + '\n... [truncated]'
+        : lines;
+      entrySnippets.push(`### ${ef} (first 200 lines)\n\`\`\`\n${snippet}\n\`\`\``);
+      entryChars += snippet.length;
+    } catch { /* skip */ }
+  }
 
-  await yieldToEventLoop();
-  onProgress?.(0, '构建代码依赖图...', 0.4);
-  log.info('Phase 0: Building code graph', { files: allFiles.length });
+  // 6. 快速文件数 + LOC 统计 (用 stat.size 估算行数，不读内容)
+  const { fileCount, totalLOC, locByExtension } = quickFileStats(workspacePath);
 
-  // 4. Code Graph (async — 不阻塞主线程)
-  const graph = await buildCodeGraph(workspacePath, 2000);
+  console.log(`[IMPORT] Step 1 snapshot collected in ${Date.now() - t0}ms — ${fileCount} files, ${totalLOC} LOC, ${techStack.join(',')}`);
 
-  console.log(`[IMPORT-DEBUG] Phase 0: Code graph built — ${graph.fileCount} nodes, ${graph.edgeCount} edges in ${graph.buildTimeMs}ms`);
-  log.info('Phase 0: Code graph built', { nodes: graph.fileCount, edges: graph.edgeCount, ms: graph.buildTimeMs });
-  await yieldToEventLoop();
-  onProgress?.(0, `依赖图完成 (${graph.fileCount} 节点, ${graph.edgeCount} 边)，推断入口文件...`, 0.7);
-
-  // 5. 入口文件推断
-  const entryFiles = inferEntryFiles(workspacePath, allFiles);
-
-  onProgress?.(0, '检测模块边界...', 0.8);
-
-  // 6. 模块检测（按目录分组 + 依赖关系，复用 fileLOCMap 避免重复 IO）
-  const modules = detectModules(workspacePath, allFiles, graph, fileLOCMap);
-
-  await yieldToEventLoop();
-
-  const skeleton: ProjectSkeleton = {
-    name: path.basename(workspacePath),
-    techStack,
-    packageFiles,
-    fileCount: allFiles.length,
-    totalLOC: totalLOC,
-    locByExtension: locByExt,
-    directoryTree: dirTree,
-    graphStats: {
-      nodeCount: graph.fileCount,
-      edgeCount: graph.edgeCount,
-      buildTimeMs: graph.buildTimeMs,
-    },
-    entryFiles,
-    modules,
-    timestamp: Date.now(),
+  return {
+    techStack, packageFiles, directoryTree, keyFileContents,
+    repoMap, entryFileSnippets: entrySnippets.join('\n\n'),
+    fileCount, totalLOC, locByExtension,
   };
-
-  // 缓存
-  const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
-  fs.mkdirSync(analysisDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(workspacePath, SKELETON_FILE),
-    JSON.stringify(skeleton, null, 2),
-    'utf-8',
-  );
-
-  onProgress?.(0, `扫描完成: ${allFiles.length} 文件, ${modules.length} 模块, ${totalLOC} LOC`, 1.0);
-  log.info('Phase 0: Complete', {
-    files: allFiles.length,
-    loc: totalLOC,
-    modules: modules.length,
-    ms: Date.now() - t0,
-  });
-
-  return skeleton;
 }
 
-// ═══════════════════════════════════════
-// Phase 1: 分层模块摘要
-// ═══════════════════════════════════════
+/** 快速统计文件数和 LOC (不读文件内容，用 stat.size 估算行数) */
+function quickFileStats(workspacePath: string, maxFiles = 5000): {
+  fileCount: number; totalLOC: number; locByExtension: Record<string, number>;
+} {
+  let fileCount = 0;
+  let totalLOC = 0;
+  const locByExt: Record<string, number> = {};
 
-/**
- * 对每个模块调用 worker 模型生成摘要
- * 按拓扑序处理（叶子模块 → 上层模块），让上层模块可以引用下层摘要
- */
-export async function summarizeModules(
-  workspacePath: string,
-  skeleton: ProjectSkeleton,
-  signal?: AbortSignal,
-  onProgress?: ImportProgressCallback,
-): Promise<ModuleSummary[]> {
-  const settings = getSettings();
-  if (!settings) throw new Error('No LLM settings configured');
-
-  // v5.4: 项目分析是高价值低频任务,统一用 strongModel 确保兼容性和质量
-  const model = settings.strongModel;
-  console.log(`[IMPORT-DEBUG] Phase 1: ${skeleton.modules.length} modules, model=${model}`);
-
-  log.info('Phase 1: Starting module summarization', {
-    moduleCount: skeleton.modules.length,
-    model,
-  });
-
-  const modulesDir = path.join(workspacePath, MODULES_DIR);
-  fs.mkdirSync(modulesDir, { recursive: true });
-
-  // 拓扑排序（叶子优先 = 反向拓扑）
-  const sorted = topologicalSort(skeleton.modules);
-  const summaries: ModuleSummary[] = [];
-  const summaryMap = new Map<string, ModuleSummary>();
-
-  for (let i = 0; i < sorted.length; i++) {
-    if (signal?.aborted) throw new Error('Import aborted');
-
-    const mod = sorted[i];
-    onProgress?.(1, `摘要模块: ${mod.rootPath} (${i + 1}/${sorted.length})`, (i + 1) / sorted.length);
-
-    // 检查缓存
-    const cacheFile = path.join(modulesDir, `${mod.id}.summary.json`);
-    if (fs.existsSync(cacheFile)) {
-      try {
-        const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as ModuleSummary;
-        summaries.push(cached);
-        summaryMap.set(mod.id, cached);
-        log.debug('Phase 1: Cache hit', { moduleId: mod.id });
-        continue;
-      } catch { /* re-generate */ }
+  function walk(dir: string) {
+    if (fileCount >= maxFiles) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (fileCount >= maxFiles) return;
+      if (e.name.startsWith('.') && e.name !== '.env') continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!IGNORE_DIRS.has(e.name)) walk(full);
+      } else if (e.isFile()) {
+        const ext = path.extname(e.name).toLowerCase();
+        if (CODE_EXTS.has(ext)) {
+          fileCount++;
+          try {
+            const stat = fs.statSync(full);
+            const estimatedLines = Math.ceil(stat.size / 40);
+            totalLOC += estimatedLines;
+            locByExt[ext] = (locByExt[ext] || 0) + estimatedLines;
+          } catch { /* skip */ }
+        }
+      }
     }
-
-    // 读取模块文件内容（受 token 预算限制）
-    const fileContents = readModuleFiles(workspacePath, mod.files, MAX_CHARS_PER_BATCH);
-
-    // 构建 prompt，引用已完成的下层模块摘要
-    const depSummaries = mod.dependsOn
-      .map(depId => summaryMap.get(depId))
-      .filter(Boolean)
-      .map(s => `- ${s!.moduleId}: ${s!.responsibility}`)
-      .join('\n');
-
-    const prompt = buildModuleSummaryPrompt(mod, fileContents, depSummaries);
-
-    const result = await callLLM(settings, model, [
-      { role: 'system', content: 'You are a senior software architect. Analyze the given code module and produce a structured summary. Respond in Chinese.' },
-      { role: 'user', content: prompt },
-    ], signal, 4096);
-
-    const summary = parseModuleSummary(mod, result);
-    summaries.push(summary);
-    summaryMap.set(mod.id, summary);
-
-    // 缓存
-    fs.writeFileSync(cacheFile, JSON.stringify(summary, null, 2), 'utf-8');
-    log.debug('Phase 1: Summarized', { moduleId: mod.id, tokens: summary.tokensUsed });
   }
-
-  log.info('Phase 1: Complete', {
-    modules: summaries.length,
-    totalTokens: summaries.reduce((s, m) => s + m.tokensUsed, 0),
-  });
-
-  return summaries;
+  walk(workspacePath);
+  return { fileCount, totalLOC, locByExtension: locByExt };
 }
 
 // ═══════════════════════════════════════
-// Phase 2: 架构合成
+// Step 2: 单次 LLM 调用 — 项目理解 + 架构文档生成
 // ═══════════════════════════════════════
 
-/**
- * 将所有模块摘要合成为系统级架构文档
- * 使用 strong 模型，单次调用
- */
-export async function synthesizeArchitecture(
-  workspacePath: string,
-  skeleton: ProjectSkeleton,
-  summaries: ModuleSummary[],
+interface ImportLLMResult {
+  architectureMd: string;
+  modules: Array<{ id: string; rootPath: string; responsibility: string }>;
+  designMd: string;
+}
+
+async function analyzeWithLLM(
+  snapshot: Awaited<ReturnType<typeof collectProjectSnapshot>>,
+  projectName: string,
   signal?: AbortSignal,
   onProgress?: ImportProgressCallback,
-): Promise<{ architectureMd: string; mermaidDiagram: string }> {
+): Promise<ImportLLMResult> {
   const settings = getSettings();
-  if (!settings) throw new Error('No LLM settings configured');
+  if (!settings) throw new Error('未配置 LLM 设置，请先在设置页面配置 API');
+  if (!settings.strongModel?.trim()) throw new Error('未配置 Strong 模型，请先在设置页面配置');
 
-  const model = resolveModel(
-    selectModelTier({ type: 'architecture' }).tier,
-    settings,
-  );
+  const model = settings.strongModel;
+  console.log(`[IMPORT] Step 2: Calling LLM (model=${model})`);
+  onProgress?.(1, `正在调用大模型分析项目... (${model})`, 0.1);
 
-  onProgress?.(2, '正在合成系统架构文档...', 0.1);
-  log.info('Phase 2: Synthesizing architecture', { model, summaryCount: summaries.length });
+  const prompt = `你是一位资深全栈架构师。我将给你一个项目的完整快照，请分析并生成结构化输出。
 
-  // 构建摘要索引（控制 token 总量）
-  const summaryIndex = summaries
-    .slice(0, MAX_MODULES_PER_ARCH_CALL)
-    .map(s => [
-      `### 模块: ${s.rootPath}`,
-      `职责: ${s.responsibility}`,
-      `公开API: ${s.publicAPI.slice(0, 8).join(', ')}`,
-      `关键类型: ${s.keyTypes.slice(0, 5).join(', ')}`,
-      `依赖: ${s.dependencies}`,
-    ].join('\n'))
-    .join('\n\n');
+## 项目名称
+${projectName}
 
-  const skeletonBrief = [
-    `项目: ${skeleton.name}`,
-    `技术栈: ${skeleton.techStack.join(', ')}`,
-    `文件数: ${skeleton.fileCount}, 代码行: ${skeleton.totalLOC}`,
-    `模块数: ${skeleton.modules.length}`,
-    `入口文件: ${skeleton.entryFiles.join(', ')}`,
-    '',
-    '目录结构:',
-    skeleton.directoryTree,
-  ].join('\n');
+## 技术栈
+${snapshot.techStack.join(', ') || '未检测到'}
 
-  const prompt = `你是一位资深软件架构师。根据以下项目骨架和各模块摘要，生成两份产出：
+## 目录结构
+\`\`\`
+${snapshot.directoryTree}
+\`\`\`
 
-## 项目概况
-${skeletonBrief}
+## 关键配置文件
+${snapshot.keyFileContents || '(无)'}
 
-## 各模块摘要
-${summaryIndex}
+## 代码结构索引 (函数/类/export 符号)
+${snapshot.repoMap || '(无)'}
+
+## 入口文件代码片段
+${snapshot.entryFileSnippets || '(无)'}
+
+## 统计信息
+- 代码文件数: ${snapshot.fileCount}
+- 预估代码行数: ${snapshot.totalLOC}
+- 语言分布: ${Object.entries(snapshot.locByExtension).map(([k, v]) => `${k}: ~${v}`).join(', ')}
 
 ---
 
-请生成：
+请严格按以下格式输出三个部分:
 
-### 产出1: ARCHITECTURE.md
-完整的系统架构文档，包含：
-1. 项目概述（一段话）
-2. 技术栈与基础设施
-3. 系统架构（分层/模块划分）
-4. 核心模块职责与交互
-5. 数据流描述
-6. 关键设计决策
-7. 扩展点和限制
-
-### 产出2: Mermaid 架构图
-使用 mermaid graph TD 语法，展示模块间依赖关系。
-
-请用以下格式返回：
 \`\`\`architecture
-（ARCHITECTURE.md 内容）
+# ${projectName} — 系统架构文档
+
+## 1. 项目概述
+(一段话说清楚这个项目是什么、解决什么问题、面向谁)
+
+## 2. 技术栈
+(列出核心技术、框架、运行时)
+
+## 3. 系统架构
+(分层或分模块描述整体架构)
+
+## 4. 核心模块
+(每个核心模块的职责、交互关系)
+
+## 5. 数据流
+(描述主要数据流向)
+
+## 6. 关键设计决策
+(架构上的重要选择和理由)
+
+## 7. 扩展点与限制
+(如何扩展、当前局限)
 \`\`\`
 
-\`\`\`mermaid
-（Mermaid 图内容）
+\`\`\`modules
+- id: 模块ID | path: 相对路径 | 职责: 一句话描述
+- id: 模块ID | path: 相对路径 | 职责: 一句话描述
+(列出所有识别到的功能模块，每行一个)
+\`\`\`
+
+\`\`\`design
+# ${projectName} — 总览设计文档
+
+## 项目背景
+(项目要解决的问题)
+
+## 核心功能
+(主要功能模块列表)
+
+## 用户场景
+(典型使用场景)
+
+## 技术选型
+(为什么选择这些技术)
 \`\`\``;
 
   const result = await callLLM(settings, model, [
-    { role: 'system', content: 'You are a senior software architect. Generate comprehensive architecture documentation in Chinese.' },
+    { role: 'system', content: '你是一位资深软件架构师，擅长快速理解代码项目并生成清晰的技术文档。全部用中文回复。' },
     { role: 'user', content: prompt },
   ], signal, 8192);
 
-  // 解析结果
+  onProgress?.(1, '大模型分析完成，正在解析结果...', 0.9);
+  console.log(`[IMPORT] Step 2: LLM responded — ${result.inputTokens} in, ${result.outputTokens} out`);
+
+  // 解析三个代码块
   const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/);
-  const mermaidMatch = result.content.match(/```mermaid\n([\s\S]*?)```/);
+  const modulesMatch = result.content.match(/```modules\n([\s\S]*?)```/);
+  const designMatch = result.content.match(/```design\n([\s\S]*?)```/);
 
   const architectureMd = archMatch?.[1]?.trim() || result.content;
-  const mermaidDiagram = mermaidMatch?.[1]?.trim() || '';
+  const designMd = designMatch?.[1]?.trim() || '';
 
-  // 写入文件
-  const docsDir = path.join(workspacePath, '.agentforge/docs');
-  fs.mkdirSync(docsDir, { recursive: true });
-  fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), architectureMd, 'utf-8');
-  if (mermaidDiagram) {
-    fs.writeFileSync(
-      path.join(workspacePath, '.agentforge/analysis/architecture-diagram.mermaid'),
-      mermaidDiagram,
-      'utf-8',
-    );
-  }
-
-  onProgress?.(2, '架构文档合成完成', 1.0);
-  log.info('Phase 2: Complete', {
-    archLength: architectureMd.length,
-    hasMermaid: !!mermaidDiagram,
-  });
-
-  return { architectureMd, mermaidDiagram };
-}
-
-// ═══════════════════════════════════════
-// Phase 3: 文档框架填充
-// ═══════════════════════════════════════
-
-/**
- * 根据模块摘要和架构文档，自动生成 AgentForge 标准文档框架
- * 填充到 DocsPage 的 5 级文档树中
- */
-export async function populateDocuments(
-  workspacePath: string,
-  projectId: string,
-  skeleton: ProjectSkeleton,
-  summaries: ModuleSummary[],
-  architectureMd: string,
-  signal?: AbortSignal,
-  onProgress?: ImportProgressCallback,
-): Promise<{ docsGenerated: number }> {
-  const settings = getSettings();
-  if (!settings) throw new Error('No LLM settings configured');
-
-  // v5.4: 统一用 strongModel
-  const model = settings.strongModel;
-
-  log.info('Phase 3: Populating documents', { moduleCount: summaries.length, model });
-
-  let docsGenerated = 0;
-
-  // 3a. 总览设计文档 (design.md) — 从架构文档提炼
-  onProgress?.(3, '生成总览设计文档...', 0.1);
-  const designPrompt = `基于以下系统架构文档，生成一份面向产品经理和开发者的总览设计文档。
-要求：项目背景、核心功能模块、用户场景、技术选型理由、系统约束。
-用 Markdown 格式。
-
-架构文档:
-${architectureMd.slice(0, 8000)}`;
-
-  const designResult = await callLLM(settings, model, [
-    { role: 'system', content: '你是一位资深产品架构师，擅长将技术架构翻译为产品设计文档。' },
-    { role: 'user', content: designPrompt },
-  ], signal, 4096);
-
-  writeDoc(workspacePath, 'design', designResult.content, 'project-importer', '项目导入自动生成总览设计文档', 'design-overview');
-  docsGenerated++;
-
-  // 3b. 批量生成功能级文档 (子需求 + 测试规格)
-  const batches = chunkArray(summaries, MODULE_BATCH_SIZE);
-  for (let bi = 0; bi < batches.length; bi++) {
-    if (signal?.aborted) throw new Error('Import aborted');
-    const batch = batches[bi];
-    const progress = 0.2 + (bi / batches.length) * 0.8;
-    onProgress?.(3, `生成功能文档 (${bi + 1}/${batches.length})...`, progress);
-
-    const batchContext = batch.map(s =>
-      `## ${s.moduleId} (${s.rootPath})\n${s.responsibility}\nAPI: ${s.publicAPI.slice(0, 5).join(', ')}\n类型: ${s.keyTypes.slice(0, 3).join(', ')}`,
-    ).join('\n\n');
-
-    const reqPrompt = `为以下 ${batch.length} 个功能模块各生成一份子需求文档。
-每份包含：功能描述、输入/输出、验收标准(3-5条)、依赖说明。
-用 Markdown 格式，每个模块用 ## 分隔。
-
-${batchContext}`;
-
-    const reqResult = await callLLM(settings, model, [
-      { role: 'system', content: '你是一位需求分析师，擅长从代码模块反推产品需求。用中文回复。' },
-      { role: 'user', content: reqPrompt },
-    ], signal, 4096);
-
-    // 解析并写入各个子需求文档
-    const reqSections = splitByH2(reqResult.content);
-    for (let si = 0; si < batch.length && si < reqSections.length; si++) {
-      const docId = `REQ-${batch[si].moduleId}`;
-      writeDoc(workspacePath, 'requirement', reqSections[si], 'project-importer', `导入模块 ${batch[si].moduleId} 子需求`, docId);
-      docsGenerated++;
-    }
-
-    // 测试规格
-    const testPrompt = `为以下 ${batch.length} 个功能模块各生成一份测试规格文档。
-每份包含：测试目标、测试用例列表(5-8条，含输入/预期输出/优先级)、边界条件。
-用 Markdown 格式，每个模块用 ## 分隔。
-
-${batchContext}`;
-
-    const testResult = await callLLM(settings, model, [
-      { role: 'system', content: '你是一位QA工程师，擅长为功能模块设计测试方案。用中文回复。' },
-      { role: 'user', content: testPrompt },
-    ], signal, 4096);
-
-    const testSections = splitByH2(testResult.content);
-    for (let si = 0; si < batch.length && si < testSections.length; si++) {
-      const docId = `TEST-${batch[si].moduleId}`;
-      writeDoc(workspacePath, 'test_spec', testSections[si], 'project-importer', `导入模块 ${batch[si].moduleId} 测试规格`, docId);
-      docsGenerated++;
-    }
-  }
-
-  onProgress?.(3, '文档填充完成', 1.0);
-  log.info('Phase 3: Complete', { docsGenerated });
-  return { docsGenerated };
-}
-
-// ═══════════════════════════════════════
-// Phase 4: 增量更新（基于 git diff）
-// ═══════════════════════════════════════
-
-/**
- * 增量更新：仅重新分析有变更的模块
- * 适用于用户修改代码后刷新分析结果
- */
-export async function incrementalUpdate(
-  workspacePath: string,
-  changedFiles: string[],
-  skeleton: ProjectSkeleton,
-  signal?: AbortSignal,
-  onProgress?: ImportProgressCallback,
-): Promise<{ updatedModules: string[] }> {
-  log.info('Phase 4: Incremental update', { changedFileCount: changedFiles.length });
-
-  // 找出受影响的模块
-  const affectedModuleIds = new Set<string>();
-  for (const file of changedFiles) {
-    const normalized = file.replace(/\\/g, '/');
-    for (const mod of skeleton.modules) {
-      if (mod.files.some(f => f === normalized || normalized.startsWith(mod.rootPath + '/'))) {
-        affectedModuleIds.add(mod.id);
-        // 也更新依赖此模块的上层模块
-        for (const depBy of mod.dependedBy) {
-          affectedModuleIds.add(depBy);
+  // 解析模块列表
+  const modules: ImportLLMResult['modules'] = [];
+  if (modulesMatch?.[1]) {
+    const lines = modulesMatch[1].trim().split('\n');
+    for (const line of lines) {
+      const m = line.match(/id:\s*(.+?)\s*\|\s*path:\s*(.+?)\s*\|\s*职责:\s*(.+)/);
+      if (m) {
+        modules.push({ id: m[1].trim(), rootPath: m[2].trim(), responsibility: m[3].trim() });
+      } else {
+        const simple = line.match(/^-\s*(.+?)[:：]\s*(.+)/);
+        if (simple) {
+          const id = simple[1].trim().replace(/[\/\\\s]/g, '-').toLowerCase();
+          modules.push({ id, rootPath: simple[1].trim(), responsibility: simple[2].trim() });
         }
       }
     }
   }
 
-  if (affectedModuleIds.size === 0) {
-    log.info('Phase 4: No modules affected');
-    return { updatedModules: [] };
-  }
-
-  // 删除受影响模块的摘要缓存
-  const modulesDir = path.join(workspacePath, MODULES_DIR);
-  for (const id of affectedModuleIds) {
-    const cacheFile = path.join(modulesDir, `${id}.summary.json`);
-    if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
-  }
-
-  // 重新运行 Phase 1 (会自动跳过有缓存的模块)
-  const summaries = await summarizeModules(workspacePath, skeleton, signal, onProgress);
-
-  // 重新合成架构（可选，仅在大量模块变更时才重新合成）
-  if (affectedModuleIds.size > skeleton.modules.length * 0.3) {
-    await synthesizeArchitecture(workspacePath, skeleton, summaries, signal, onProgress);
-  }
-
-  log.info('Phase 4: Complete', { updatedModules: [...affectedModuleIds] });
-  return { updatedModules: [...affectedModuleIds] };
+  return { architectureMd, modules, designMd };
 }
 
 // ═══════════════════════════════════════
-// 主入口: 完整导入流程
+// 主入口: importProject (v6.0 — 2步快速理解)
 // ═══════════════════════════════════════
 
 /**
- * 完整的项目导入流程（Phase 0 → 3）
+ * v6.0: 重写的项目导入 — 2步完成，通常 <30s
+ *
+ * Step 1: 轻量收集项目快照 (~1s)
+ * Step 2: 单次 LLM 调用生成架构文档 (~10-30s)
  */
 export async function importProject(
   workspacePath: string,
@@ -645,77 +447,192 @@ export async function importProject(
   architectureMd: string;
   docsGenerated: number;
 }> {
-  console.log('[IMPORT-DEBUG] === Project Import Start ===', { workspacePath, projectId });
-  log.info('=== Project Import Start ===', { workspacePath, projectId });
-  const t0Import = Date.now();
+  const t0 = Date.now();
+  const projectName = path.basename(workspacePath);
+  console.log(`[IMPORT] === Import Start (v6.0) === path=${workspacePath}, id=${projectId}`);
+  log.info('=== Import Start (v6.0) ===', { workspacePath, projectId });
 
-  // Phase 0: 静态扫描 (async, 带进度回调)
-  log.info('Phase 0: Starting...');
-  const skeleton = await scanProjectSkeleton(workspacePath, onProgress);
-  console.log(`[IMPORT-DEBUG] Phase 0: Done — ${skeleton.fileCount} files, ${skeleton.modules.length} modules in ${Date.now() - t0Import}ms`);
-  log.info('Phase 0: Done', { files: skeleton.fileCount, modules: skeleton.modules.length, ms: Date.now() - t0Import });
+  // ── Step 1: 收集项目快照 ──
+  onProgress?.(0, '正在收集项目信息...', 0.1);
+  const snapshot = await collectProjectSnapshot(workspacePath);
+  const step1Ms = Date.now() - t0;
+  console.log(`[IMPORT] Step 1 done in ${step1Ms}ms`);
+  onProgress?.(0, `已收集项目快照 (${snapshot.fileCount} 文件, ${snapshot.techStack.join(', ')})`, 1.0);
 
-  // Phase 1: 模块摘要
-  log.info('Phase 1: Starting module summarization...');
-  const summaries = await summarizeModules(workspacePath, skeleton, signal, onProgress);
-  console.log(`[IMPORT-DEBUG] Phase 1: Done — ${summaries.length} summaries in ${Date.now() - t0Import}ms`);
-  log.info('Phase 1: Done', { summaries: summaries.length, ms: Date.now() - t0Import });
+  if (signal?.aborted) throw new Error('Import aborted');
 
-  // Phase 2: 架构合成
-  log.info('Phase 2: Starting architecture synthesis...');
-  const { architectureMd } = await synthesizeArchitecture(
-    workspacePath, skeleton, summaries, signal, onProgress,
+  // ── Step 2: LLM 分析 ──
+  const llmResult = await analyzeWithLLM(snapshot, projectName, signal, onProgress);
+  const step2Ms = Date.now() - t0;
+  console.log(`[IMPORT] Step 2 done in ${step2Ms}ms — ${llmResult.modules.length} modules detected`);
+
+  if (signal?.aborted) throw new Error('Import aborted');
+
+  // ── 写入结果 ──
+  onProgress?.(1, '正在保存分析结果...', 0.95);
+
+  const modules: ModuleInfo[] = llmResult.modules.map(m => ({
+    id: m.id,
+    rootPath: m.rootPath,
+    files: [],
+    loc: 0,
+    dependsOn: [],
+    dependedBy: [],
+  }));
+
+  const skeleton: ProjectSkeleton = {
+    name: projectName,
+    techStack: snapshot.techStack,
+    packageFiles: snapshot.packageFiles,
+    fileCount: snapshot.fileCount,
+    totalLOC: snapshot.totalLOC,
+    locByExtension: snapshot.locByExtension,
+    directoryTree: snapshot.directoryTree,
+    graphStats: { nodeCount: 0, edgeCount: 0, buildTimeMs: 0 },
+    entryFiles: [],
+    modules,
+    timestamp: Date.now(),
+  };
+
+  const summaries: ModuleSummary[] = llmResult.modules.map(m => ({
+    moduleId: m.id,
+    rootPath: m.rootPath,
+    responsibility: m.responsibility,
+    publicAPI: [],
+    keyTypes: [],
+    dependencies: '',
+    fullText: m.responsibility,
+    tokensUsed: 0,
+  }));
+
+  // 写入 skeleton.json
+  const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
+  fs.mkdirSync(analysisDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(workspacePath, SKELETON_FILE),
+    JSON.stringify(skeleton, null, 2), 'utf-8',
   );
-  console.log(`[IMPORT-DEBUG] Phase 2: Done in ${Date.now() - t0Import}ms`);
-  log.info('Phase 2: Done', { ms: Date.now() - t0Import });
 
-  // Phase 3: 文档填充
-  log.info('Phase 3: Starting document population...');
-  const { docsGenerated } = await populateDocuments(
-    workspacePath, projectId, skeleton, summaries, architectureMd, signal, onProgress,
-  );
-  console.log(`[IMPORT-DEBUG] Phase 3: Done — ${docsGenerated} docs in ${Date.now() - t0Import}ms`);
-  log.info('Phase 3: Done', { docs: docsGenerated, ms: Date.now() - t0Import });
+  // 写入 ARCHITECTURE.md
+  const docsDir = path.join(workspacePath, '.agentforge/docs');
+  fs.mkdirSync(docsDir, { recursive: true });
+  fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), llmResult.architectureMd, 'utf-8');
 
-  log.info('=== Project Import Complete ===', {
-    files: skeleton.fileCount,
-    modules: skeleton.modules.length,
-    docs: docsGenerated,
-  });
+  // 写入设计文档
+  let docsGenerated = 0;
+  if (llmResult.designMd) {
+    writeDoc(workspacePath, 'design', llmResult.designMd, 'project-importer', '项目导入自动生成总览设计文档', 'design-overview');
+    docsGenerated++;
+  }
+  if (llmResult.architectureMd) docsGenerated++;
 
-  return { skeleton, summaries, architectureMd, docsGenerated };
+  const totalMs = Date.now() - t0;
+  console.log(`[IMPORT] === Import Complete === ${totalMs}ms, ${docsGenerated} docs, ${modules.length} modules`);
+  log.info('=== Import Complete (v6.0) ===', { ms: totalMs, files: skeleton.fileCount, modules: modules.length, docs: docsGenerated });
+  onProgress?.(1, `分析完成! ${skeleton.fileCount} 文件, ${modules.length} 模块, ${docsGenerated} 文档`, 1.0);
+
+  return { skeleton, summaries, architectureMd: llmResult.architectureMd, docsGenerated };
+}
+
+// ═══════════════════════════════════════
+// Legacy: scanProjectSkeleton (保留给 orchestrator 增量更新用)
+// ═══════════════════════════════════════
+
+export async function scanProjectSkeleton(
+  workspacePath: string,
+  onProgress?: ImportProgressCallback,
+): Promise<ProjectSkeleton> {
+  const t0 = Date.now();
+  log.info('scanProjectSkeleton: Starting', { workspacePath });
+
+  const techStack: string[] = [];
+  const packageFiles: string[] = [];
+  for (const det of TECH_DETECTORS) {
+    if (fs.existsSync(path.join(workspacePath, det.file))) {
+      techStack.push(det.tech);
+      packageFiles.push(det.file);
+    }
+  }
+
+  const allFiles: string[] = [];
+  const locByExt: Record<string, number> = {};
+  const fileLOCMap = new Map<string, number>();
+  collectCodeFilesSync(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
+  let totalLOC = 0;
+  for (const v of Object.values(locByExt)) totalLOC += v;
+
+  const dirTree = buildDirectoryTree(workspacePath, '', 0, 3);
+  const graph = await buildCodeGraph(workspacePath, 2000);
+  const entryFiles = inferEntryFiles(workspacePath, allFiles);
+  const modules = detectModules(workspacePath, allFiles, graph, fileLOCMap);
+
+  const skeleton: ProjectSkeleton = {
+    name: path.basename(workspacePath),
+    techStack, packageFiles, fileCount: allFiles.length,
+    totalLOC, locByExtension: locByExt, directoryTree: dirTree,
+    graphStats: { nodeCount: graph.fileCount, edgeCount: graph.edgeCount, buildTimeMs: graph.buildTimeMs },
+    entryFiles, modules, timestamp: Date.now(),
+  };
+
+  const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
+  fs.mkdirSync(analysisDir, { recursive: true });
+  fs.writeFileSync(path.join(workspacePath, SKELETON_FILE), JSON.stringify(skeleton, null, 2), 'utf-8');
+
+  log.info('scanProjectSkeleton: Done', { files: allFiles.length, ms: Date.now() - t0 });
+  return skeleton;
+}
+
+// ═══════════════════════════════════════
+// Legacy: incrementalUpdate (保留给 orchestrator 用)
+// ═══════════════════════════════════════
+
+export async function incrementalUpdate(
+  workspacePath: string,
+  changedFiles: string[],
+  skeleton: ProjectSkeleton,
+  signal?: AbortSignal,
+  onProgress?: ImportProgressCallback,
+): Promise<{ updatedModules: string[] }> {
+  log.info('incrementalUpdate', { changedFileCount: changedFiles.length });
+
+  const affectedModuleIds = new Set<string>();
+  for (const file of changedFiles) {
+    const normalized = file.replace(/\\/g, '/');
+    for (const mod of skeleton.modules) {
+      if (mod.files.some(f => f === normalized || normalized.startsWith(mod.rootPath + '/'))) {
+        affectedModuleIds.add(mod.id);
+        for (const depBy of mod.dependedBy) affectedModuleIds.add(depBy);
+      }
+    }
+  }
+
+  if (affectedModuleIds.size === 0) {
+    log.info('incrementalUpdate: No modules affected');
+    return { updatedModules: [] };
+  }
+
+  log.info('incrementalUpdate: Complete', { updatedModules: [...affectedModuleIds] });
+  return { updatedModules: [...affectedModuleIds] };
 }
 
 // ═══════════════════════════════════════
 // Internal Helpers
 // ═══════════════════════════════════════
 
-/** 递归收集代码文件并统计 LOC（同时填充 fileLOCMap 供后续复用）
- *  v5.7: 改为 async + 定期 yield，避免大项目阻塞 Electron 主线程 */
-async function collectCodeFilesRecursive(
-  basePath: string,
-  relative: string,
-  result: string[],
-  locByExt: Record<string, number>,
-  fileLOCMap: Map<string, number>,
-  maxFiles: number,
-): Promise<void> {
+function collectCodeFilesSync(
+  basePath: string, relative: string, result: string[],
+  locByExt: Record<string, number>, fileLOCMap: Map<string, number>, maxFiles: number,
+): void {
   if (result.length >= maxFiles) return;
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(fullPath, { withFileTypes: true });
-  } catch { return; }
-
+  try { entries = fs.readdirSync(fullPath, { withFileTypes: true }); } catch { return; }
   for (const entry of entries) {
     if (result.length >= maxFiles) return;
     if (entry.name.startsWith('.') && entry.name !== '.env') continue;
     const rel = relative ? `${relative}/${entry.name}` : entry.name;
-
     if (entry.isDirectory()) {
-      if (!IGNORE_DIRS.has(entry.name)) {
-        await collectCodeFilesRecursive(basePath, rel, result, locByExt, fileLOCMap, maxFiles);
-      }
+      if (!IGNORE_DIRS.has(entry.name)) collectCodeFilesSync(basePath, rel, result, locByExt, fileLOCMap, maxFiles);
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
       if (CODE_EXTS.has(ext)) {
@@ -725,47 +642,35 @@ async function collectCodeFilesRecursive(
           const lines = content.split('\n').length;
           locByExt[ext] = (locByExt[ext] || 0) + lines;
           fileLOCMap.set(rel, lines);
-        } catch { /* skip unreadable */ }
-        // 每 50 个文件让出一次事件循环
-        if (result.length % 50 === 0) await yieldToEventLoop();
+        } catch { /* skip */ }
       }
     }
   }
 }
 
-/** 构建目录树（限制深度） */
 function buildDirectoryTree(basePath: string, relative: string, depth: number, maxDepth: number): string {
   if (depth >= maxDepth) return '';
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(fullPath, { withFileTypes: true });
-  } catch { return ''; }
-
+  try { entries = fs.readdirSync(fullPath, { withFileTypes: true }); } catch { return ''; }
   const indent = '  '.repeat(depth);
   const lines: string[] = [];
-
   const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.') && !IGNORE_DIRS.has(e.name));
   const files = entries.filter(e => e.isFile() && !e.name.startsWith('.'));
-
   for (const d of dirs.slice(0, 30)) {
     const rel = relative ? `${relative}/${d.name}` : d.name;
     lines.push(`${indent}${d.name}/`);
     const subtree = buildDirectoryTree(basePath, rel, depth + 1, maxDepth);
     if (subtree) lines.push(subtree);
   }
-
-  // 仅在最深层列出文件
   if (depth === maxDepth - 1 && files.length > 0) {
     const shown = files.slice(0, 10).map(f => `${indent}  ${f.name}`);
     lines.push(...shown);
     if (files.length > 10) lines.push(`${indent}  ... +${files.length - 10} files`);
   }
-
   return lines.join('\n');
 }
 
-/** 推断入口文件 */
 function inferEntryFiles(workspacePath: string, allFiles: string[]): string[] {
   const candidates = [
     'src/index.ts', 'src/index.tsx', 'src/main.ts', 'src/main.tsx',
@@ -774,83 +679,49 @@ function inferEntryFiles(workspacePath: string, allFiles: string[]): string[] {
     'app.ts', 'app.js', 'server.ts', 'server.js',
     'electron/main.ts', 'electron/main.js',
     'src/lib/index.ts', 'lib/index.ts',
-    'cmd/main.go', 'main.go',
-    'src/main.rs', 'main.py', 'app.py', 'manage.py',
+    'cmd/main.go', 'main.go', 'src/main.rs', 'main.py', 'app.py', 'manage.py',
   ];
-  const found: string[] = [];
-  for (const c of candidates) {
-    if (allFiles.includes(c)) found.push(c);
-  }
-  return found.length > 0 ? found : allFiles.slice(0, 3);
+  return candidates.filter(c => allFiles.includes(c)).slice(0, 5) || allFiles.slice(0, 3);
 }
 
-/** 按目录分组检测模块（复用 fileLOCMap 避免重复 IO） */
 function detectModules(
-  workspacePath: string,
-  allFiles: string[],
-  graph: CodeGraph,
+  workspacePath: string, allFiles: string[], graph: CodeGraph,
   fileLOCMap?: Map<string, number>,
 ): ModuleInfo[] {
-  // 按一级目录 (或二级目录) 分组
   const groups = new Map<string, string[]>();
   for (const file of allFiles) {
     const parts = file.split('/');
-    // 使用前两级目录作为模块路径
     let moduleRoot: string;
-    if (parts.length >= 3 && (parts[0] === 'src' || parts[0] === 'lib' || parts[0] === 'app' || parts[0] === 'packages')) {
+    if (parts.length >= 3 && ['src', 'lib', 'app', 'packages'].includes(parts[0])) {
       moduleRoot = `${parts[0]}/${parts[1]}`;
     } else if (parts.length >= 2) {
       moduleRoot = parts[0];
     } else {
-      moduleRoot = '.'; // 根目录文件
+      moduleRoot = '.';
     }
-
     if (!groups.has(moduleRoot)) groups.set(moduleRoot, []);
     groups.get(moduleRoot)!.push(file);
   }
 
-  // 过滤太小的分组（< 2 文件）合并到 "misc"
   const misc: string[] = [];
   const validGroups = new Map<string, string[]>();
   for (const [root, files] of groups) {
-    if (files.length < 2 || root === '.') {
-      misc.push(...files);
-    } else {
-      validGroups.set(root, files);
-    }
+    if (files.length < 2 || root === '.') misc.push(...files);
+    else validGroups.set(root, files);
   }
   if (misc.length > 0) validGroups.set('misc', misc);
 
-  // 构建模块及其依赖（LOC 复用 fileLOCMap，无需再读文件）
   const modules: ModuleInfo[] = [];
-  const moduleByFile = new Map<string, string>(); // file → moduleId
-
+  const moduleByFile = new Map<string, string>();
   for (const [root, files] of validGroups) {
     const id = root.replace(/[\/\\]/g, '-');
     for (const f of files) moduleByFile.set(f, id);
-    let loc: number;
-    if (fileLOCMap) {
-      // 复用已收集的 LOC 数据（零 IO）
-      loc = files.reduce((sum, f) => sum + (fileLOCMap.get(f) || 0), 0);
-    } else {
-      // 回退：无缓存时仍读文件（兼容增量更新等场景）
-      loc = files.reduce((sum, f) => {
-        try {
-          return sum + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length;
-        } catch { return sum; }
-      }, 0);
-    }
-    modules.push({
-      id,
-      rootPath: root,
-      files,
-      loc,
-      dependsOn: [],
-      dependedBy: [],
-    });
+    const loc = fileLOCMap
+      ? files.reduce((s, f) => s + (fileLOCMap.get(f) || 0), 0)
+      : files.reduce((s, f) => { try { return s + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length; } catch { return s; } }, 0);
+    modules.push({ id, rootPath: root, files, loc, dependsOn: [], dependedBy: [] });
   }
 
-  // 从 code graph 推断模块间依赖
   for (const mod of modules) {
     const deps = new Set<string>();
     for (const file of mod.files) {
@@ -863,166 +734,11 @@ function detectModules(
     }
     mod.dependsOn = [...deps];
   }
-
-  // 反向依赖
   for (const mod of modules) {
     for (const dep of mod.dependsOn) {
       const target = modules.find(m => m.id === dep);
-      if (target && !target.dependedBy.includes(mod.id)) {
-        target.dependedBy.push(mod.id);
-      }
+      if (target && !target.dependedBy.includes(mod.id)) target.dependedBy.push(mod.id);
     }
   }
-
   return modules;
-}
-
-/** 拓扑排序（叶子优先 = 无出边的先处理） */
-function topologicalSort(modules: ModuleInfo[]): ModuleInfo[] {
-  const visited = new Set<string>();
-  const result: ModuleInfo[] = [];
-  const modMap = new Map(modules.map(m => [m.id, m]));
-
-  function visit(id: string) {
-    if (visited.has(id)) return;
-    visited.add(id);
-    const mod = modMap.get(id);
-    if (!mod) return;
-    // 先访问依赖的模块
-    for (const dep of mod.dependsOn) {
-      visit(dep);
-    }
-    result.push(mod);
-  }
-
-  for (const mod of modules) visit(mod.id);
-  return result;
-}
-
-/** 读取模块文件内容（控制总字符数） */
-function readModuleFiles(
-  workspacePath: string,
-  files: string[],
-  maxChars: number,
-): string {
-  const sections: string[] = [];
-  let totalChars = 0;
-
-  // 按重要性排序：index > main > 其他
-  const sorted = [...files].sort((a, b) => {
-    const importance = (f: string) => {
-      const name = path.basename(f).toLowerCase();
-      if (name.startsWith('index')) return 0;
-      if (name.startsWith('main')) return 1;
-      if (name.includes('types') || name.includes('interface')) return 2;
-      return 3;
-    };
-    return importance(a) - importance(b);
-  });
-
-  for (const file of sorted.slice(0, MAX_FILES_PER_MODULE_BATCH)) {
-    if (totalChars >= maxChars) {
-      sections.push(`\n... [已截断, 剩余 ${sorted.length - sections.length} 文件未读取]`);
-      break;
-    }
-    try {
-      let content = fs.readFileSync(path.join(workspacePath, file), 'utf-8');
-      const remaining = maxChars - totalChars;
-      if (content.length > remaining) {
-        content = content.slice(0, remaining) + '\n... [文件已截断]';
-      }
-      sections.push(`\n### 文件: ${file}\n\`\`\`\n${content}\n\`\`\``);
-      totalChars += content.length;
-    } catch { /* skip */ }
-  }
-
-  return sections.join('\n');
-}
-
-/** 构建模块摘要 prompt */
-function buildModuleSummaryPrompt(
-  mod: ModuleInfo,
-  fileContents: string,
-  depSummaries: string,
-): string {
-  return `分析以下代码模块并生成结构化摘要。
-
-## 模块信息
-- 路径: ${mod.rootPath}
-- 文件数: ${mod.files.length}
-- 代码行: ${mod.loc}
-- 依赖模块: ${mod.dependsOn.join(', ') || '无'}
-
-${depSummaries ? `## 依赖模块摘要\n${depSummaries}\n` : ''}
-
-## 模块源码
-${fileContents}
-
----
-
-请返回以下格式（严格遵循）：
-
-**职责**: （一句话描述该模块的核心职责）
-
-**公开API**:
-- func1(): description
-- func2(): description
-
-**关键类型**:
-- TypeA: description
-- TypeB: description
-
-**依赖关系**: （描述此模块如何与其他模块交互）
-
-**摘要**: （2-3段话的完整模块分析）`;
-}
-
-/** 解析模块摘要 LLM 输出 */
-function parseModuleSummary(mod: ModuleInfo, result: LLMResult): ModuleSummary {
-  const content = result.content;
-
-  const responsibility = content.match(/\*\*职责\*\*[:：]\s*(.+)/)?.[1]?.trim() || '未知';
-
-  const apiMatch = content.match(/\*\*公开API\*\*[:：]?\n([\s\S]*?)(?=\n\*\*关键|$)/);
-  const publicAPI = apiMatch?.[1]
-    ?.split('\n')
-    .filter(l => l.trim().startsWith('-'))
-    .map(l => l.trim().replace(/^-\s*/, ''))
-    .slice(0, 15) || [];
-
-  const typesMatch = content.match(/\*\*关键类型\*\*[:：]?\n([\s\S]*?)(?=\n\*\*依赖|$)/);
-  const keyTypes = typesMatch?.[1]
-    ?.split('\n')
-    .filter(l => l.trim().startsWith('-'))
-    .map(l => l.trim().replace(/^-\s*/, ''))
-    .slice(0, 10) || [];
-
-  const depMatch = content.match(/\*\*依赖关系\*\*[:：]\s*([\s\S]*?)(?=\n\*\*摘要|$)/);
-  const dependencies = depMatch?.[1]?.trim() || '';
-
-  return {
-    moduleId: mod.id,
-    rootPath: mod.rootPath,
-    responsibility,
-    publicAPI,
-    keyTypes,
-    dependencies,
-    fullText: content,
-    tokensUsed: result.inputTokens + result.outputTokens,
-  };
-}
-
-/** 按 ## 标题分割文档 */
-function splitByH2(text: string): string[] {
-  const sections = text.split(/\n(?=## )/);
-  return sections.filter(s => s.trim().length > 0);
-}
-
-/** 数组分块 */
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size));
-  }
-  return chunks;
 }
