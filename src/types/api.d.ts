@@ -92,7 +92,9 @@ interface AgentForgeAPI {
     get(id: string): Promise<any>;
     getFeatures(projectId: string): Promise<any[]>;
     getAgents(projectId: string): Promise<any[]>;
-    getLogs(projectId: string, limit?: number): Promise<any[]>;
+    getLogs(projectId: string, options?: {
+      limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
+    }): Promise<{ rows: any[]; total: number }>;
     getStats(projectId: string): Promise<{ features: any; agents: any }>;
     stop(projectId: string): Promise<{ success: boolean }>;
     delete(projectId: string): Promise<{ success: boolean }>;

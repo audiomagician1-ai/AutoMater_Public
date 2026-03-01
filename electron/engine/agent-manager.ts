@@ -75,8 +75,31 @@ export function checkBudget(projectId: string, settings: any): { ok: boolean; sp
 }
 
 // ═══════════════════════════════════════
-// Feature 原子锁定（解决多 Worker 竞态）
+// v4.0: 团队自定义 Prompt 解析
 // ═══════════════════════════════════════
+
+/**
+ * 查询项目的 team_members 表，返回指定角色的自定义 system_prompt。
+ * 如果有多个同角色成员，可通过 agentIndex 区分（0-based, 对应 dev-1, dev-2...）。
+ * 找不到或 prompt 为空时返回 null，调用方应 fallback 到内置 prompt。
+ */
+export function getTeamPrompt(projectId: string, role: string, agentIndex: number = 0): string | null {
+  try {
+    const db = getDb();
+    const members = db.prepare(
+      'SELECT system_prompt FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
+    ).all(projectId) as Array<{ system_prompt: string | null }>;
+
+    if (members.length === 0) return null;
+
+    // 选择对应 index 的成员，超出范围则取最后一个
+    const member = members[Math.min(agentIndex, members.length - 1)];
+    const prompt = member?.system_prompt?.trim();
+    return prompt && prompt.length > 10 ? prompt : null;
+  } catch {
+    return null;
+  }
+}
 
 export function lockNextFeature(projectId: string, workerId: string): any | null {
   const db = getDb();

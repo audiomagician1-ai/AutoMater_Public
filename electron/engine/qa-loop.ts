@@ -11,6 +11,7 @@ import { readWorkspaceFile } from './file-writer';
 import { runTest as sbRunTest, runLint as sbRunLint, type SandboxConfig } from './sandbox-executor';
 import { parseStructuredOutput, QA_VERDICT_SCHEMA } from './output-parser';
 import { programmaticQACheck } from './guards';
+import { getTeamPrompt } from './agent-manager';
 import fs from 'fs';
 import path from 'path';
 
@@ -33,7 +34,8 @@ export interface QAResult {
 
 export async function runQAReview(
   settings: any, signal: AbortSignal,
-  feature: any, filesWritten: string[], workspacePath: string
+  feature: any, filesWritten: string[], workspacePath: string,
+  projectId?: string
 ): Promise<QAResult> {
   // ═══ v3.0: 程序化 QA 检查 (不依赖 LLM) ═══
   const fileContents = new Map<string, string>();
@@ -118,8 +120,11 @@ export async function runQAReview(
     filesContent.push(`### ${filePath}\n\`\`\`\n${content}\n\`\`\``);
   }
 
+  // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
+  const qaPrompt = (projectId ? getTeamPrompt(projectId, 'qa') : null) ?? QA_SYSTEM_PROMPT;
+
   const result = await callLLM(settings, settings.strongModel, [
-    { role: 'system', content: QA_SYSTEM_PROMPT },
+    { role: 'system', content: qaPrompt },
     {
       role: 'user',
       content: `请审查以下 Feature 的实现代码:\n\nFeature ID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n${testResults}## 实现的文件\n${filesContent.join('\n\n')}\n\n请给出审查结果（JSON 格式，不要用 markdown 代码块包裹）。${testResults ? '\n注意: 如果测试失败，verdict 应为 fail。' : ''}`,

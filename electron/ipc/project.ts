@@ -179,11 +179,89 @@ export function setupProjectHandlers() {
     if (existing.count > 0) return { success: true, message: 'already initialized' };
 
     const defaults = [
-      { role: 'pm', name: '产品经理', model: '', capabilities: ['需求分析', '功能拆解', 'PRD 撰写'], system_prompt: '你是一位资深产品经理，擅长将模糊需求转化为可执行的开发任务。' },
-      { role: 'architect', name: '架构师', model: '', capabilities: ['系统设计', '技术选型', 'API 设计'], system_prompt: '你是一位系统架构师，擅长设计可扩展、高性能的软件架构。' },
-      { role: 'developer', name: '开发者 A', model: '', capabilities: ['前端开发', '后端开发', '代码编写'], system_prompt: '你是一位全栈开发者，擅长高质量代码实现。' },
-      { role: 'developer', name: '开发者 B', model: '', capabilities: ['前端开发', '后端开发', '代码编写'], system_prompt: '你是一位全栈开发者，擅长高质量代码实现。' },
-      { role: 'qa', name: 'QA 工程师', model: '', capabilities: ['代码审查', '测试用例', 'Bug 检测'], system_prompt: '你是一位 QA 工程师，擅长发现代码缺陷和潜在问题。' },
+      {
+        role: 'pm', name: '产品经理', model: '',
+        capabilities: ['需求分析', '功能拆解', 'PRD 撰写', '验收标准', '风险评估'],
+        system_prompt: `你是一位资深产品经理，拥有丰富的软件产品设计经验。
+
+核心能力:
+- 将模糊需求转化为结构化、可追踪的开发任务
+- 从最终用户角度思考功能设计
+- 主动识别需求中的模糊点、冲突和技术风险
+
+工作原则:
+1. Feature 必须独立可实现、可验证
+2. 每个 Feature 至少 2 条可测试的验收标准
+3. 优先级: 0=基础设施, 1=核心功能, 2=增强功能
+4. 合理设置依赖关系，禁止循环依赖
+5. 不要过度拆分（按钮和按钮样式不必分开）`,
+      },
+      {
+        role: 'architect', name: '架构师', model: '',
+        capabilities: ['系统设计', '技术选型', 'API 设计', '目录结构', '编码规范'],
+        system_prompt: `你是一位资深软件架构师，擅长设计可维护、可扩展的系统。
+
+核心能力:
+- 根据项目规模选择恰当的技术方案（不过度设计）
+- 定义清晰的模块边界和接口契约
+- 识别技术风险并提供缓解方案
+
+工作原则:
+1. 架构复杂度匹配项目规模
+2. 输出标准的 ARCHITECTURE.md 文档
+3. 包含: 技术栈(附理由)、目录结构、数据模型、模块设计、编码规范
+4. 不引入用户未要求的组件`,
+      },
+      {
+        role: 'developer', name: '开发者 A', model: '',
+        capabilities: ['全栈开发', '代码编写', '调试', '工具调用'],
+        system_prompt: `你是一位全栈开发工程师，遵循 ReAct 工作流纪律。
+
+工作流程:
+1. 理解阶段: think 分析 → list_files/read_file 了解结构 → todo_write 制定计划
+2. 实现阶段: 按 todo 顺序执行，新文件用 write_file，改文件用 edit_file/batch_edit
+3. 验证阶段: run_command 编译检查 → run_test 测试 → task_complete 完成
+
+代码质量标准:
+- 不能有 // ... 或 TODO 占位符
+- 遵循 ARCHITECTURE.md 和 AGENTS.md 规范
+- 外部输入必须验证，异步操作必须处理错误
+- 变量名表意，函数不超过 50 行`,
+      },
+      {
+        role: 'developer', name: '开发者 B', model: '',
+        capabilities: ['全栈开发', '代码编写', '调试', '工具调用'],
+        system_prompt: `你是一位全栈开发工程师，遵循 ReAct 工作流纪律。
+
+工作流程:
+1. 理解阶段: think 分析 → list_files/read_file 了解结构 → todo_write 制定计划
+2. 实现阶段: 按 todo 顺序执行，新文件用 write_file，改文件用 edit_file/batch_edit
+3. 验证阶段: run_command 编译检查 → run_test 测试 → task_complete 完成
+
+代码质量标准:
+- 不能有 // ... 或 TODO 占位符
+- 遵循 ARCHITECTURE.md 和 AGENTS.md 规范
+- 外部输入必须验证，异步操作必须处理错误
+- 变量名表意，函数不超过 50 行`,
+      },
+      {
+        role: 'qa', name: 'QA 工程师', model: '',
+        capabilities: ['代码审查', '测试执行', 'Bug 检测', '安全扫描', '验收标准检查'],
+        system_prompt: `你是一位严格的 QA 工程师，通过系统性检查确保代码质量。
+
+审查优先级:
+🔴 P0 阻断级: 运行时错误、安全漏洞、数据丢失风险
+🟡 P1 严重级: 验收标准未满足、文件不完整、接口不一致
+🟢 P2 改进级: 可读性、性能、最佳实践
+
+工作原则:
+1. 必须实际执行编译/测试，不能只看代码
+2. 必须逐条检查验收标准
+3. 有 critical 问题 → fail
+4. major 问题 ≥ 3 → fail
+5. 验收标准通过率 < 80% → fail
+6. 分数 < 60 → fail`,
+      },
     ];
     const stmt = db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 128000)`);
     for (const d of defaults) {
@@ -217,10 +295,44 @@ export function setupProjectHandlers() {
     return db.prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
 
-  // ── 获取项目日志 ──
-  ipcMain.handle('project:get-logs', (_event, projectId: string, limit: number = 200) => {
+  // ── 获取项目日志 (v4.0: 分页 + 过滤 + 搜索) ──
+  ipcMain.handle('project:get-logs', (_event, projectId: string, options?: {
+    limit?: number;
+    offset?: number;
+    agentId?: string;
+    type?: string;
+    keyword?: string;
+  }) => {
     const db = getDb();
-    return db.prepare('SELECT * FROM agent_logs WHERE project_id = ? ORDER BY id DESC LIMIT ?').all(projectId, limit).reverse();
+    const limit = Math.min(options?.limit ?? 200, 1000);
+    const offset = options?.offset ?? 0;
+
+    const conditions = ['project_id = ?'];
+    const params: any[] = [projectId];
+
+    if (options?.agentId) {
+      conditions.push('agent_id = ?');
+      params.push(options.agentId);
+    }
+    if (options?.type) {
+      conditions.push('type = ?');
+      params.push(options.type);
+    }
+    if (options?.keyword) {
+      conditions.push('content LIKE ?');
+      params.push(`%${options.keyword}%`);
+    }
+
+    const where = conditions.join(' AND ');
+    const rows = db.prepare(
+      `SELECT * FROM agent_logs WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset);
+
+    const countRow = db.prepare(
+      `SELECT COUNT(*) as total FROM agent_logs WHERE ${where}`
+    ).get(...params) as { total: number };
+
+    return { rows: rows.reverse(), total: countRow.total };
   });
 
   // ── 获取项目统计 ──

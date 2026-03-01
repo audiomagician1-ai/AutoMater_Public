@@ -12,7 +12,7 @@ import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { callLLM, callLLMWithTools, calcCost, sleep, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
-import { updateAgentStats, checkBudget } from './agent-manager';
+import { updateAgentStats, checkBudget, getTeamPrompt } from './agent-manager';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
@@ -280,8 +280,12 @@ export async function reactDeveloperLoop(
     sharedDecisionsText = formatDecisionsForContext(decisions, workerId);
   }
 
+  // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
+  const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
+  const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
+
   const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
-    { role: 'system', content: DEVELOPER_REACT_PROMPT },
+    { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
       content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,

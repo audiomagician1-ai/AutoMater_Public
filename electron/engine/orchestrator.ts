@@ -18,7 +18,7 @@ import { getDb } from '../db';
 // ── 子模块 ──
 import { callLLM, calcCost, getSettings, sleep } from './llm-client';
 import { sendToUI, addLog, notify, createStreamCallback } from './ui-bridge';
-import { stopOrchestrator as _stopOrchestrator, registerOrchestrator, unregisterOrchestrator, spawnAgent, updateAgentStats, checkBudget, lockNextFeature } from './agent-manager';
+import { stopOrchestrator as _stopOrchestrator, registerOrchestrator, unregisterOrchestrator, spawnAgent, updateAgentStats, checkBudget, lockNextFeature, getTeamPrompt } from './agent-manager';
 import { reactDeveloperLoop, getAgentReactStates as _getAgentReactStates, getContextSnapshots as _getContextSnapshots } from './react-loop';
 import { runQAReview } from './qa-loop';
 
@@ -97,8 +97,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       if (signal.aborted) return;
       const [onChunk] = createStreamCallback(win, projectId, pmId);
       sendToUI(win, 'agent:stream-start', { projectId, agentId: pmId, label: 'PM 需求分析' });
+      const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
       const pmResult = await callLLM(settings, settings.strongModel, [
-        { role: 'system', content: PM_SYSTEM_PROMPT },
+        { role: 'system', content: pmPrompt },
         { role: 'user', content: `用户需求:\n${project.wish}\n\n请分析此需求，拆解为 Feature 清单。直接输出 JSON 数组，不要用 markdown 代码块包裹。` },
       ], signal, 16384, 2, onChunk);
       sendToUI(win, 'agent:stream-end', { projectId, agentId: pmId });
@@ -173,8 +174,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       const featureSummary = features.map(f => `- ${f.id}: ${f.title || f.description}`).join('\n');
       const [onChunk] = createStreamCallback(win, projectId, archId);
       sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构设计' });
+      const archPrompt = getTeamPrompt(projectId, 'architect') ?? ARCHITECT_SYSTEM_PROMPT;
       const archResult = await callLLM(settings, settings.strongModel, [
-        { role: 'system', content: ARCHITECT_SYSTEM_PROMPT },
+        { role: 'system', content: archPrompt },
         { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单:\n${featureSummary}\n\n请设计项目技术架构，输出 ARCHITECTURE.md 文件。` },
       ], signal, 16384, 2, onChunk);
       sendToUI(win, 'agent:stream-end', { projectId, agentId: archId });
@@ -316,7 +318,7 @@ async function workerLoop(
           db.prepare("UPDATE agents SET status = 'working', current_task = ? WHERE id = ? AND project_id = ?").run(feature.id, qaId, projectId);
           sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `🔍 审查 ${feature.id}...` });
 
-          const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath);
+          const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath, projectId);
           const qaCost = calcCost(settings.strongModel, qaResult.inputTokens, qaResult.outputTokens);
           updateAgentStats(qaId, projectId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
           db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);

@@ -30,7 +30,9 @@ contextBridge.exposeInMainWorld('agentforge', {
     get: (id: string) => ipcRenderer.invoke('project:get', id),
     getFeatures: (projectId: string) => ipcRenderer.invoke('project:get-features', projectId),
     getAgents: (projectId: string) => ipcRenderer.invoke('project:get-agents', projectId),
-    getLogs: (projectId: string, limit?: number) => ipcRenderer.invoke('project:get-logs', projectId, limit),
+    getLogs: (projectId: string, options?: {
+      limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
+    }) => ipcRenderer.invoke('project:get-logs', projectId, options),
     getStats: (projectId: string) => ipcRenderer.invoke('project:get-stats', projectId),
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
