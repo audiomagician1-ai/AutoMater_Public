@@ -21,7 +21,7 @@ interface AgentForgeAPI {
     listModels(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; models: string[] }>;
   };
   project: {
-    create(wish: string): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
+    create(wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
     list(): Promise<any[]>;
     get(id: string): Promise<any>;
     getFeatures(projectId: string): Promise<any[]>;
@@ -33,8 +33,9 @@ interface AgentForgeAPI {
     delete(projectId: string): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
     export(projectId: string): Promise<{ success: boolean; path?: string; error?: string }>;
-    gitCommit(projectId: string, message: string): Promise<{ success: boolean }>;
+    gitCommit(projectId: string, message: string): Promise<{ success: boolean; hash?: string; pushed?: boolean }>;
     gitLog(projectId: string): Promise<string[]>;
+    testGitHub(repo: string, token: string): Promise<{ success: boolean; message: string }>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;

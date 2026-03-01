@@ -6,8 +6,10 @@
  * 2. 已有文件目录树摘要
  * 3. 当前 Feature 依赖的已完成 Feature 产出的文件内容
  * 4. 与当前 Feature 可能相关的文件（按关键词匹配）
+ * 5. 计划进度摘要 (v0.8)
  *
  * 控制总上下文大小不超过指定 token 预算（粗略按字符数估算）
+ * v0.8: 新增分层压缩 — 超预算时自动对大文件生成摘要
  */
 
 import fs from 'fs';
@@ -214,3 +216,104 @@ const STOP_WORDS = new Set([
   'not', 'but', 'all', 'can', 'will', 'one', 'each', 'which', 'their',
   'use', 'using', '实现', '功能', '需要', '支持', '包含', '确保',
 ]);
+
+// ═══════════════════════════════════════
+// v0.8: 分层上下文压缩
+// ═══════════════════════════════════════
+
+/**
+ * 对单个文件内容进行压缩摘要
+ * 保留：imports、exports、函数签名、类定义、关键注释
+ * 裁剪：函数体、冗余注释、空行
+ */
+export function compressFileContent(content: string, maxLines: number = 30): string {
+  const lines = content.split('\n');
+  if (lines.length <= maxLines) return content;
+
+  const important: string[] = [];
+  let insideFunc = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // 始终保留: import, export, interface, type, class, function 签名, 关键注释
+    if (
+      trimmed.startsWith('import ') ||
+      trimmed.startsWith('export ') ||
+      trimmed.startsWith('interface ') ||
+      trimmed.startsWith('type ') ||
+      trimmed.startsWith('class ') ||
+      trimmed.match(/^(export\s+)?(async\s+)?function\s/) ||
+      trimmed.match(/^(export\s+)?const\s+\w+\s*[:=]/) ||
+      trimmed.startsWith('/**') ||
+      trimmed.startsWith('// ═') ||
+      trimmed.startsWith('## ') ||
+      trimmed.startsWith('# ')
+    ) {
+      important.push(line);
+    }
+
+    if (important.length >= maxLines) break;
+  }
+
+  if (important.length === 0) {
+    // fallback: 取前 N 行 + 后 N 行
+    const head = lines.slice(0, Math.floor(maxLines / 2));
+    const tail = lines.slice(-Math.floor(maxLines / 4));
+    return [...head, '// ... [已压缩]', ...tail].join('\n');
+  }
+
+  return [...important, `\n// ... [已压缩: ${lines.length} → ${important.length} 行]`].join('\n');
+}
+
+/**
+ * 为 ReAct 工具循环准备的轻量上下文 (v0.8)
+ * 比 collectDeveloperContext 更紧凑: 只给架构摘要 + 文件树 + 计划进度
+ */
+export function collectLightContext(
+  workspacePath: string,
+  projectId: string,
+  feature: any,
+  planSummary?: string,
+  tokenBudget: number = 3000
+): ContextResult {
+  const sections: string[] = [];
+  let totalChars = 0;
+  let filesIncluded = 0;
+  const charBudget = tokenBudget * 1.5;
+
+  // 1. 计划进度 (最高优先)
+  if (planSummary) {
+    sections.push(planSummary);
+    totalChars += planSummary.length;
+  }
+
+  // 2. 架构文档 (压缩版)
+  const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
+  if (archContent) {
+    const compressed = compressFileContent(archContent, 20);
+    const section = `## 项目架构 (压缩)\n${compressed}`;
+    if (totalChars + section.length < charBudget * 0.4) {
+      sections.push(section);
+      totalChars += section.length;
+      filesIncluded++;
+    }
+  }
+
+  // 3. 文件树 (紧凑版)
+  const tree = readDirectoryTree(workspacePath, '', 3);
+  if (tree.length > 0) {
+    const treeText = `## 文件结构\n${formatTreeCompact(tree)}`;
+    if (totalChars + treeText.length < charBudget * 0.6) {
+      sections.push(treeText);
+      totalChars += treeText.length;
+    }
+  }
+
+  const contextText = sections.join('\n\n');
+  return {
+    contextText,
+    estimatedTokens: estimateTokens(contextText),
+    filesIncluded,
+  };
+}

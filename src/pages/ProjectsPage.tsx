@@ -17,6 +17,14 @@ export function ProjectsPage() {
   const [projectStats, setProjectStats] = useState<Record<string, any>>({});
   const { settingsConfigured, setGlobalPage, enterProject, addLog, clearLogs } = useAppStore();
 
+  // Git 模式
+  const [showGitOptions, setShowGitOptions] = useState(false);
+  const [gitMode, setGitMode] = useState<'local' | 'github'>('local');
+  const [githubRepo, setGithubRepo] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [githubTesting, setGithubTesting] = useState(false);
+  const [githubTestResult, setGithubTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   const loadProjects = async () => {
     const list = await window.agentforge.project.list();
     setProjects(list || []);
@@ -40,11 +48,15 @@ export function ProjectsPage() {
     setLoading(true);
     clearLogs();
     try {
-      const result = await window.agentforge.project.create(wish.trim());
+      const options = gitMode === 'github' && githubRepo && githubToken
+        ? { gitMode: 'github', githubRepo, githubToken }
+        : { gitMode: 'local' };
+      const result = await window.agentforge.project.create(wish.trim(), options);
       if (result.success) {
-        addLog({ projectId: result.projectId, agentId: 'system', content: `🎯 新项目: ${result.name}` });
+        addLog({ projectId: result.projectId, agentId: 'system', content: `🎯 新项目: ${result.name} (${gitMode === 'github' ? 'GitHub: ' + githubRepo : '本地 Git'})` });
         await window.agentforge.project.start(result.projectId);
         setWish('');
+        setShowGitOptions(false);
         enterProject(result.projectId, 'logs');
       }
     } catch (err: any) {
@@ -53,6 +65,15 @@ export function ProjectsPage() {
       setLoading(false);
       loadProjects();
     }
+  };
+
+  const handleTestGitHub = async () => {
+    if (!githubRepo || !githubToken) return;
+    setGithubTesting(true);
+    setGithubTestResult(null);
+    const result = await window.agentforge.project.testGitHub(githubRepo, githubToken);
+    setGithubTestResult(result);
+    setGithubTesting(false);
   };
 
   const handleStop = async (e: React.MouseEvent, id: string) => {
@@ -119,6 +140,77 @@ export function ProjectsPage() {
               💡 首次使用请先 <button onClick={() => setGlobalPage('settings')} className="underline font-medium">配置 LLM</button>
             </div>
           )}
+
+          {/* Git 模式选择 */}
+          <div className="space-y-3">
+            <button
+              onClick={() => setShowGitOptions(!showGitOptions)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
+            >
+              <span>{showGitOptions ? '▾' : '▸'}</span>
+              <span>🔗 版本控制设置</span>
+              <span className="text-slate-600 ml-1">({gitMode === 'github' ? `GitHub: ${githubRepo}` : '本地 Git'})</span>
+            </button>
+
+            {showGitOptions && (
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setGitMode('local')}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${gitMode === 'local' ? 'bg-forge-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                  >
+                    📁 本地 Git
+                  </button>
+                  <button
+                    onClick={() => setGitMode('github')}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${gitMode === 'github' ? 'bg-forge-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                  >
+                    🐙 GitHub 仓库
+                  </button>
+                </div>
+
+                {gitMode === 'local' && (
+                  <p className="text-xs text-slate-500">项目将在本地工作区管理 Git 版本历史，无需联网。</p>
+                )}
+
+                {gitMode === 'github' && (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={githubRepo}
+                      onChange={e => setGithubRepo(e.target.value)}
+                      placeholder="owner/repo (例: myname/myproject)"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500"
+                    />
+                    <input
+                      type="password"
+                      value={githubToken}
+                      onChange={e => setGithubToken(e.target.value)}
+                      placeholder="GitHub Personal Access Token (ghp_...)"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleTestGitHub}
+                        disabled={!githubRepo || !githubToken || githubTesting}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 transition-all disabled:opacity-40"
+                      >
+                        {githubTesting ? '测试中...' : '🔌 测试连接'}
+                      </button>
+                      {githubTestResult && (
+                        <span className={`text-xs ${githubTestResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {githubTestResult.message}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-600">
+                      自动推送提交到 GitHub · Issue 追踪开发问题 · 需要 repo 和 issues 权限
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -152,10 +244,15 @@ export function ProjectsPage() {
                   >
                     {/* 状态徽章 */}
                     <div className="flex items-center justify-between mb-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 ${st.color}`}>
-                        {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1 animate-pulse" />}
-                        {st.text}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 ${st.color}`}>
+                          {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1 animate-pulse" />}
+                          {st.text}
+                        </span>
+                        {p.git_mode === 'github' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">🐙 {p.github_repo}</span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-slate-600">{new Date(p.created_at).toLocaleDateString()}</span>
                     </div>
 

@@ -1,5 +1,6 @@
 /**
  * 项目 IPC — 创建项目、启动 Agent 编排
+ * v0.8: 支持 git_mode (local/github)
  */
 
 import { ipcMain, BrowserWindow, app, shell, dialog } from 'electron';
@@ -7,32 +8,45 @@ import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { runOrchestrator, stopOrchestrator } from '../engine/orchestrator';
-import { initGitRepo, commitWorkspace, getGitLog, exportWorkspaceZip } from '../engine/workspace-git';
+import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
+import { exportWorkspaceZip } from '../engine/workspace-git';
 
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
 
+function getGitConfig(project: any): GitProviderConfig {
+  return {
+    mode: project.git_mode || 'local',
+    workspacePath: project.workspace_path,
+    githubRepo: project.github_repo || undefined,
+    githubToken: project.github_token || undefined,
+  };
+}
+
 export function setupProjectHandlers() {
 
   // ── 创建项目 ──
-  ipcMain.handle('project:create', async (_event, wish: string) => {
+  ipcMain.handle('project:create', async (_event, wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }) => {
     const db = getDb();
     const id = generateId();
     const name = wish.length > 30 ? wish.slice(0, 30) + '...' : wish;
+    const gitMode = options?.gitMode || 'local';
+    const githubRepo = options?.githubRepo || null;
+    const githubToken = options?.githubToken || null;
 
     // 创建工作区目录
     const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
     const workspacePath = path.join(workspacesRoot, id);
     fs.mkdirSync(workspacePath, { recursive: true });
 
-    // Git init
-    initGitRepo(workspacePath);
+    // Git init (根据模式)
+    initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
 
     db.prepare(`
-      INSERT INTO projects (id, name, wish, status, workspace_path, config)
-      VALUES (?, ?, ?, 'initializing', ?, '{}')
-    `).run(id, name, wish, workspacePath);
+      INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo, github_token)
+      VALUES (?, ?, ?, 'initializing', ?, '{}', ?, ?, ?)
+    `).run(id, name, wish, workspacePath, gitMode, githubRepo, githubToken);
 
     return { success: true, projectId: id, name, workspacePath };
   });
@@ -137,13 +151,13 @@ export function setupProjectHandlers() {
   // ── 导出项目为 zip ──
   ipcMain.handle('project:export', async (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT name, workspace_path FROM projects WHERE id = ?').get(projectId) as { name: string; workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
       return { success: false, error: '工作区目录不存在' };
     }
 
     // 先 commit 最新状态
-    commitWorkspace(project.workspace_path, 'Export snapshot');
+    gitCommit(getGitConfig(project), 'Export snapshot');
 
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     if (!win) return { success: false, error: '无窗口' };
@@ -164,10 +178,10 @@ export function setupProjectHandlers() {
   // ── Git commit ──
   ipcMain.handle('project:git-commit', (_event, projectId: string, message: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return { success: false };
-    const ok = commitWorkspace(project.workspace_path, message);
-    return { success: ok };
+    const result = gitCommit(getGitConfig(project), message);
+    return { success: result.success, hash: result.hash, pushed: result.pushed };
   });
 
   // ── Git log ──
@@ -175,7 +189,12 @@ export function setupProjectHandlers() {
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return [];
-    return getGitLog(project.workspace_path);
+    return gitLog(project.workspace_path);
+  });
+
+  // ── GitHub 连接测试 ──
+  ipcMain.handle('project:test-github', async (_event, repo: string, token: string) => {
+    return testGitHubConnection(repo, token);
   });
 }
 

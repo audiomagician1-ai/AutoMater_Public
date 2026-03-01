@@ -42,6 +42,9 @@ export async function initDatabase(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'initializing',
       workspace_path TEXT,
       config TEXT NOT NULL DEFAULT '{}',
+      git_mode TEXT NOT NULL DEFAULT 'local',
+      github_repo TEXT,
+      github_token TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -91,6 +94,17 @@ export async function initDatabase(): Promise<void> {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
   `);
+
+  // 迁移: 为已有的 projects 表补充 v0.8 新字段
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN git_mode TEXT NOT NULL DEFAULT 'local'`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_repo TEXT`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_token TEXT`);
+  } catch { /* 列已存在 */ }
 
   console.log('[DB] Initialized at', dbPath);
 }

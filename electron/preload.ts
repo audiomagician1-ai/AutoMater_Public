@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('agentforge', {
 
   // ── 项目 ──
   project: {
-    create: (wish: string) => ipcRenderer.invoke('project:create', wish),
+    create: (wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }) => ipcRenderer.invoke('project:create', wish, options),
     list: () => ipcRenderer.invoke('project:list'),
     get: (id: string) => ipcRenderer.invoke('project:get', id),
     getFeatures: (projectId: string) => ipcRenderer.invoke('project:get-features', projectId),
@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('agentforge', {
     export: (projectId: string) => ipcRenderer.invoke('project:export', projectId),
     gitCommit: (projectId: string, message: string) => ipcRenderer.invoke('project:git-commit', projectId, message),
     gitLog: (projectId: string) => ipcRenderer.invoke('project:git-log', projectId),
+    testGitHub: (repo: string, token: string) => ipcRenderer.invoke('project:test-github', repo, token),
   },
 
   // ── 工作区文件系统 ──
