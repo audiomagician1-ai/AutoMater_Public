@@ -147,6 +147,11 @@ contextBridge.exposeInMainWorld('agentforge', {
     getRanked: () => ipcRenderer.invoke('skill-evolution:get-ranked'),
   },
 
+  // ── 文件夹选择对话框 (v5.1) ──
+  dialog: {
+    openDirectory: (title?: string) => ipcRenderer.invoke('dialog:open-directory', title),
+  },
+
   // ── 缩放控制 (v5.2) ──
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */

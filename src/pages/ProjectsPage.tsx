@@ -218,8 +218,8 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
-                        if (result?.filePaths?.[0]) {
+                        const result = await window.agentforge.dialog.openDirectory('选择项目根目录');
+                        if (!result.canceled && result.filePaths?.[0]) {
                           setImportPath(result.filePaths[0]);
                           if (!importName) setImportName(result.filePaths[0].split(/[\\/]/).pop() || '');
                         }
@@ -340,8 +340,8 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
-                        if (result?.filePaths?.[0]) setWorkspacePath(result.filePaths[0]);
+                        const result = await window.agentforge.dialog.openDirectory('选择工作区文件夹');
+                        if (!result.canceled && result.filePaths?.[0]) setWorkspacePath(result.filePaths[0]);
                       } catch {}
                     }}
                     className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
@@ -370,8 +370,8 @@ export function ProjectsPage() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
-                        if (result?.filePaths?.[0]) setHistoryPath(result.filePaths[0]);
+                        const result = await window.agentforge.dialog.openDirectory('选择历史版本文件夹');
+                        if (!result.canceled && result.filePaths?.[0]) setHistoryPath(result.filePaths[0]);
                       } catch {}
                     }}
                     className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"

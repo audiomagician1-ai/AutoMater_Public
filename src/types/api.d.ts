@@ -193,6 +193,11 @@ interface AgentForgeAPI {
     getRanked(): Promise<Array<SkillEvolutionEntry & { score: number }>>;
   };
 
+  /** v5.1: 文件夹选择对话框 */
+  dialog: {
+    openDirectory(title?: string): Promise<{ canceled: boolean; filePaths: string[] }>;
+  };
+
   /** v5.2: 缩放控制 */
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */
