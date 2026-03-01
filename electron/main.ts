@@ -5,6 +5,7 @@ import { setupProjectHandlers } from './ipc/project';
 import { setupSettingsHandlers } from './ipc/settings';
 import { setupWorkspaceHandlers } from './ipc/workspace';
 import { setupEventHandlers } from './ipc/events';
+import { setupMcpHandlers, initMcpAndSkills, shutdownMcpAndSkills } from './ipc/mcp';
 import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
@@ -49,6 +50,10 @@ app.whenReady().then(async () => {
   setupProjectHandlers();
   setupWorkspaceHandlers();
   setupEventHandlers();
+  setupMcpHandlers();
+
+  // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
+  initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });
 
   createWindow();
 
@@ -60,6 +65,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  shutdownMcpAndSkills().catch(() => {});
   if (process.platform !== 'darwin') {
     app.quit();
   }

@@ -116,5 +116,25 @@ contextBridge.exposeInMainWorld('agentforge', {
     ipcRenderer.on(channel, subscription);
     return () => ipcRenderer.removeListener(channel, subscription);
   },
+
+  // ── MCP 服务器管理 (v5.0) ──
+  mcp: {
+    listServers: () => ipcRenderer.invoke('mcp:list-servers'),
+    addServer: (config: any) => ipcRenderer.invoke('mcp:add-server', config),
+    updateServer: (id: string, updates: any) => ipcRenderer.invoke('mcp:update-server', id, updates),
+    removeServer: (id: string) => ipcRenderer.invoke('mcp:remove-server', id),
+    connectServer: (id: string) => ipcRenderer.invoke('mcp:connect-server', id),
+    disconnectServer: (id: string) => ipcRenderer.invoke('mcp:disconnect-server', id),
+    listTools: () => ipcRenderer.invoke('mcp:list-tools'),
+    testServer: (config: any) => ipcRenderer.invoke('mcp:test-server', config),
+  },
+
+  // ── Skill 目录管理 (v5.0) ──
+  skill: {
+    getDirectory: () => ipcRenderer.invoke('skill:get-directory'),
+    setDirectory: (dirPath: string) => ipcRenderer.invoke('skill:set-directory', dirPath),
+    reload: () => ipcRenderer.invoke('skill:reload'),
+    list: () => ipcRenderer.invoke('skill:list'),
+  },
 });
 

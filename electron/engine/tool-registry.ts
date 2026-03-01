@@ -5,6 +5,7 @@
  * 管理各角色的工具白名单，以及转换为 LLM function-calling 格式。
  *
  * v2.6.0: 从 tool-system.ts (1250行 God Object) 拆出
+ * v5.0.0: 支持动态外部工具 (MCP + Skill) 合并到 getToolsForRole()
  */
 
 // ═══════════════════════════════════════
@@ -599,7 +600,14 @@ function toOpenAITool(def: ToolDefinition): Record<string, any> {
 
 /**
  * 按角色返回工具列表 (OpenAI function-calling 格式)
- * 只返回该角色允许使用的工具，减少 token 浪费
+ *
+ * 合并三个来源:
+ *   1. 内置工具 (TOOL_DEFINITIONS 中角色白名单内的)
+ *   2. MCP 服务器发现的工具 (按 allowedRoles 过滤)
+ *   3. Skill 目录加载的工具 (按 allowedRoles 过滤)
+ *
+ * @param role - Agent 角色
+ * @param gitMode - git 模式 ('local' | 'github')
  */
 export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): any[] {
   const allowed = new Set(ROLE_TOOLS[role] || ROLE_TOOLS.developer);
@@ -609,19 +617,67 @@ export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): any
     allowed.delete('github_list_issues');
   }
 
-  return TOOL_DEFINITIONS
+  // 1. 内置工具
+  const builtinTools = TOOL_DEFINITIONS
     .filter(t => allowed.has(t.name))
     .map(toOpenAITool);
+
+  // 2. MCP 工具 (延迟导入避免循环依赖)
+  const mcpTools = getExternalMcpTools(role);
+
+  // 3. Skill 工具 (延迟导入避免循环依赖)
+  const skillTools = getExternalSkillTools(role);
+
+  return [...builtinTools, ...mcpTools, ...skillTools];
 }
 
 /** 返回所有工具 (OpenAI format)，可选按 gitMode 过滤 GitHub 工具 */
 export function getToolsForLLM(gitMode: string = 'local'): any[] {
-  return TOOL_DEFINITIONS
+  const builtinTools = TOOL_DEFINITIONS
     .filter(t => {
       if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
       return true;
     })
     .map(toOpenAITool);
+
+  const mcpTools = getExternalMcpTools();
+  const skillTools = getExternalSkillTools();
+
+  return [...builtinTools, ...mcpTools, ...skillTools];
+}
+
+/**
+ * 从 MCP Manager 获取外部工具 (OpenAI format)。
+ * 使用延迟 require 避免模块初始化时的循环依赖。
+ */
+function getExternalMcpTools(role?: string): any[] {
+  try {
+    const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
+    const allTools = mcpManager.getAllTools();
+
+    return allTools.map(t => toOpenAITool({
+      name: `mcp_${t.serverId}_${t.name}`,
+      description: `[MCP] ${t.description}`,
+      parameters: t.inputSchema,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 从 Skill Manager 获取外部工具 (OpenAI format)。
+ */
+function getExternalSkillTools(role?: string): any[] {
+  try {
+    const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
+    const defs = role
+      ? skillManager.getDefinitionsForRole(role)
+      : skillManager.getAllDefinitions();
+    return defs.map(toOpenAITool);
+  } catch {
+    return [];
+  }
 }
 
 /** 解析 LLM 返回的 tool_calls (OpenAI 格式 → ToolCall[]) */
@@ -637,6 +693,9 @@ export function parseToolCalls(message: any): ToolCall[] {
 
 /** 判断一个工具是否需要异步执行 */
 export function isAsyncTool(toolName: string): boolean {
+  // MCP 和 Skill 工具始终异步执行
+  if (toolName.startsWith('mcp_') || toolName.startsWith('skill_')) return true;
+
   return toolName.startsWith('github_')
     || toolName.startsWith('browser_')
     || ['web_search', 'fetch_url', 'http_request',

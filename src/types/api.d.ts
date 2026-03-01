@@ -162,6 +162,26 @@ interface AgentForgeAPI {
     query(tags: string[]): Promise<any[]>;
   };
   on(channel: string, callback: (...args: any[]) => void): () => void;
+
+  /** v5.0: MCP 服务器管理 */
+  mcp: {
+    listServers(): Promise<McpServerStatus[]>;
+    addServer(config: Omit<McpServerConfig, 'id'>): Promise<{ success: boolean; id: string }>;
+    updateServer(id: string, updates: Partial<McpServerConfig>): Promise<{ success: boolean; error?: string }>;
+    removeServer(id: string): Promise<{ success: boolean }>;
+    connectServer(id: string): Promise<{ success: boolean; tools: McpToolSummary[]; error?: string }>;
+    disconnectServer(id: string): Promise<{ success: boolean }>;
+    listTools(): Promise<McpToolSummary[]>;
+    testServer(config: McpServerConfig): Promise<{ success: boolean; tools: McpToolSummary[]; error?: string }>;
+  };
+
+  /** v5.0: Skill 目录管理 */
+  skill: {
+    getDirectory(): Promise<string>;
+    setDirectory(dirPath: string): Promise<{ success: boolean; loaded: number; skills: SkillSummary[]; errors: Array<{ file: string; error: string }> }>;
+    reload(): Promise<{ success: boolean; loaded: number; skills: SkillSummary[]; errors: Array<{ file: string; error: string }> }>;
+    list(): Promise<SkillSummary[]>;
+  };
 }
 
 /** 需求条目 (v3.1) */
@@ -256,6 +276,42 @@ interface AppSettings {
   workerCount: number;
   /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
+}
+
+/** MCP 服务器配置 (v5.0) */
+interface McpServerConfig {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled: boolean;
+  allowedRoles?: string[];
+}
+
+/** MCP 服务器状态 (含连接信息) (v5.0) */
+interface McpServerStatus extends McpServerConfig {
+  connected: boolean;
+  toolCount: number;
+}
+
+/** MCP 工具摘要 (v5.0) */
+interface McpToolSummary {
+  name: string;
+  description: string;
+  serverId: string;
+  inputSchema?: Record<string, any>;
+}
+
+/** Skill 摘要 (v5.0) */
+interface SkillSummary {
+  name: string;
+  description: string;
+  sourceFile?: string;
 }
 
 declare global {

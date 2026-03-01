@@ -5,6 +5,7 @@
  * 不包含工具定义和权限逻辑（见 tool-registry.ts）。
  *
  * v2.6.0: 从 tool-system.ts 拆出
+ * v5.0.0: 支持 MCP + Skill 外部工具代理执行
  */
 
 import fs from 'fs';
@@ -299,8 +300,13 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'visual_assert':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
 
-      default:
+      default: {
+        // MCP / Skill 外部工具 — sync 入口返回 placeholder，实际由 async 路径执行
+        if (call.name.startsWith('mcp_') || call.name.startsWith('skill_')) {
+          return { success: true, output: `[async] ${call.name}...`, action: 'web' };
+        }
         return { success: false, output: `未知工具: ${call.name}` };
+      }
     }
   } catch (err: any) {
     return { success: false, output: `工具执行错误: ${err.message}` };
@@ -425,6 +431,86 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
     return { success: result.success, output: result.success ? `视觉断言 ${result.passed ? '✅ PASS' : '❌ FAIL'} (置信度: ${result.confidence}%)\n断言: ${call.arguments.assertion}\n依据: ${result.reasoning}` : `断言失败: ${result.error}`, action: 'computer' };
   }
 
+  // ── MCP 外部工具 ──
+  if (call.name.startsWith('mcp_')) {
+    return executeMcpTool(call);
+  }
+
+  // ── Skill 外部工具 ──
+  if (call.name.startsWith('skill_')) {
+    return executeSkillTool(call);
+  }
+
   // Fallback to sync
   return executeTool(call, ctx);
+}
+
+// ═══════════════════════════════════════
+// MCP & Skill Proxy Execution
+// ═══════════════════════════════════════
+
+/**
+ * 执行 MCP 外部工具。
+ *
+ * 工具名格式: mcp_{serverId}_{originalName}
+ * 通过 mcpManager 路由到正确的服务器连接。
+ */
+async function executeMcpTool(call: ToolCall): Promise<ToolResult> {
+  try {
+    const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
+
+    // 解析 serverId 和 原始工具名
+    // 格式: mcp_{serverId}_{toolName}
+    const withoutPrefix = call.name.slice(4); // 去掉 "mcp_"
+    const underscoreIdx = withoutPrefix.indexOf('_');
+    if (underscoreIdx === -1) {
+      return { success: false, output: `Invalid MCP tool name format: ${call.name}` };
+    }
+
+    // serverId 可能包含下划线 (mcp_XXXX_YYYY 格式), 需要更智能地解析
+    // 策略: 遍历所有已连接服务器，找到匹配的 tool
+    const allTools = mcpManager.getAllTools();
+    const matchedTool = allTools.find(t => `mcp_${t.serverId}_${t.name}` === call.name);
+
+    if (!matchedTool) {
+      return { success: false, output: `MCP tool not found: ${call.name}. Available: ${allTools.map(t => t.name).join(', ')}` };
+    }
+
+    const result = await mcpManager.callTool(matchedTool.name, matchedTool.serverId, call.arguments);
+
+    const toolResult: ToolResult = {
+      success: result.success,
+      output: result.content.slice(0, 10_000),
+      action: 'web',
+    };
+
+    // 如果包含图片，附加 _imageBase64
+    if (result.imageBase64) {
+      (toolResult as any)._imageBase64 = result.imageBase64;
+    }
+
+    return toolResult;
+  } catch (err: any) {
+    return { success: false, output: `MCP tool execution error: ${err.message}` };
+  }
+}
+
+/**
+ * 执行 Skill 外部工具。
+ *
+ * 工具名格式: skill_{originalName}
+ * 通过 skillManager 查找并执行。
+ */
+async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
+  try {
+    const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
+    const result = await skillManager.executeSkill(call.name, call.arguments);
+    return {
+      success: result.success,
+      output: result.output.slice(0, 10_000),
+      action: 'shell',
+    };
+  } catch (err: any) {
+    return { success: false, output: `Skill execution error: ${err.message}` };
+  }
 }
