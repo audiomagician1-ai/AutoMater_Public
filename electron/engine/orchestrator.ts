@@ -1,19 +1,18 @@
 ﻿/**
- * Orchestrator — Agent 编排引擎 (7 阶段流水线)
+ * Orchestrator — Agent 编排引擎 (5 阶段流水线)
  *
- * v4.2 流水线:
+ * v5.0 流水线 (扁平化重构):
  *   Phase 1: PM 需求分析 → Feature 清单
- *   Phase 2: PM 设计文档 → .agentforge/docs/design.md
- *   Phase 3: Architect 技术架构 → ARCHITECTURE.md
- *   Phase 4: PM 子需求拆分 + QA 测试规格 → per-feature docs
- *   Phase 5: Developer 实现 (ReAct parallel) + QA 代码审查
- *   Phase 6: PM 验收审查 (per-feature)
- *   Phase 7: 汇总 + 用户验收等待
+ *   Phase 2: Architect 架构 + 产品设计 → ARCHITECTURE.md + design.md (合并原 P2+P3)
+ *   Phase 3: 批量子需求拆分 + 测试规格 (批量化, 原 P4)
+ *   Phase 4: Developer 实现 (ReAct, 内嵌 planning) + QA 审查 + PM 批量验收
+ *   Phase 5: 汇总 + 用户验收等待
  *
  * 演进历程:
  *   v0.3: 4 阶段 (PM → Architect → Dev → QA)
  *   v2.5: 拆分为模块化架构
  *   v4.2: 7 阶段, 文档驱动, PM 验收闭环
+ *   v5.0: 5 阶段, 批量化文档生成和验收, 移除独立 Planning, 移除 tech_lead
  */
 
 import { BrowserWindow } from 'electron';
@@ -104,15 +103,12 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   if (!isResume) {
     // ═══════════════════════════════════════
-    // 首次运行: 完整的 7 阶段流水线
+    // 首次运行: 完整的 5 阶段流水线 (v5.0)
     // ═══════════════════════════════════════
     const features = await phasePMAnalysis(projectId, project, settings, win, signal);
     if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
-    if (workspacePath) {
-      await phasePMDesignDoc(projectId, project, features, settings, win, signal, workspacePath);
-      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-    }
+    // v5.0: Phase 2 设计文档已合并到 Phase 3 架构设计, 不再独立调用
 
     await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
@@ -123,11 +119,13 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     }
   } else {
     // ═══════════════════════════════════════
-    // Phase 0: 需求分诊 (Wish Triage) — 检测隐式变更
+    // Phase 0: PM 需求分诊 (Wish Triage) — 由 PM 执行, 非元 Agent
     // ═══════════════════════════════════════
+    // 元 Agent 只负责通用交互/路由, 不加载项目设计内容。
+    // 分诊需要项目上下文(已有 Feature + 设计文档), 因此由 PM 角色执行。
     // 用户可能只是续跑未完成的 feature, 也可能带了新 wish。
     // 关键: 新 wish 可能隐含对已有 feature 的变更 — 用户不会主动说"这是变更"。
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — 检查是否有新需求或隐式变更...' });
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — PM 检查是否有新需求或隐式变更...' });
 
     // 获取当前 wish (可能被用户更新过)
     const freshProject = db.prepare('SELECT wish FROM projects WHERE id = ?').get(projectId) as { wish: string };
@@ -222,7 +220,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
-  // Phase 5: Developer 实现 + QA 代码审查
+  // Phase 4a: Developer 实现 + QA 代码审查 (v5.0: 原 Phase 5)
   // ═══════════════════════════════════════
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   db.prepare("UPDATE projects SET status = 'developing', updated_at = datetime('now') WHERE id = ?").run(projectId);
@@ -257,7 +255,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
 
   // ═══════════════════════════════════════
-  // Phase 6: PM 验收审查 (per-feature)
+  // Phase 4b: PM 批量验收审查 (v5.0: 原 Phase 6, 批量化)
   // ═══════════════════════════════════════
   if (workspacePath) {
     await phasePMAcceptance(projectId, settings, win, signal, workspacePath);
@@ -265,7 +263,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
-  // Phase 7: 汇总 + 用户验收等待
+  // Phase 5: 汇总 + 用户验收等待 (v5.0: 原 Phase 7)
   // ═══════════════════════════════════════
   await phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
 
@@ -525,7 +523,7 @@ async function phasePMDesignDoc(
 }
 
 // ═══════════════════════════════════════
-// Phase 3: Architect 技术架构
+// Phase 2: Architect 技术架构 + 产品设计 (v5.0: 合并原 Phase 2+3)
 // ═══════════════════════════════════════
 
 async function phaseArchitect(
@@ -537,41 +535,48 @@ async function phaseArchitect(
   const db = getDb();
   const archId = `arch-${Date.now().toString(36)}`;
   spawnAgent(projectId, archId, 'architect', win);
-  sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '🏗️ Phase 3: 架构师开始设计技术方案...' });
-  addLog(projectId, archId, 'log', '开始架构设计');
+  sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '🏗️ Phase 2: 架构师开始设计技术方案 + 产品设计...' });
+  addLog(projectId, archId, 'log', '开始架构 + 产品设计');
 
   try {
-    const featureSummary = features.map(f => `- ${f.id}: ${f.title || f.description}`).join('\n');
-
-    // 如果有设计文档, 注入为上下文
-    const designContext = workspacePath ? buildDesignContext(workspacePath, 4000) : '';
+    const featureSummary = features.map(f =>
+      `- ${f.id}: [${f.category || 'core'}] ${f.title || f.description} (priority: ${f.priority ?? 1})\n  验收: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}`
+    ).join('\n');
 
     const [onChunk] = createStreamCallback(win, projectId, archId);
-    sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构设计' });
+    sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构 + 产品设计' });
     const archPrompt = getTeamPrompt(projectId, 'architect') ?? ARCHITECT_SYSTEM_PROMPT;
     const archResult = await callLLM(settings, settings.strongModel, [
       { role: 'system', content: archPrompt },
-      { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单:\n${featureSummary}\n\n${designContext ? `## 产品设计文档摘要\n${designContext}\n\n` : ''}请设计项目技术架构，输出 ARCHITECTURE.md 文件。` },
+      { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单 (${features.length} 个):\n${featureSummary}\n\n请完成以下两份文档:\n\n1. **产品设计文档** — 产品愿景、功能全景、用户流程、数据模型概要、非功能性需求\n2. **技术架构文档 (ARCHITECTURE.md)** — 技术选型、目录结构、核心数据模型、模块设计、API 接口、编码规范\n\n两份文档合并为一份完整输出, 先产品设计后技术架构。` },
     ], signal, 16384, 2, onChunk);
     sendToUI(win, 'agent:stream-end', { projectId, agentId: archId });
 
     const archCost = calcCost(settings.strongModel, archResult.inputTokens, archResult.outputTokens);
     addLog(projectId, archId, 'output', archResult.content.slice(0, 3000));
 
-    const archBlocks = parseFileBlocks(archResult.content);
-    if (archBlocks.length > 0 && workspacePath) {
-      writeFileBlocks(workspacePath, archBlocks);
-      sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区' });
-    } else if (workspacePath) {
-      fs.writeFileSync(path.join(workspacePath, 'ARCHITECTURE.md'), archResult.content, 'utf-8');
-      sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区 (直接输出)' });
+    // v5.0: 同时写入设计文档和架构文档
+    if (workspacePath) {
+      // 写入设计文档到 doc-manager
+      writeDoc(workspacePath, 'design', archResult.content, archId, '初始版本: 架构师生成设计+架构文档');
+
+      // 写入 ARCHITECTURE.md
+      const archBlocks = parseFileBlocks(archResult.content);
+      if (archBlocks.length > 0) {
+        writeFileBlocks(workspacePath, archBlocks);
+        sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区' });
+      } else {
+        fs.writeFileSync(path.join(workspacePath, 'ARCHITECTURE.md'), archResult.content, 'utf-8');
+        sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区 (直接输出)' });
+      }
+      sendToUI(win, 'workspace:changed', { projectId });
     }
-    if (workspacePath) sendToUI(win, 'workspace:changed', { projectId });
+
     updateAgentStats(archId, projectId, archResult.inputTokens, archResult.outputTokens, archCost);
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(archId);
-    sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
+    sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
     emitEvent({ projectId, agentId: archId, type: 'phase:architect:end', data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost }, inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost });
-    createCheckpoint(projectId, '架构设计完成');
+    createCheckpoint(projectId, '架构 + 产品设计完成');
   } catch (err: any) {
     if (signal.aborted) return;
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `⚠️ 架构设计失败 (非致命): ${err.message}` });
@@ -580,8 +585,10 @@ async function phaseArchitect(
 }
 
 // ═══════════════════════════════════════
-// Phase 4: PM 子需求拆分 + QA 测试规格
+// Phase 3: 批量子需求拆分 + 测试规格 (v5.0: 批量化, 原 Phase 4)
 // ═══════════════════════════════════════
+
+const BATCH_DOC_SIZE = 5; // 每批处理的 Feature 数
 
 async function phaseReqsAndTestSpecs(
   projectId: string, features: any[], settings: AppSettings,
@@ -590,70 +597,85 @@ async function phaseReqsAndTestSpecs(
   const db = getDb();
   const designContext = buildDesignContext(workspacePath, 4000);
 
-  sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📋 Phase 4: 为 ${features.length} 个 Feature 生成子需求和测试规格...` });
+  sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📋 Phase 3: 批量生成 ${features.length} 个 Feature 的子需求和测试规格 (每批 ${BATCH_DOC_SIZE} 个)...` });
 
-  for (const feature of features) {
+  // ── 3a: 批量子需求文档 ──
+  const batches: any[][] = [];
+  for (let i = 0; i < features.length; i += BATCH_DOC_SIZE) {
+    batches.push(features.slice(i, i + BATCH_DOC_SIZE));
+  }
+
+  for (let bi = 0; bi < batches.length; bi++) {
     if (signal.aborted) return;
+    const batch = batches[bi];
+    const batchIds = batch.map((f: any, i: number) => f.id || `F${features.indexOf(f) + 1}`);
 
-    const featureId = feature.id || `F${features.indexOf(feature) + 1}`;
-
-    // ── 4a: PM 子需求文档 ──
+    // 批量子需求: 一次调用生成多个 Feature 的子需求
     try {
-      const pmReqId = `pm-req-${Date.now().toString(36)}`;
+      const pmReqId = `pm-req-batch-${Date.now().toString(36)}`;
+      const batchFeatureDesc = batch.map((f: any) => {
+        const fid = f.id || `F${features.indexOf(f) + 1}`;
+        return `### Feature ${fid}\n标题: ${f.title || f.description}\n描述: ${f.description}\n验收标准: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(f.dependsOn || f.depends_on || [])}\n备注: ${f.notes || '无'}`;
+      }).join('\n\n');
+
       const reqResult = await callLLM(settings, settings.strongModel, [
         { role: 'system', content: PM_SPLIT_REQS_PROMPT },
         {
           role: 'user',
-          content: `## 设计文档上下文\n${designContext}\n\n## Feature 信息\nID: ${featureId}\n标题: ${feature.title || feature.description}\n描述: ${feature.description}\n验收标准: ${JSON.stringify(feature.acceptance_criteria || feature.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(feature.dependsOn || feature.depends_on || [])}\n备注: ${feature.notes || '无'}\n\n请编写此 Feature 的详细子需求文档。`,
+          content: `## 设计文档上下文\n${designContext}\n\n## Feature 列表 (${batch.length} 个, 请为每个单独输出子需求文档)\n\n${batchFeatureDesc}\n\n请为以上每个 Feature 分别编写详细子需求文档。用 "---FEATURE: Fxxx---" 分隔每个 Feature 的文档。`,
         },
-      ], signal, 8192);
+      ], signal, 16384);
 
       const reqCost = calcCost(settings.strongModel, reqResult.inputTokens, reqResult.outputTokens);
-      const reqVer = writeDoc(workspacePath, 'requirement', reqResult.content, pmReqId, `${featureId} 初始子需求`, featureId);
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 批次 ${bi + 1}/${batches.length} 子需求生成完成 ($${reqCost.toFixed(4)})` });
 
-      db.prepare("UPDATE features SET requirement_doc_ver = ? WHERE id = ? AND project_id = ?")
-        .run(reqVer, featureId, projectId);
-
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 ${featureId} 子需求文档 v${reqVer} ($${reqCost.toFixed(4)})` });
-    } catch (err: any) {
-      if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 子需求生成失败: ${err.message}` });
-    }
-
-    // ── 4b: QA 测试规格 ──
-    try {
-      const reqContent = readDoc(workspacePath, 'requirement', featureId);
-      if (!reqContent) {
-        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 跳过测试规格 (无子需求文档)` });
-        continue;
+      // 解析批量输出, 按 Feature 分割
+      const sections = splitBatchOutput(reqResult.content, batchIds);
+      for (const fid of batchIds) {
+        const content = sections[fid] || reqResult.content; // fallback: 整个输出
+        const reqVer = writeDoc(workspacePath, 'requirement', content, pmReqId, `${fid} 初始子需求`, fid);
+        db.prepare("UPDATE features SET requirement_doc_ver = ? WHERE id = ? AND project_id = ?")
+          .run(reqVer, fid, projectId);
       }
-
-      const qaSpecId = `qa-spec-${Date.now().toString(36)}`;
-      const specResult = await callLLM(settings, settings.strongModel, [
-        { role: 'system', content: QA_TEST_SPEC_PROMPT },
-        {
-          role: 'user',
-          content: `## 子需求文档\n${reqContent}\n\n请为此 Feature 编写功能测试规格文档。`,
-        },
-      ], signal, 8192);
-
-      const specCost = calcCost(settings.strongModel, specResult.inputTokens, specResult.outputTokens);
-      const specVer = writeDoc(workspacePath, 'test_spec', specResult.content, qaSpecId, `${featureId} 初始测试规格`, featureId);
-
-      db.prepare("UPDATE features SET test_spec_doc_ver = ? WHERE id = ? AND project_id = ?")
-        .run(specVer, featureId, projectId);
-
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 ${featureId} 测试规格 v${specVer} ($${specCost.toFixed(4)})` });
     } catch (err: any) {
       if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 测试规格生成失败: ${err.message}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${err.message}` });
     }
 
-    // 每 5 个 Feature 做一个 checkpoint
-    const idx = features.indexOf(feature);
-    if ((idx + 1) % 5 === 0) {
-      createCheckpoint(projectId, `Phase 4: ${idx + 1}/${features.length} Feature 文档已生成`);
+    // 批量测试规格: 一次调用生成多个 Feature 的测试规格
+    try {
+      const qaSpecId = `qa-spec-batch-${Date.now().toString(36)}`;
+      const batchReqDocs = batchIds.map(fid => {
+        const content = readDoc(workspacePath, 'requirement', fid);
+        return content ? `### Feature ${fid}\n${content}` : null;
+      }).filter(Boolean).join('\n\n---\n\n');
+
+      if (batchReqDocs) {
+        const specResult = await callLLM(settings, settings.strongModel, [
+          { role: 'system', content: QA_TEST_SPEC_PROMPT },
+          {
+            role: 'user',
+            content: `## 多个 Feature 的子需求文档\n\n${batchReqDocs}\n\n请为以上每个 Feature 分别编写功能测试规格文档。用 "---FEATURE: Fxxx---" 分隔每个 Feature 的文档。`,
+          },
+        ], signal, 16384);
+
+        const specCost = calcCost(settings.strongModel, specResult.inputTokens, specResult.outputTokens);
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 批次 ${bi + 1}/${batches.length} 测试规格生成完成 ($${specCost.toFixed(4)})` });
+
+        const specSections = splitBatchOutput(specResult.content, batchIds);
+        for (const fid of batchIds) {
+          const content = specSections[fid] || specResult.content;
+          const specVer = writeDoc(workspacePath, 'test_spec', content, qaSpecId, `${fid} 初始测试规格`, fid);
+          db.prepare("UPDATE features SET test_spec_doc_ver = ? WHERE id = ? AND project_id = ?")
+            .run(specVer, fid, projectId);
+        }
+      }
+    } catch (err: any) {
+      if (signal.aborted) return;
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${err.message}` });
     }
+
+    createCheckpoint(projectId, `Phase 3: 批次 ${bi + 1}/${batches.length} 文档已生成`);
   }
 
   // 一致性检查
@@ -667,7 +689,35 @@ async function phaseReqsAndTestSpecs(
   }
 
   emitEvent({ projectId, agentId: 'system', type: 'phase:docs:end', data: { featureCount: features.length } });
-  createCheckpoint(projectId, `Phase 4 完成: ${features.length} Feature 文档已生成`);
+  createCheckpoint(projectId, `Phase 3 完成: ${features.length} Feature 文档已生成`);
+}
+
+/**
+ * 解析批量 LLM 输出, 按 Feature ID 分割
+ * 支持格式: "---FEATURE: F001---" 或 "## Feature F001" 等分隔符
+ */
+function splitBatchOutput(content: string, featureIds: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  for (let i = 0; i < featureIds.length; i++) {
+    const fid = featureIds[i];
+    // 尝试多种分隔符模式
+    const patterns = [
+      new RegExp(`---\\s*FEATURE:\\s*${fid}\\s*---([\\s\\S]*?)(?=---\\s*FEATURE:|$)`, 'i'),
+      new RegExp(`##\\s*Feature\\s*${fid}\\b([\\s\\S]*?)(?=##\\s*Feature\\s*F\\d|$)`, 'i'),
+      new RegExp(`#\\s*${fid}\\b([\\s\\S]*?)(?=#\\s*F\\d|$)`, 'i'),
+    ];
+
+    for (const pat of patterns) {
+      const match = content.match(pat);
+      if (match && match[1]?.trim()) {
+        result[fid] = match[1].trim();
+        break;
+      }
+    }
+  }
+
+  return result;
 }
 
 // ═══════════════════════════════════════
@@ -783,8 +833,10 @@ async function workerLoop(
 }
 
 // ═══════════════════════════════════════
-// Phase 6: PM 验收审查
+// Phase 4 (v5.0): PM 批量验收审查 (原 Phase 6)
 // ═══════════════════════════════════════
+
+const BATCH_ACCEPT_SIZE = 4; // 每批验收的 Feature 数
 
 async function phasePMAcceptance(
   projectId: string, settings: AppSettings,
@@ -797,84 +849,103 @@ async function phasePMAcceptance(
     .all(projectId) as FeatureRow[];
 
   if (qaPassed.length === 0) {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 6: 没有 Feature 需要 PM 验收' });
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 4: 没有 Feature 需要 PM 验收' });
     return;
   }
 
   const pmAccId = `pm-acc-${Date.now().toString(36)}`;
   spawnAgent(projectId, pmAccId, 'pm', win);
-  sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `📋 Phase 6: PM 验收审查 (${qaPassed.length} features)...` });
+  sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `📋 Phase 4: PM 批量验收审查 (${qaPassed.length} features, 每批 ${BATCH_ACCEPT_SIZE} 个)...` });
 
   const designContext = buildDesignContext(workspacePath, 6000);
 
-  for (const feature of qaPassed) {
+  // 分批验收
+  const accBatches: FeatureRow[][] = [];
+  for (let i = 0; i < qaPassed.length; i += BATCH_ACCEPT_SIZE) {
+    accBatches.push(qaPassed.slice(i, i + BATCH_ACCEPT_SIZE));
+  }
+
+  for (let bi = 0; bi < accBatches.length; bi++) {
     if (signal.aborted) return;
+    const batch = accBatches[bi];
 
     try {
-      // 读取该 Feature 的文档上下文 + 实现的文件列表
-      const featureDocCtx = buildFeatureDocContext(workspacePath, feature.id);
-      const affectedFiles = safeJsonParse(feature.affected_files, []);
-      let filePreview = '';
-      for (const fp of affectedFiles.slice(0, 5)) {
-        const fullPath = path.join(workspacePath, fp);
-        if (fs.existsSync(fullPath)) {
-          const content = fs.readFileSync(fullPath, 'utf-8');
-          filePreview += `### ${fp}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\`\n\n`;
+      // 构建批量 Feature 信息
+      const batchInfo = batch.map(feature => {
+        const featureDocCtx = buildFeatureDocContext(workspacePath, feature.id);
+        const affectedFiles = safeJsonParse(feature.affected_files, []);
+        let filePreview = '';
+        for (const fp of affectedFiles.slice(0, 3)) {
+          const fullPath = path.join(workspacePath, fp);
+          if (fs.existsSync(fullPath)) {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            filePreview += `#### ${fp}\n\`\`\`\n${content.slice(0, 1000)}\n\`\`\`\n`;
+          }
         }
-      }
+        return [
+          `### Feature ${feature.id}`,
+          `标题: ${feature.title}`,
+          `描述: ${feature.description}`,
+          `验收标准: ${feature.acceptance_criteria}`,
+          featureDocCtx ? `文档摘要: ${featureDocCtx.slice(0, 500)}` : '',
+          filePreview ? `代码预览:\n${filePreview}` : '',
+        ].filter(Boolean).join('\n');
+      }).join('\n\n---\n\n');
 
       const acceptResult = await callLLM(settings, settings.strongModel, [
         { role: 'system', content: PM_ACCEPTANCE_PROMPT },
         {
           role: 'user',
-          content: [
-            `## 设计文档上下文\n${designContext}`,
-            featureDocCtx ? `\n## Feature 文档\n${featureDocCtx}` : '',
-            `\n## Feature 基本信息\nID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}`,
-            filePreview ? `\n## 实现代码预览\n${filePreview}` : '',
-            `\n请对此 Feature 的实现进行产品验收审查。输出 JSON。`,
-          ].filter(Boolean).join('\n'),
+          content: `## 设计文档上下文\n${designContext}\n\n## ${batch.length} 个 Feature 待验收\n\n${batchInfo}\n\n请逐个输出每个 Feature 的验收审查结果。输出 JSON 数组, 每项包含: feature_id, verdict, score, summary, feedback。`,
         },
-      ], signal, 4096);
+      ], signal, 8192);
 
       const accCost = calcCost(settings.strongModel, acceptResult.inputTokens, acceptResult.outputTokens);
       updateAgentStats(pmAccId, projectId, acceptResult.inputTokens, acceptResult.outputTokens, accCost);
 
-      const parseResult = parseStructuredOutput(acceptResult.content, PM_ACCEPTANCE_SCHEMA);
-      let verdict = 'reject';
-      let score = 0;
-      let feedback = '';
-      let summary = '';
-
-      if (parseResult.ok) {
-        verdict = parseResult.data.verdict;
-        score = parseResult.data.score;
-        feedback = parseResult.data.feedback || '';
-        summary = parseResult.data.summary || '';
-      } else {
-        summary = `PM 验收输出解析失败: ${parseResult.error}`;
-        addLog(projectId, pmAccId, 'error', summary);
+      // 尝试解析为数组
+      let verdicts: Array<{ feature_id: string; verdict: string; score: number; summary?: string; feedback?: string }> = [];
+      try {
+        const parsed = parseStructuredOutput(acceptResult.content, PM_ACCEPTANCE_SCHEMA);
+        if (parsed.ok) {
+          // 如果返回的是单个对象 (向后兼容), 包装为数组
+          verdicts = Array.isArray(parsed.data) ? parsed.data : [parsed.data];
+        }
+      } catch {
+        // fallback: 尝试直接 JSON.parse
+        try {
+          const raw = JSON.parse(acceptResult.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+          verdicts = Array.isArray(raw) ? raw : [raw];
+        } catch { /* parse failed */ }
       }
 
-      // 更新 Feature 状态
-      const finalStatus = verdict === 'accept' || verdict === 'conditional_accept' ? 'passed' : 'pm_rejected';
-      db.prepare("UPDATE features SET status = ?, pm_verdict = ?, pm_verdict_score = ?, pm_verdict_feedback = ?, completed_at = CASE WHEN ? IN ('passed') THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
-        .run(finalStatus, verdict, score, feedback, finalStatus, feature.id, projectId);
+      // 应用结果到每个 Feature
+      for (const feature of batch) {
+        const v = verdicts.find(v => v.feature_id === feature.id) || verdicts[batch.indexOf(feature)];
+        const verdict = v?.verdict || 'conditional_accept';
+        const score = v?.score || 70;
+        const feedback = v?.feedback || '';
+        const summary = v?.summary || '';
 
-      const icon = verdict === 'accept' ? '✅' : verdict === 'conditional_accept' ? '⚠️' : '❌';
-      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `${icon} ${feature.id} PM 验收: ${verdict} (${score}/100) — ${summary}` });
-      sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: finalStatus, agentId: pmAccId });
+        const finalStatus = verdict === 'accept' || verdict === 'conditional_accept' ? 'passed' : 'pm_rejected';
+        db.prepare("UPDATE features SET status = ?, pm_verdict = ?, pm_verdict_score = ?, pm_verdict_feedback = ?, completed_at = CASE WHEN ? IN ('passed') THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
+          .run(finalStatus, verdict, score, feedback, finalStatus, feature.id, projectId);
 
-      if (verdict === 'reject' && feedback) {
-        sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `  💬 反馈: ${feedback.slice(0, 300)}` });
+        const icon = verdict === 'accept' ? '✅' : verdict === 'conditional_accept' ? '⚠️' : '❌';
+        sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `${icon} ${feature.id} PM 验收: ${verdict} (${score}/100) — ${summary}` });
+        sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: finalStatus, agentId: pmAccId });
       }
+
+      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `  📋 批次 ${bi + 1}/${accBatches.length} 验收完成 ($${accCost.toFixed(4)})` });
     } catch (err: any) {
       if (signal.aborted) return;
-      // PM 验收失败 → 视为 conditional_accept (不阻断)
-      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `⚠️ ${feature.id} PM 验收出错 (视为通过): ${err.message}` });
-      db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?")
-        .run(`PM 验收异常: ${err.message}`, feature.id, projectId);
-      sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId });
+      // 批次验收失败 → 全部视为 conditional_accept
+      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `⚠️ 批次 ${bi + 1} PM 验收出错 (全部视为通过): ${err.message}` });
+      for (const feature of batch) {
+        db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?")
+          .run(`PM 验收异常: ${err.message}`, feature.id, projectId);
+        sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId });
+      }
     }
   }
 

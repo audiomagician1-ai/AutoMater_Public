@@ -1,8 +1,10 @@
 /**
  * WishPage v5.0 — 需求管理 + 元Agent对话
  *
- * 左侧: 需求列表 (无变更tab, agent自主识别迭代需求)
- * 右侧: 元Agent对话页面 — 独立于项目的管家秘书
+ * 左侧: 需求列表 (agent自主识别迭代需求)
+ * 右侧: 元Agent对话页面 — 跨项目通用管家, 默认轻量上下文
+ *        用户可通过管家按需查询任何项目的设计细节和技术架构
+ *        分诊新需求/迭代需求的职责由 PM 承担 (需要项目上下文)
  *
  * @module WishPage
  */
@@ -36,7 +38,7 @@ interface ChatMessage {
 
 function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: '0', role: 'assistant', content: '你好！我是你的项目管家。你可以告诉我你的需求想法，我会帮你转发给团队。也可以问我其他项目的情况，或者调整工作流程。有什么需要帮忙的？', timestamp: Date.now() },
+    { id: '0', role: 'assistant', content: '你好！我是元Agent管家，你的一站式项目助手。你可以：\n• 提交需求想法，我帮你转发给团队\n• 查询任何项目的设计文档、技术架构、进度状态\n• 调整工作流程、查看团队配置\n有什么需要？', timestamp: Date.now() },
   ]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -57,7 +59,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       const reply: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',
-        content: `收到你的消息："${userMsg.content.slice(0, 50)}${userMsg.content.length > 50 ? '...' : ''}"。我会分析这是否包含新需求或迭代需求，并自动转发给合适的 Agent。请稍候...`,
+        content: `收到："${userMsg.content.slice(0, 50)}${userMsg.content.length > 50 ? '...' : ''}"。我来处理——如果是需求类请求，我会转交 PM 进行分诊；如果是查询项目设计/技术细节，我会为你调取相关文档。请稍候...`,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, reply]);

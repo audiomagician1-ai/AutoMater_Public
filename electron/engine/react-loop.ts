@@ -16,7 +16,7 @@ import { updateAgentStats, checkBudget, getTeamPrompt } from './agent-manager';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
-import { DEVELOPER_REACT_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
+import { DEVELOPER_REACT_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
 import { parseStructuredOutput, PLAN_STEPS_SCHEMA } from './output-parser';
 import {
@@ -211,46 +211,15 @@ export async function reactDeveloperLoop(
   let completed = false;
   const filesWritten = new Set<string>();
 
-  // ── Step 1: 规划 ──
-  sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `📋 ${feature.id} 制定开发计划...` });
+  // ── v5.0: planning 内嵌到 ReAct think 步骤, 不再独立调用 ──
+  // 生成轻量默认计划 (纯本地, 零 token), ReAct 的第一个 think 会自行细化
+  const plan: FeaturePlan = parsePlanFromLLM('', feature.id, feature.title || feature.description);
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: workerId,
+    content: `📋 ${feature.id} 使用内嵌规划 (ReAct think 步骤自行细化)`,
+  });
 
-  let plan: FeaturePlan | null = null;
-  try {
-    const planCtx = workspacePath
-      ? collectLightContext(workspacePath, projectId, feature, undefined, 2000, workerId)
-      : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
-
-    const planModel = resolveModel(selectModelTier({ type: 'planning' }).tier, settings);
-    const planResult = await callLLM(settings, planModel, [
-      { role: 'system', content: PLANNER_FEATURE_PROMPT },
-      {
-        role: 'user',
-        content: `Feature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\nQA 反馈（需修复）:\n${qaFeedback}` : ''}\n\n${planCtx.contextText}`,
-      },
-    ], signal, 4096);
-
-    const planCost = calcCost(planModel, planResult.inputTokens, planResult.outputTokens);
-    totalCost += planCost;
-    totalIn += planResult.inputTokens;
-    totalOut += planResult.outputTokens;
-    updateAgentStats(workerId, projectId, planResult.inputTokens, planResult.outputTokens, planCost);
-
-    plan = parsePlanFromLLM(planResult.content, feature.id, feature.title || feature.description);
-    const planSummary = plan.steps.map((s, i) => `  ${i + 1}. ${s.description}`).join('\n');
-    sendToUI(win, 'agent:log', {
-      projectId, agentId: workerId,
-      content: `📋 ${feature.id} 计划 (${plan.steps.length} 步):\n${planSummary}`,
-    });
-    addLog(projectId, workerId, 'plan', `[${feature.id}] Plan:\n${planSummary}`);
-  } catch (err: any) {
-    sendToUI(win, 'agent:log', {
-      projectId, agentId: workerId,
-      content: `⚠️ ${feature.id} 规划失败，使用默认计划: ${err.message}`,
-    });
-    plan = parsePlanFromLLM('', feature.id, feature.title || feature.description);
-  }
-
-  // ── Step 2: ReAct 循环 ──
+  // ── Code Graph ──
   if (workspacePath) {
     try {
       const graph = buildCodeGraph(workspacePath, 300);

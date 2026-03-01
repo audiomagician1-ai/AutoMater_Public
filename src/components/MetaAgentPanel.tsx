@@ -25,7 +25,7 @@ export function MetaAgentPanel() {
     {
       id: '0',
       role: 'assistant',
-      content: '你好！我是元Agent管家。有什么可以帮你的？',
+      content: '你好！我是元Agent管家，你的一站式项目助手。提交需求、查询设计文档和技术架构、调整工作流——随时问我。',
       timestamp: Date.now(),
     },
   ]);

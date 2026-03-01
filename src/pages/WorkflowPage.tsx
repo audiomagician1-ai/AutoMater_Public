@@ -24,13 +24,13 @@ interface PipelineStage {
 }
 
 const PIPELINE: PipelineStage[] = [
-  { id: 'intake',    agent: '元Agent',   icon: '🤖', label: '需求接收',   description: '用户通过对话或表单提交需求，元Agent 判断是新需求还是变更迭代', color: 'bg-forge-500', outputs: ['需求文本', '分类标签'] },
-  { id: 'pm',        agent: 'PM Agent',  icon: '🧠', label: 'PM 分析',    description: '产品经理分析需求可行性、拆分功能模块、生成子需求文档', color: 'bg-violet-500', outputs: ['PM 分析报告', '功能模块列表', '子需求文档'] },
-  { id: 'architect', agent: 'Architect', icon: '🏗️', label: '架构设计',   description: '架构师生成技术设计文档，确定系统模块、数据模型、API 定义', color: 'bg-blue-500', outputs: ['设计文档', '架构图', '技术选型'] },
-  { id: 'plan',      agent: 'Planner',   icon: '📋', label: '任务拆分',   description: '将设计拆分为具体开发任务，生成测试规格文档，确定依赖关系和优先级', color: 'bg-cyan-500', outputs: ['Feature 列表', '测试规格', '依赖图'] },
-  { id: 'dev',       agent: 'Developer', icon: '💻', label: '开发实现',   description: '开发者通过 ReAct 多轮工具调用，编写代码、创建文件、运行测试', color: 'bg-amber-500', outputs: ['源代码文件', '单元测试', 'Git 提交'] },
-  { id: 'qa',        agent: 'QA Agent',  icon: '🧪', label: 'QA 审查',    description: 'QA 工程师审查代码质量、运行测试、检查是否满足测试规格', color: 'bg-emerald-500', outputs: ['审查报告', '测试结果', '通过/失败裁决'] },
-  { id: 'accept',    agent: '用户',      icon: '🎯', label: '用户验收',   description: '所有 Feature 通过 QA 后，用户进行最终验收，可接受或要求修改', color: 'bg-orange-500', outputs: ['验收决定', '交付产出'] },
+  { id: 'intake',    agent: '元Agent',   icon: '🤖', label: '需求接收',     description: '用户一站式交互入口：提交需求→路由给团队；查询设计/架构/进度→按需调取项目文档。默认轻量上下文，按需懒加载项目详情', color: 'bg-forge-500', outputs: ['需求文本', '路由决策', '查询结果'] },
+  { id: 'pm',        agent: 'PM Agent',  icon: '🧠', label: 'PM 分析',      description: '产品经理加载项目上下文，判断新需求/变更迭代，拆分功能模块、定义验收标准', color: 'bg-violet-500', outputs: ['Feature 清单', '分诊结果', '验收标准'] },
+  { id: 'architect', agent: 'Architect', icon: '🏗️', label: '架构+设计',   description: '架构师同时生成产品设计文档和技术架构文档，一次调用完成双重职责', color: 'bg-blue-500', outputs: ['设计文档', 'ARCHITECTURE.md', '技术选型'] },
+  { id: 'docs',      agent: 'PM + QA',   icon: '📋', label: '批量文档',     description: '批量生成子需求文档和测试规格（每 5 个 Feature 一组，减少 60%+ 调用次数）', color: 'bg-cyan-500', outputs: ['子需求文档', '测试规格', '一致性检查'] },
+  { id: 'dev',       agent: 'Developer', icon: '💻', label: '开发实现',     description: '开发者通过 ReAct 多轮工具调用（内嵌规划，不再独立 planning），编写代码、运行测试', color: 'bg-amber-500', outputs: ['源代码文件', '单元测试', 'Git 提交'] },
+  { id: 'qa',        agent: 'QA + PM',   icon: '🧪', label: 'QA + PM 验收', description: 'QA 审查代码质量 → PM 批量验收（每 4 个 Feature 一组），双重质量闭环', color: 'bg-emerald-500', outputs: ['审查报告', '验收裁决', '通过/驳回'] },
+  { id: 'accept',    agent: '用户',      icon: '🎯', label: '用户验收',     description: '所有 Feature 通过 QA + PM 审查后，用户进行最终验收', color: 'bg-orange-500', outputs: ['验收决定', '交付产出'] },
 ];
 
 type SimState = 'idle' | 'running' | 'done';

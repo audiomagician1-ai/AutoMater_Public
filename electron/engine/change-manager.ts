@@ -453,6 +453,12 @@ const WISH_TRIAGE_SCHEMA = {
   },
 };
 
+/**
+ * 需求分诊 — 由 PM 角色执行 (需要项目上下文: 已有 Feature + 设计文档)
+ *
+ * 注意: 元 Agent 是通用管家, 不加载项目设计内容, 只负责需求接收/路由。
+ * 分诊涉及与已有 Feature 的比对和设计文档的理解, 因此必须由 PM 执行。
+ */
 export async function detectImplicitChanges(
   projectId: string,
   newWish: string,

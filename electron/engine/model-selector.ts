@@ -8,8 +8,10 @@
  * - PM / Architect / QA 审查 → 强模型 (需要全局理解 + 高质量输出)
  * - Developer (复杂 feature, 多文件) → 强模型
  * - Developer (简单 feature, 单文件) → 弱模型
- * - Planner / Summarizer / Sub-agent → 弱模型
+ * - Summarizer / Sub-agent → 弱模型
  * - 格式化 / 简单操作 → 迷你模型 (如果有)
+ *
+ * v5.0: planning 不再独立调用, 但保留 'planning' task type 供向后兼容
  *
  * v1.3.0: 初始实现
  */
