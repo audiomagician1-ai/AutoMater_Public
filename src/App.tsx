@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from './stores/app-store';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
+import { ProjectsPage } from './pages/ProjectsPage';
+import { OverviewPage } from './pages/OverviewPage';
 import { WishPage } from './pages/WishPage';
 import { BoardPage } from './pages/BoardPage';
 import { TeamPage } from './pages/TeamPage';
@@ -10,7 +12,11 @@ import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
-  const { currentPage, addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured, currentProjectId, startStream, appendStream, endStream } = useAppStore();
+  const {
+    insideProject, globalPage, projectPage,
+    addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured,
+    currentProjectId, startStream, appendStream, endStream,
+  } = useAppStore();
   const [stats, setStats] = useState<any>(null);
 
   // 订阅主进程事件
@@ -42,15 +48,13 @@ export function App() {
       addLog({ projectId: data.projectId, agentId: 'system', content: `❌ 错误: ${data.error}` });
     }));
 
-    // ── 流式事件 ──
+    // 流式事件
     unsubs.push(window.agentforge.on('agent:stream-start', (data: any) => {
       startStream(data.agentId, data.label || '');
     }));
-
     unsubs.push(window.agentforge.on('agent:stream', (data: any) => {
       appendStream(data.agentId, data.chunk);
     }));
-
     unsubs.push(window.agentforge.on('agent:stream-end', (data: any) => {
       endStream(data.agentId);
     }));
@@ -74,14 +78,24 @@ export function App() {
     return () => clearInterval(t);
   }, [currentProjectId]);
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'wish': return <WishPage />;
-      case 'board': return <BoardPage />;
-      case 'team': return <TeamPage />;
-      case 'logs': return <LogsPage />;
-      case 'output': return <OutputPage />;
-      case 'settings': return <SettingsPage />;
+  const renderContent = () => {
+    if (!insideProject) {
+      // 外层: 项目列表 / 设置
+      switch (globalPage) {
+        case 'settings': return <SettingsPage />;
+        case 'projects':
+        default: return <ProjectsPage />;
+      }
+    }
+    // 内层: 项目子页
+    switch (projectPage) {
+      case 'overview': return <OverviewPage />;
+      case 'wish':     return <WishPage />;
+      case 'board':    return <BoardPage />;
+      case 'team':     return <TeamPage />;
+      case 'output':   return <OutputPage />;
+      case 'logs':     return <LogsPage />;
+      default:         return <OverviewPage />;
     }
   };
 
@@ -90,10 +104,10 @@ export function App() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 overflow-hidden">
-          {renderPage()}
+          {renderContent()}
         </main>
       </div>
-      <StatusBar stats={stats} />
+      {insideProject && <StatusBar stats={stats} />}
     </div>
   );
 }

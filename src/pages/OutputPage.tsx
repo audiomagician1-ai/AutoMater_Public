@@ -174,7 +174,7 @@ export function OutputPage() {
   if (!currentProjectId) {
     return (
       <div className="h-full flex items-center justify-center text-slate-500">
-        <p>请先在许愿台创建一个项目</p>
+        <p>加载中...</p>
       </div>
     );
   }

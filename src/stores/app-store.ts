@@ -1,10 +1,14 @@
 /**
  * 全局应用状态 (Zustand)
+ * v0.7: 双层导航 — 外层 (项目列表/设置) → 内层 (项目子页)
  */
 
 import { create } from 'zustand';
 
-export type PageId = 'wish' | 'board' | 'team' | 'logs' | 'output' | 'settings';
+/** 外层页面 (无需选中项目) */
+export type GlobalPageId = 'projects' | 'settings';
+/** 项目内子页面 (需要 currentProjectId) */
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'output' | 'logs';
 
 interface LogEntry {
   id: number;
@@ -12,11 +16,9 @@ interface LogEntry {
   agentId: string;
   content: string;
   timestamp: number;
-  /** 流式日志: 标记此条是否正在接收流式内容 */
   streaming?: boolean;
 }
 
-/** 活跃的流式会话 */
 interface StreamSession {
   agentId: string;
   label: string;
@@ -25,9 +27,21 @@ interface StreamSession {
 }
 
 interface AppState {
-  // 导航
-  currentPage: PageId;
-  setPage: (page: PageId) => void;
+  // ── 双层导航 ──
+  /** 是否处于项目内部视图 */
+  insideProject: boolean;
+  /** 外层当前页 */
+  globalPage: GlobalPageId;
+  /** 项目内当前子页 */
+  projectPage: ProjectPageId;
+  /** 进入项目 */
+  enterProject: (projectId: string, page?: ProjectPageId) => void;
+  /** 返回项目列表 */
+  exitProject: () => void;
+  /** 外层切页 */
+  setGlobalPage: (page: GlobalPageId) => void;
+  /** 项目内切页 */
+  setProjectPage: (page: ProjectPageId) => void;
 
   // 当前项目
   currentProjectId: string | null;
@@ -60,8 +74,22 @@ interface AppState {
 let logIdCounter = 0;
 
 export const useAppStore = create<AppState>((set) => ({
-  currentPage: 'wish',
-  setPage: (page) => set({ currentPage: page }),
+  // ── 双层导航 ──
+  insideProject: false,
+  globalPage: 'projects',
+  projectPage: 'overview',
+
+  enterProject: (projectId, page = 'overview') => set({
+    insideProject: true,
+    currentProjectId: projectId,
+    projectPage: page,
+  }),
+  exitProject: () => set({
+    insideProject: false,
+    globalPage: 'projects',
+  }),
+  setGlobalPage: (page) => set({ globalPage: page, insideProject: false }),
+  setProjectPage: (page) => set({ projectPage: page }),
 
   currentProjectId: null,
   setCurrentProject: (id) => set({ currentProjectId: id }),

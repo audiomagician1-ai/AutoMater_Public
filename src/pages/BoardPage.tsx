@@ -33,7 +33,7 @@ export function BoardPage() {
   }));
 
   if (!currentProjectId) {
-    return <div className="h-full flex items-center justify-center text-slate-500"><p>请先在许愿台创建一个项目</p></div>;
+    return <div className="h-full flex items-center justify-center text-slate-500"><p>加载中...</p></div>;
   }
 
   const getByStatus = (s: string) => enriched.filter(f => f.status === s);

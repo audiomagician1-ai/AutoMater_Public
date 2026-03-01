@@ -37,7 +37,7 @@ export function TeamPage() {
   if (!currentProjectId) {
     return (
       <div className="h-full flex items-center justify-center text-slate-500">
-        <p>请先在许愿台创建一个项目</p>
+        <p>加载中...</p>
       </div>
     );
   }
@@ -95,7 +95,7 @@ export function TeamPage() {
         })}
         {agents.length === 0 && (
           <div className="col-span-full text-center py-12 text-slate-600">
-            尚无 Agent，请先在许愿台发起项目
+            尚无 Agent，开始许愿后 AI 团队将自动上线
           </div>
         )}
       </div>
