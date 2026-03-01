@@ -27,6 +27,77 @@ const runningOrchestrators = new Map<string, AbortController>();
 // v1.1: 上下文快照缓存 (projectId → agentId → snapshot)
 const contextSnapshotCache = new Map<string, Map<string, ContextSnapshot>>();
 
+// v1.1: Agent ReAct 状态缓存 (projectId → agentId → ReactStateHistory)
+export interface MessageTokenBreakdown {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  tokens: number;
+  count: number;
+}
+
+export interface ReactIterationState {
+  iteration: number;
+  timestamp: number;
+  messageCount: number;
+  totalContextTokens: number;
+  breakdown: MessageTokenBreakdown[];
+  inputTokensThisCall: number;
+  outputTokensThisCall: number;
+  costThisCall: number;
+  cumulativeCost: number;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  filesWritten: string[];
+  toolCallsThisIteration: string[];
+  completed: boolean;
+}
+
+export interface AgentReactState {
+  agentId: string;
+  featureId: string;
+  iterations: ReactIterationState[];
+  maxContextWindow: number; // model's max tokens (estimated)
+}
+
+const agentReactStateCache = new Map<string, Map<string, AgentReactState>>();
+
+export function getAgentReactStates(projectId: string): Map<string, AgentReactState> {
+  return agentReactStateCache.get(projectId) ?? new Map();
+}
+
+function cacheAgentReactState(projectId: string, state: AgentReactState) {
+  if (!agentReactStateCache.has(projectId)) {
+    agentReactStateCache.set(projectId, new Map());
+  }
+  agentReactStateCache.get(projectId)!.set(state.agentId, state);
+}
+
+/** 粗估消息 token (和 context-collector 保持一致) */
+function estimateMsgTokens(content: any): number {
+  if (!content) return 0;
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  return Math.ceil(text.length / 1.5);
+}
+
+/** 计算消息链条 token 分布 */
+function computeMessageBreakdown(messages: Array<{ role: string; content: any }>): { breakdown: MessageTokenBreakdown[]; total: number } {
+  const map: Record<string, { tokens: number; count: number }> = {};
+  let total = 0;
+  for (const m of messages) {
+    const role = m.role as string;
+    const t = estimateMsgTokens(m.content);
+    if (!map[role]) map[role] = { tokens: 0, count: 0 };
+    map[role].tokens += t;
+    map[role].count += 1;
+    total += t;
+  }
+  const breakdown: MessageTokenBreakdown[] = Object.entries(map).map(([role, v]) => ({
+    role: role as any,
+    tokens: v.tokens,
+    count: v.count,
+  }));
+  return { breakdown, total };
+}
+
 export function getContextSnapshots(projectId: string): Map<string, ContextSnapshot> {
   return contextSnapshotCache.get(projectId) ?? new Map();
 }
@@ -1092,6 +1163,14 @@ async function reactDeveloperLoop(
     content: `🔄 ${feature.id} 开始 ReAct 工具循环 (最多 ${MAX_ITERATIONS} 轮)`,
   });
 
+  // v1.1: 初始化 Agent ReAct 状态跟踪
+  const reactState: AgentReactState = {
+    agentId: workerId,
+    featureId: feature.id,
+    iterations: [],
+    maxContextWindow: 128000, // 默认估值，大多数现代模型
+  };
+
   for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
     // 预算检查
     const budget = checkBudget(projectId, settings);
@@ -1221,6 +1300,34 @@ async function reactDeveloperLoop(
           content: toolResult.output.slice(0, 4000), // 限制输出长度
         });
       }
+
+      // ═══ v1.1: 推送 Agent ReAct 迭代状态 ═══
+      const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+      const { breakdown, total: contextTokens } = computeMessageBreakdown(messages);
+      const iterState: ReactIterationState = {
+        iteration: iter,
+        timestamp: Date.now(),
+        messageCount: messages.length,
+        totalContextTokens: contextTokens,
+        breakdown,
+        inputTokensThisCall: result.inputTokens,
+        outputTokensThisCall: result.outputTokens,
+        costThisCall: cost,
+        cumulativeCost: totalCost,
+        cumulativeInputTokens: totalIn,
+        cumulativeOutputTokens: totalOut,
+        filesWritten: [...filesWritten],
+        toolCallsThisIteration: toolCallsThisIter,
+        completed,
+      };
+      reactState.iterations.push(iterState);
+      cacheAgentReactState(projectId, reactState);
+      sendToUI(win, 'agent:react-state', {
+        projectId,
+        agentId: workerId,
+        state: reactState,
+        latestIteration: iterState,
+      });
 
       // 如果 task_complete 已触发，结束循环
       if (completed) {

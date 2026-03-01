@@ -36,6 +36,39 @@ interface ContextSnapshot {
   filesIncluded: number;
 }
 
+/** 消息 token 分布 (v1.1) */
+interface MessageTokenBreakdown {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  tokens: number;
+  count: number;
+}
+
+/** 单次 ReAct 迭代状态 (v1.1) */
+interface ReactIterationState {
+  iteration: number;
+  timestamp: number;
+  messageCount: number;
+  totalContextTokens: number;
+  breakdown: MessageTokenBreakdown[];
+  inputTokensThisCall: number;
+  outputTokensThisCall: number;
+  costThisCall: number;
+  cumulativeCost: number;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  filesWritten: string[];
+  toolCallsThisIteration: string[];
+  completed: boolean;
+}
+
+/** Agent ReAct 完整状态 (v1.1) */
+interface AgentReactState {
+  agentId: string;
+  featureId: string;
+  iterations: ReactIterationState[];
+  maxContextWindow: number;
+}
+
 interface AgentForgeAPI {
   settings: {
     get(): Promise<AppSettings>;
@@ -63,6 +96,7 @@ interface AgentForgeAPI {
     gitLog(projectId: string): Promise<string[]>;
     testGitHub(repo: string, token: string): Promise<{ success: boolean; message: string }>;
     getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
+    getReactStates(projectId: string): Promise<Record<string, AgentReactState>>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;

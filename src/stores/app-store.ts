@@ -75,6 +75,11 @@ interface AppState {
   contextSnapshots: Map<string, ContextSnapshot>;
   updateContextSnapshot: (snapshot: ContextSnapshot) => void;
   clearContextSnapshots: () => void;
+
+  // v1.1: Agent ReAct 实时状态
+  agentReactStates: Map<string, AgentReactState>;
+  updateAgentReactState: (state: AgentReactState) => void;
+  clearAgentReactStates: () => void;
 }
 
 let logIdCounter = 0;
@@ -151,4 +156,13 @@ export const useAppStore = create<AppState>((set) => ({
     return { contextSnapshots: next };
   }),
   clearContextSnapshots: () => set({ contextSnapshots: new Map() }),
+
+  // v1.1: Agent ReAct 实时状态
+  agentReactStates: new Map(),
+  updateAgentReactState: (state) => set((s) => {
+    const next = new Map(s.agentReactStates);
+    next.set(state.agentId, state);
+    return { agentReactStates: next };
+  }),
+  clearAgentReactStates: () => set({ agentReactStates: new Map() }),
 }));

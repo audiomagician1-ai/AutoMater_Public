@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('agentforge', {
     gitLog: (projectId: string) => ipcRenderer.invoke('project:git-log', projectId),
     testGitHub: (repo: string, token: string) => ipcRenderer.invoke('project:test-github', repo, token),
     getContextSnapshots: (projectId: string) => ipcRenderer.invoke('project:get-context-snapshots', projectId),
+    getReactStates: (projectId: string) => ipcRenderer.invoke('project:get-react-states', projectId),
   },
 
   // ── 工作区文件系统 ──

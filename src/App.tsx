@@ -19,6 +19,7 @@ export function App() {
     currentProjectId, startStream, appendStream, endStream,
     updateContextSnapshot,
   } = useAppStore();
+  const updateAgentReactState = useAppStore(s => s.updateAgentReactState);
   const [stats, setStats] = useState<any>(null);
 
   // 订阅主进程事件
@@ -64,6 +65,13 @@ export function App() {
     unsubs.push(window.agentforge.on('agent:context-snapshot', (data: any) => {
       if (data.snapshot) {
         updateContextSnapshot(data.snapshot);
+      }
+    }));
+
+    // Agent ReAct 状态事件 (v1.1)
+    unsubs.push(window.agentforge.on('agent:react-state', (data: any) => {
+      if (data.state) {
+        updateAgentReactState(data.state);
       }
     }));
 
