@@ -21,6 +21,7 @@ import { readDirectoryTree, readWorkspaceFile, type FileNode } from './file-writ
 import { getDb } from '../db';
 import { generateRepoMap } from './repo-map';
 import { readMemoryForRole } from './memory-system';
+import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -38,7 +39,7 @@ export interface ContextSection {
   /** 人类可读名称 */
   name: string;
   /** 来源类型标签 */
-  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'plan' | 'qa-feedback';
+  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'code-graph' | 'plan' | 'qa-feedback';
   /** 内容文本 */
   content: string;
   /** 字符数 */
@@ -286,21 +287,41 @@ export function collectDeveloperContext(
     }
   }
 
-  // ─── 4. 关键词相关文件（补充预算） ───
+  // ─── 4. Code Graph 相关文件 (v1.3: 替代关键词匹配) ───
   if (totalChars < charBudget * 0.7 && tree.length > 0) {
-    const allFiles = flattenTree(tree).filter(p => !p.endsWith('/'));
-    const keywords = extractKeywords(feature.title + ' ' + feature.description);
-
     const depSet = new Set(depFiles);
-    const relatedFiles = allFiles
-      .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md')
-      .filter(f => keywords.some(kw => f.toLowerCase().includes(kw)))
-      .slice(0, 5);
+    let graphRelatedFiles: string[] = [];
 
-    if (relatedFiles.length > 0) {
-      const relContentParts: string[] = ['## 可能相关的已有文件'];
+    try {
+      // 构建 Code Graph 并用 multi-hop 遍历查找相关文件
+      const graph = buildCodeGraph(workspacePath, 300);
+      const keywords = extractKeywords(feature.title + ' ' + feature.description);
+      const seeds = inferSeedFiles(graph, depFiles, keywords, 5);
+
+      if (seeds.length > 0) {
+        const traversed = traverseGraph(graph, seeds, 2, 10);
+        graphRelatedFiles = traversed
+          .map(t => t.file)
+          .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
+      }
+    } catch {
+      // Code Graph 失败时 fallback 到关键词匹配
+    }
+
+    // Fallback: 如果 Code Graph 没找到结果，用旧的关键词匹配
+    if (graphRelatedFiles.length === 0) {
+      const allFiles = flattenTree(tree).filter(p => !p.endsWith('/'));
+      const keywords = extractKeywords(feature.title + ' ' + feature.description);
+      graphRelatedFiles = allFiles
+        .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md')
+        .filter(f => keywords.some(kw => f.toLowerCase().includes(kw)))
+        .slice(0, 5);
+    }
+
+    if (graphRelatedFiles.length > 0) {
+      const relContentParts: string[] = ['## 代码依赖图相关文件'];
       const relFileList: string[] = [];
-      for (const f of relatedFiles) {
+      for (const f of graphRelatedFiles.slice(0, 8)) {
         if (totalChars >= charBudget * 0.95) break;
         const content = readWorkspaceFile(workspacePath, f);
         if (content) {
@@ -315,7 +336,7 @@ export function collectDeveloperContext(
       if (relContentParts.length > 1) {
         const relText = relContentParts.join('\n');
         sectionList.push({
-          id: 'keyword-files', name: '关键词匹配文件', source: 'keyword-match',
+          id: 'code-graph-files', name: 'Code Graph 关联文件', source: 'dependency',
           content: relText, chars: relText.length, tokens: estimateTokens(relText),
           truncated: false, files: relFileList,
         });

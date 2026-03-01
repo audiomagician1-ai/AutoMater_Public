@@ -228,6 +228,18 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['entry'],
     },
   },
+  // ── v1.3: Sub-agent 工具 ──
+  {
+    name: 'spawn_researcher',
+    description: '启动一个只读研究子 Agent。子 Agent 可以读取文件、搜索代码、查看目录，但不能修改任何内容。用于在不打断当前工作的情况下调研问题。最多 8 轮工具调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '要研究的问题，包括足够的背景信息' },
+      },
+      required: ['question'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -481,6 +493,11 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
 
       case 'task_complete': {
         return { success: true, output: `任务完成: ${call.arguments.summary}`, action: 'write' };
+      }
+
+      // spawn_researcher 是异步工具，同步入口返回提示
+      case 'spawn_researcher': {
+        return { success: true, output: '[async] 正在启动研究子 Agent...', action: 'read' };
       }
 
       default:

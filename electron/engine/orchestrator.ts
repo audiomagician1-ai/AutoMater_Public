@@ -18,6 +18,9 @@ import { initGitRepo, commitWorkspace } from './workspace-git';
 import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
 import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProjectMemory, appendRoleMemory, recordLessonLearned, buildLessonExtractionPrompt, appendSharedDecision, readRecentDecisions, formatDecisionsForContext } from './memory-system';
+import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
+import { runResearcher } from './sub-agent';
+import { buildCodeGraph, graphSummary } from './code-graph';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -1027,11 +1030,12 @@ async function workerLoop(
                   feature.id, qaFeedback, reactResult.filesWritten,
                   `QA pass on attempt ${qaAttempt}, score ${qaResult.score}`
                 );
-                const lessonResult = await callLLM(settings, settings.workerModel, [
+                const lessonModel = resolveModel(selectModelTier({ type: 'lesson_extract' }).tier, settings);
+                const lessonResult = await callLLM(settings, lessonModel, [
                   { role: 'system', content: '你是经验提取助手，只输出经验条目。' },
                   { role: 'user', content: lessonPrompt },
                 ], signal, 1024);
-                const lessonCost = calcCost(settings.workerModel, lessonResult.inputTokens, lessonResult.outputTokens);
+                const lessonCost = calcCost(lessonModel, lessonResult.inputTokens, lessonResult.outputTokens);
                 updateAgentStats(qaId, projectId, lessonResult.inputTokens, lessonResult.outputTokens, lessonCost);
 
                 // 写入 project memory
@@ -1121,7 +1125,25 @@ async function reactDeveloperLoop(
 ): Promise<ReactResult> {
   const db = getDb();
   const MAX_ITERATIONS = 25;
-  const model = settings.workerModel;
+
+  // ── v1.3: Dynamic Model Selection ──
+  const featureComplexity = estimateFeatureComplexity(feature);
+  let depCount = 0;
+  try { depCount = JSON.parse(feature.depends_on || '[]').length; } catch {}
+  const taskComplexity: TaskComplexity = {
+    type: 'development',
+    featureComplexity,
+    dependencyCount: depCount,
+    hasQAFeedback: !!qaFeedback,
+    qaAttempt: qaFeedback ? 2 : 1, // 如有 QA 反馈则至少第 2 次
+  };
+  const modelSelection = selectModelTier(taskComplexity);
+  const model = resolveModel(modelSelection.tier, settings);
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: workerId,
+    content: `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
+  });
+
   const tools = getToolsForLLM(gitConfig.mode);
 
   const toolCtx: ToolContext = {
@@ -1145,7 +1167,8 @@ async function reactDeveloperLoop(
       ? collectLightContext(workspacePath, projectId, feature, undefined, 2000, workerId)
       : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
 
-    const planResult = await callLLM(settings, model, [
+    const planModel = resolveModel(selectModelTier({ type: 'planning' }).tier, settings);
+    const planResult = await callLLM(settings, planModel, [
       { role: 'system', content: PLANNER_FEATURE_PROMPT },
       {
         role: 'user',
@@ -1153,7 +1176,7 @@ async function reactDeveloperLoop(
       },
     ], signal, 4096);
 
-    const planCost = calcCost(model, planResult.inputTokens, planResult.outputTokens);
+    const planCost = calcCost(planModel, planResult.inputTokens, planResult.outputTokens);
     totalCost += planCost;
     totalIn += planResult.inputTokens;
     totalOut += planResult.outputTokens;
@@ -1175,6 +1198,18 @@ async function reactDeveloperLoop(
   }
 
   // ── Step 2: ReAct 循环 ──
+  // v1.3: Code Graph 日志
+  if (workspacePath) {
+    try {
+      const graph = buildCodeGraph(workspacePath, 300);
+      const summary = graphSummary(graph);
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `📊 ${feature.id} ${summary}`,
+      });
+    } catch { /* non-fatal */ }
+  }
+
   // 构建初始消息列表
   const initialContext = workspacePath
     ? collectDeveloperContext(workspacePath, projectId, feature, 5000, workerId)
@@ -1311,7 +1346,46 @@ async function reactDeveloperLoop(
         // 执行工具
         let toolResult: ToolResult;
         const isAsync = tc.function.name.startsWith('github_');
-        if (isAsync) {
+
+        // ── v1.3: spawn_researcher 子 Agent ──
+        if (tc.function.name === 'spawn_researcher') {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `🔬 ${feature.id} 启动研究子 Agent: ${(toolArgs.question || '').slice(0, 80)}...`,
+          });
+
+          try {
+            const researchModel = resolveModel('worker', settings);
+            const researchResult = await runResearcher(
+              toolArgs.question || '',
+              toolCtx,
+              async (msgs, tools) => {
+                return await callLLMWithTools(settings, researchModel, msgs, tools, signal, 8192);
+              },
+              signal,
+            );
+
+            const resCost = calcCost(researchModel, researchResult.inputTokens, researchResult.outputTokens);
+            totalCost += resCost;
+            totalIn += researchResult.inputTokens;
+            totalOut += researchResult.outputTokens;
+            updateAgentStats(workerId, projectId, researchResult.inputTokens, researchResult.outputTokens, resCost);
+
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `🔬 ${feature.id} 研究子 Agent 完成 (读取 ${researchResult.filesRead.length} 文件, $${resCost.toFixed(4)})`,
+            });
+
+            toolResult = {
+              success: researchResult.success,
+              output: `研究结论:
+${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(', ') || '无'}`,
+              action: 'read',
+            };
+          } catch (resErr: any) {
+            toolResult = { success: false, output: `研究子 Agent 失败: ${resErr.message}`, action: 'read' };
+          }
+        } else if (isAsync) {
           toolResult = await executeToolAsync(toolCall, toolCtx);
         } else {
           toolResult = executeTool(toolCall, toolCtx);
@@ -1456,7 +1530,8 @@ async function compressMessageHistorySmart(
   }).join('\n');
 
   try {
-    const summaryResult = await callLLM(settings, settings.workerModel, [
+    const summaryModel = resolveModel(selectModelTier({ type: 'summarize' }).tier, settings);
+    const summaryResult = await callLLM(settings, summaryModel, [
       { role: 'system', content: '你是对话摘要助手。将以下 Agent 对话历史压缩为一段简洁摘要（200-400字），保留关键决策、已创建的文件、遇到的问题和解决方案。只输出摘要，不要其他内容。' },
       { role: 'user', content: `请摘要以下 ${compressRange.length} 条对话:\n\n${compressText.slice(0, 4000)}` },
     ], signal, 1024, 0); // 不重试

@@ -14,7 +14,7 @@ interface FileNode {
 interface ContextSection {
   id: string;
   name: string;
-  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'plan' | 'qa-feedback';
+  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'code-graph' | 'plan' | 'qa-feedback';
   content: string;
   chars: number;
   tokens: number;
