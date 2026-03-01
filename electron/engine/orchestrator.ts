@@ -11,11 +11,11 @@
 
 import { BrowserWindow, Notification } from 'electron';
 import { getDb } from '../db';
-import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_REACT_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
+import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_REACT_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT, QA_REACT_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks, readWorkspaceFile, type WrittenFile } from './file-writer';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { initGitRepo, commitWorkspace } from './workspace-git';
-import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
+import { getToolsForLLM, getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
 import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProjectMemory, appendRoleMemory, recordLessonLearned, buildLessonExtractionPrompt, appendSharedDecision, readRecentDecisions, formatDecisionsForContext } from './memory-system';
 import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
@@ -1200,7 +1200,7 @@ async function reactDeveloperLoop(
     content: `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
   });
 
-  const tools = getToolsForLLM(gitConfig.mode);
+  const tools = getToolsForRole('developer', gitConfig.mode);
 
   const toolCtx: ToolContext = {
     workspacePath: workspacePath || '',
@@ -1378,6 +1378,11 @@ async function reactDeveloperLoop(
         }
 
         const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
+
+        // v2.1: 注入 agentId 到 todo 工具
+        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') {
+          toolArgs._agentId = workerId;
+        }
 
         // ── task_complete → 完成 ──
         if (tc.function.name === 'task_complete') {

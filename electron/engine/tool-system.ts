@@ -4,6 +4,8 @@
  * v0.8: 初始工具集 (file/search/shell/git/github)
  * v1.0: edit_file (str_replace), read_file 带行号+分页, search_files 带上下文,
  *       glob_files, 改进 ACI 设计 (参考 Claude Code / SWE-agent)
+ * v2.1: think, web_search, fetch_url, todo_write, todo_read, batch_edit, http_request
+ *       动态工具加载 (getToolsForRole)
  */
 
 import fs from 'fs';
@@ -13,6 +15,8 @@ import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, type GitProviderConfig } from './git-provider';
 import { execInSandbox, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
+import { webSearch, fetchUrl, httpRequest } from './web-tools';
+import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
 
 // ═══════════════════════════════════════
 // Tool Interface
@@ -33,7 +37,7 @@ export interface ToolResult {
   success: boolean;
   output: string;
   /** 操作类型 (用于 UI 展示) */
-  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github';
+  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan';
 }
 
 /** 工具执行上下文 */
@@ -238,6 +242,111 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         question: { type: 'string', description: '要研究的问题，包括足够的背景信息' },
       },
       required: ['question'],
+    },
+  },
+
+  // ═══ v2.1: 思考 + 互联网 + 规划 + 增强编辑 ═══
+
+  {
+    name: 'think',
+    description: '用于深度思考和推理的工具。写下你的分析、假设、计划，不会产生任何副作用。在面对复杂问题时，先用 think 理清思路再行动。',
+    parameters: {
+      type: 'object',
+      properties: {
+        thought: { type: 'string', description: '你的思考内容（推理过程、分析、计划等）' },
+      },
+      required: ['thought'],
+    },
+  },
+  {
+    name: 'web_search',
+    description: '搜索互联网。用于查找文档、API 用法、错误解决方案、最佳实践等。返回 Markdown 格式的搜索结果（标题、URL、摘要）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词（建议用英文，结果更全面）' },
+        max_results: { type: 'number', description: '最大结果数，默认 8', default: 8 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fetch_url',
+    description: '抓取网页内容并转为 Markdown 纯文本。用于阅读文档页面、API 参考、博客文章等。自动处理 HTML → Markdown 转换。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要抓取的 URL（必须 http:// 或 https:// 开头）' },
+        max_length: { type: 'number', description: '最大返回字符数，默认 15000', default: 15000 },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'http_request',
+    description: '发送任意 HTTP 请求。用于测试 API 接口、调用 webhook、验证服务端响应等。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '请求 URL' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'], description: 'HTTP 方法，默认 GET', default: 'GET' },
+        headers: { type: 'object', description: '请求头 (key-value 对象)' },
+        body: { type: 'string', description: '请求体（JSON 字符串或文本）' },
+        timeout: { type: 'number', description: '超时毫秒数，默认 30000，最大 60000', default: 30000 },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'todo_write',
+    description: '创建/更新你的任务清单（全量替换）。用于规划复杂任务的执行步骤、跟踪进度。每次调用传入完整列表。',
+    parameters: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: '任务唯一标识' },
+              content: { type: 'string', description: '任务描述' },
+              status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: '状态' },
+              priority: { type: 'string', enum: ['high', 'medium', 'low'], description: '优先级' },
+            },
+            required: ['id', 'content', 'status'],
+          },
+          description: '完整的任务列表',
+        },
+      },
+      required: ['todos'],
+    },
+  },
+  {
+    name: 'todo_read',
+    description: '读取你当前的任务清单。用于检查进度、决定下一步行动。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'batch_edit',
+    description: '对同一文件执行多次 str_replace 编辑（按顺序依次应用）。一次调用修改多处，减少轮次。每个编辑的 old_string 必须精确匹配。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '相对于工作区的文件路径' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              old_string: { type: 'string', description: '要替换的原始文本（空字符串=追加到文件末尾）' },
+              new_string: { type: 'string', description: '替换后的新文本' },
+            },
+            required: ['old_string', 'new_string'],
+          },
+          description: '编辑操作列表（按顺序应用）',
+        },
+      },
+      required: ['path', 'edits'],
     },
   },
 ];
@@ -500,6 +609,48 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: '[async] 正在启动研究子 Agent...', action: 'read' };
       }
 
+      // ═══ v2.1: 新工具 ═══
+
+      case 'think': {
+        const thought = call.arguments.thought || '';
+        return { success: true, output: think(thought), action: 'think' };
+      }
+
+      case 'web_search': {
+        // 异步工具，同步入口返回占位
+        return { success: true, output: '[async] 正在搜索...', action: 'web' };
+      }
+
+      case 'fetch_url': {
+        return { success: true, output: '[async] 正在抓取...', action: 'web' };
+      }
+
+      case 'http_request': {
+        return { success: true, output: '[async] 正在发送请求...', action: 'web' };
+      }
+
+      case 'todo_write': {
+        const todos: TodoItem[] = call.arguments.todos || [];
+        const agentId = (call.arguments as any)._agentId || 'default';
+        const result = todoWrite(agentId, todos);
+        return { success: true, output: result, action: 'plan' };
+      }
+
+      case 'todo_read': {
+        const agentId = (call.arguments as any)._agentId || 'default';
+        const result = todoRead(agentId);
+        return { success: true, output: result, action: 'plan' };
+      }
+
+      case 'batch_edit': {
+        const edits: EditOperation[] = call.arguments.edits || [];
+        if (edits.length === 0) {
+          return { success: false, output: '编辑列表为空', action: 'edit' };
+        }
+        const result = batchEdit(ctx.workspacePath, call.arguments.path, edits);
+        return { success: result.success, output: result.output, action: 'edit' };
+      }
+
       default:
         return { success: false, output: `未知工具: ${call.name}` };
     }
@@ -530,6 +681,40 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
     return { success: true, output: list, action: 'github' };
   }
 
+  // ═══ v2.1: 异步网络工具 ═══
+
+  if (call.name === 'web_search') {
+    const result = await webSearch(call.arguments.query, call.arguments.max_results ?? 8);
+    if (result.success) {
+      return { success: true, output: result.content.slice(0, 6000), action: 'web' };
+    }
+    return { success: false, output: `搜索失败: ${result.error}`, action: 'web' };
+  }
+
+  if (call.name === 'fetch_url') {
+    const result = await fetchUrl(call.arguments.url, call.arguments.max_length ?? 15000);
+    if (result.success) {
+      return { success: true, output: result.content, action: 'web' };
+    }
+    return { success: false, output: `抓取失败: ${result.error}`, action: 'web' };
+  }
+
+  if (call.name === 'http_request') {
+    const result = await httpRequest({
+      url: call.arguments.url,
+      method: call.arguments.method,
+      headers: call.arguments.headers,
+      body: call.arguments.body,
+      timeout: call.arguments.timeout,
+    });
+    const headersSummary = Object.entries(result.headers)
+      .slice(0, 10)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+    const output = `HTTP ${result.status}\n--- Headers ---\n${headersSummary}\n--- Body ---\n${result.body}`;
+    return { success: result.success, output: output.slice(0, 8000), action: 'web' };
+  }
+
   // 其余工具走同步
   return executeTool(call, ctx);
 }
@@ -541,6 +726,83 @@ export function getToolsForLLM(gitMode: string = 'local'): any[] {
       if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
       return true;
     })
+    .map(t => ({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    }));
+}
+
+// ═══════════════════════════════════════
+// v2.1: 动态工具加载 — 按角色筛选
+// ═══════════════════════════════════════
+
+export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 'researcher';
+
+/** 各角色可用工具白名单 */
+const ROLE_TOOLS: Record<AgentRole, string[]> = {
+  pm: [
+    'think', 'task_complete', 'todo_write', 'todo_read',
+    'web_search', 'fetch_url',
+  ],
+  architect: [
+    'think', 'task_complete', 'todo_write', 'todo_read',
+    'read_file', 'list_files', 'search_files', 'glob_files',
+    'write_file',
+    'web_search', 'fetch_url',
+    'memory_read', 'memory_append',
+  ],
+  developer: [
+    'think', 'task_complete', 'todo_write', 'todo_read',
+    'read_file', 'write_file', 'edit_file', 'batch_edit',
+    'list_files', 'glob_files', 'search_files',
+    'run_command', 'run_test', 'run_lint',
+    'git_commit', 'git_diff',
+    'web_search', 'fetch_url', 'http_request',
+    'spawn_researcher',
+    'memory_read', 'memory_append',
+  ],
+  qa: [
+    'think', 'task_complete', 'todo_write', 'todo_read',
+    'read_file', 'list_files', 'search_files', 'glob_files',
+    'run_command', 'run_test', 'run_lint',
+    'web_search', 'fetch_url', 'http_request',
+    'memory_read', 'memory_append',
+    // v2.2+: screenshot, mouse_click, etc.
+    // v2.3+: browser_launch, browser_navigate, etc.
+  ],
+  devops: [
+    'think', 'task_complete', 'todo_write', 'todo_read',
+    'run_command', 'http_request',
+    'git_commit', 'git_diff', 'git_log',
+    'github_create_issue', 'github_list_issues',
+    'memory_read', 'memory_append',
+  ],
+  researcher: [
+    'think',
+    'read_file', 'list_files', 'search_files', 'glob_files',
+    'web_search', 'fetch_url',
+  ],
+};
+
+/**
+ * 按角色返回工具列表 (OpenAI function-calling 格式)
+ * 只返回该角色允许使用的工具，减少 token 浪费
+ */
+export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): any[] {
+  const allowed = new Set(ROLE_TOOLS[role] || ROLE_TOOLS.developer);
+
+  // GitHub 工具额外过滤
+  if (gitMode !== 'github') {
+    allowed.delete('github_create_issue');
+    allowed.delete('github_list_issues');
+  }
+
+  return TOOL_DEFINITIONS
+    .filter(t => allowed.has(t.name))
     .map(t => ({
       type: 'function',
       function: {
