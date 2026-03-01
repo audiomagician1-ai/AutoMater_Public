@@ -323,7 +323,7 @@ function AgentDetailPanel({ agent, onClose }: { agent: any; onClose: () => void 
             {reactState && (
               <div>
                 <div className="text-slate-500">迭代</div>
-                <div className="text-lg font-bold text-slate-200">{reactState.iterations.length}</div>
+                <div className="text-lg font-bold text-slate-200">{(reactState.iterations ?? []).length}</div>
               </div>
             )}
           </div>
@@ -341,16 +341,16 @@ function AgentDetailPanel({ agent, onClose }: { agent: any; onClose: () => void 
           )}
 
           {/* ReAct Timeline Chart */}
-          {reactState && reactState.iterations.length > 0 && (
+          {reactState && (reactState.iterations ?? []).length > 0 && (
             <ContextTimeline
-              iterations={reactState.iterations}
-              maxWindow={reactState.maxContextWindow}
+              iterations={reactState.iterations!}
+              maxWindow={reactState.maxContextWindow ?? 128000}
             />
           )}
 
           {/* Message Chain Breakdown */}
-          {reactState && reactState.iterations.length > 0 && (
-            <MessageChainView iterations={reactState.iterations} />
+          {reactState && (reactState.iterations ?? []).length > 0 && (
+            <MessageChainView iterations={reactState.iterations!} />
           )}
 
           {/* Initial Context Snapshot */}
@@ -359,16 +359,16 @@ function AgentDetailPanel({ agent, onClose }: { agent: any; onClose: () => void 
           )}
 
           {/* Tool call history from react state */}
-          {reactState && reactState.iterations.length > 0 && (
+          {reactState && (reactState.iterations ?? []).length > 0 && (
             <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
               <h3 className="text-xs font-medium text-slate-400 mb-3">工具调用时间线</h3>
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {reactState.iterations.map(iter => (
+                {(reactState.iterations ?? []).map((iter: ReactIterationState) => (
                   iter.toolCallsThisIteration.length > 0 && (
                     <div key={iter.iteration} className="flex items-center gap-2 text-[11px]">
                       <span className="text-slate-500 w-6 text-right">#{iter.iteration}</span>
                       <div className="flex flex-wrap gap-1">
-                        {iter.toolCallsThisIteration.map((tool, j) => (
+                        {iter.toolCallsThisIteration.map((tool: string, j: number) => (
                           <span key={j} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">{tool}</span>
                         ))}
                       </div>
@@ -713,7 +713,8 @@ export function TeamPage() {
               const reactState = agentReactStates.get(agent.id);
               const snapshot = contextSnapshots.get(agent.id);
               const liveStatus = agentStatuses.get(agent.id);
-              const latestIter = reactState?.iterations[reactState.iterations.length - 1];
+              const iters = reactState?.iterations ?? [];
+              const latestIter = iters.length > 0 ? iters[iters.length - 1] : undefined;
               const hasContext = !!snapshot || !!reactState;
               const isWorking = agent.status === 'working' || liveStatus?.status === 'working';
 

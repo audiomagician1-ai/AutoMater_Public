@@ -254,9 +254,26 @@ if (runningOrchestrators.has(projectId)) {
 - ✅ #7 react-loop-debug (S-034): 两种 ReAct 循环 + 终止条件 + 逐轮分析 + 上下文窗口 + 高频故障模式
 - ✅ #8 multi-agent-coordination (S-035): Feature 原子锁 + decision-log 冲突检测 + 僵尸锁清理 + 并行效率指标
 
-### Sprint 4（v1.0 前）— P2 Skill
+### Sprint 4（v1.0 前）— P2 Skill ✅ 完成 2026-03-02
 
-- ⬜ #9 ~ #12 根据实际开发需要逐步补充
+- ✅ #9 typescript-monorepo-refactor (S-036): 渐进 4 步迁移策略 + pnpm workspace + 依赖规则 + 风险矩阵
+- ✅ #10 electron-build-pipeline (S-037): 打包全流程 + better-sqlite3 asar + 签名 + 体积优化 + auto-update
+- ✅ #11 agent-prompt-engineering (S-038): 6 层 prompt 结构 + JSON 稳定性多重防线 + Tool Nudge + A/B 测试
+- ✅ #12 doc-driven-development (S-039): 文档链路 + doc-manager API + changelog + 一致性检查 + 质量指标
+
+---
+
+## 🎯 路线图完成总结
+
+| Sprint | 阶段 | Skill 数 | 完成日期 |
+|---|---|---|---|
+| Sprint 1 | P0 代码修复 | — (6 文件修改) | 2026-03-01 |
+| Sprint 2 | P0 Skill 文档化 | 4 (S-028~S-031) | 2026-03-02 |
+| Sprint 3 | P1 Skill 补充 | 4 (S-032~S-035) | 2026-03-02 |
+| Sprint 4 | P2 Skill 补充 | 4 (S-036~S-039) | 2026-03-02 |
+| **合计** | | **12 新 Skill** | |
+
+**技能库**: 23 → 35 个（+12），AgentForge 直接适用 22 → 26 个
 
 ---
 

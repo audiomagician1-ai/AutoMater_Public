@@ -7,15 +7,8 @@
 import { create } from 'zustand';
 
 // Types used by store
-interface ContextSnapshot {
-  agentId: string;
-  totalTokens: number;
-  tokenBudget: number;
-  sections: any[];
-  timestamp: number;
-  filesIncluded?: number;
-  featureId?: string;
-}
+// ContextSnapshot and AgentReactState are defined globally in src/types/api.d.ts
+// Store uses compatible subtypes for internal state management
 
 /** Agent ReAct 状态 — 使用 api.d.ts 中的全局 AgentReactState 接口 */
 // Store 兼容两种来源：

@@ -10,39 +10,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
 
-// ═══════════════════════════════════════
-// Types (local definitions for TS)
-// ═══════════════════════════════════════
-interface ContextSection {
-  id: string;
-  name: string;
-  source: string;
-  tokens: number;
-  chars: number;
-  content: string;
-  truncated?: boolean;
-  files?: string[];
-}
-
-interface ContextSnapshot {
-  agentId: string;
-  totalTokens: number;
-  tokenBudget: number;
-  sections: ContextSection[];
-  timestamp: number;
-  filesIncluded?: number;
-  featureId?: string;
-}
-
-interface TeamMember {
-  id: string;
-  name: string;
-  role: string;
-  model?: string;
-  capabilities?: string;
-  system_prompt?: string;
-  max_context_tokens?: number;
-}
+// Types: ContextSection, ContextSnapshot, TeamMember are global (src/types/api.d.ts)
 
 // ═══════════════════════════════════════
 // 角色图标 & 颜色映射
@@ -163,25 +131,26 @@ function TokenBudgetBar({ snapshot }: { snapshot: ContextSnapshot }) {
 }
 
 // ═══════════════════════════════════════
-// ContextSectionCard — 可展开/折叠的模块卡片
+// ContextSectionCard — 模块卡片（点击选中，不再内联展开）
 // ═══════════════════════════════════════
-function ContextSectionCard({ section, tokenBudget }: { section: ContextSection; tokenBudget: number }) {
-  const [expanded, setExpanded] = useState(false);
+function ContextSectionCard({ section, tokenBudget, isActive, onSelect }: {
+  section: ContextSection; tokenBudget: number; isActive?: boolean; onSelect?: () => void;
+}) {
   const color = getColor(section.source);
   const ratio = (section.tokens / tokenBudget * 100).toFixed(1);
 
   return (
-    <div className={`rounded-lg border ${color.border} ${color.bg} overflow-hidden transition-all`}>
-      <button
-        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <span className="text-lg">{expanded ? '▼' : '▶'}</span>
-        <div className="flex-1 text-left">
+    <div
+      className={`rounded-lg border ${isActive ? 'border-cyan-500/50 bg-cyan-500/5 ring-1 ring-cyan-500/20' : `${color.border} ${color.bg}`} overflow-hidden transition-all cursor-pointer hover:bg-white/5`}
+      onClick={onSelect}
+    >
+      <div className="px-4 py-3 flex items-center gap-3">
+        <span className="text-lg text-slate-500">{isActive ? '◆' : '▶'}</span>
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className={`text-sm font-medium ${color.text}`}>{section.name}</span>
+            <span className={`text-sm font-medium ${isActive ? 'text-cyan-400' : color.text} truncate`}>{section.name}</span>
             {section.truncated && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">截断</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium shrink-0">截断</span>
             )}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
@@ -195,28 +164,7 @@ function ContextSectionCard({ section, tokenBudget }: { section: ContextSection;
         <div className="w-16 h-2 bg-slate-800 rounded-full overflow-hidden shrink-0">
           <div className={`h-full ${color.bar} transition-all duration-300`} style={{ width: `${Math.min(parseFloat(ratio), 100)}%` }} />
         </div>
-      </button>
-
-      {expanded && (
-        <div className="border-t border-slate-800">
-          {section.files && section.files.length > 0 && (
-            <div className="px-4 py-2 border-b border-slate-800/50">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">包含文件</div>
-              <div className="flex flex-wrap gap-1">
-                {section.files.map(f => (
-                  <span key={f} className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">{f}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="px-4 py-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">内容预览</div>
-            <pre className="text-[11px] text-slate-400 font-mono whitespace-pre-wrap break-all max-h-96 overflow-y-auto bg-slate-900/50 rounded p-3 border border-slate-800 leading-relaxed">
-              {section.content.length > 5000 ? section.content.slice(0, 5000) + '\n\n... [显示截断至 5000 字符]' : section.content}
-            </pre>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ interface FileNode {
 interface ContextSection {
   id: string;
   name: string;
-  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'code-graph' | 'plan' | 'qa-feedback';
+  source: string;
   content: string;
   chars: number;
   tokens: number;
@@ -26,14 +26,14 @@ interface ContextSection {
 /** 上下文快照 (v1.1) */
 interface ContextSnapshot {
   agentId: string;
-  featureId: string;
+  featureId?: string;
   timestamp: number;
   sections: ContextSection[];
-  totalChars: number;
+  totalChars?: number;
   totalTokens: number;
   tokenBudget: number;
-  contextText: string;
-  filesIncluded: number;
+  contextText?: string;
+  filesIncluded?: number;
 }
 
 /** 消息 token 分布 (v1.1) */
