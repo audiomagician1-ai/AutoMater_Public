@@ -228,6 +228,69 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'think':
         return { success: true, output: think(call.arguments.thought || ''), action: 'think' };
 
+      case 'report_blocked': {
+        // 这个工具的"执行"本身只是返回格式化结果 —
+        // 真正的阻塞逻辑在 ReAct 循环中处理 (检测到 report_blocked 调用后暂停流水线)
+        const reason = call.arguments.reason || '未说明原因';
+        const suggestions: string[] = call.arguments.suggestions || [];
+        const partial = call.arguments.partial_result || '';
+        const output = [
+          `🚫 BLOCKED: ${reason}`,
+          '',
+          '建议的解决方式:',
+          ...suggestions.map((s: string, i: number) => `  ${i + 1}. ${s}`),
+          partial ? `\n已完成的部分结果:\n${partial}` : '',
+        ].join('\n');
+        return { success: true, output, action: 'think' };
+      }
+
+      case 'rfc_propose': {
+        // v5.5: RFC 设计变更提案 — 记录到 change_requests 表 + 通知用户
+        const title = call.arguments.title || 'Untitled RFC';
+        const problem = call.arguments.problem || '';
+        const proposal = call.arguments.proposal || '';
+        const impact = call.arguments.impact || 'medium';
+        const affectedFeatures: string[] = call.arguments.affected_features || [];
+
+        const rfcDescription = [
+          `# RFC: ${title}`,
+          '',
+          `## 问题`,
+          problem,
+          '',
+          `## 提议方案`,
+          proposal,
+          '',
+          `## 影响范围: ${impact}`,
+          affectedFeatures.length > 0 ? `受影响的 Features: ${affectedFeatures.join(', ')}` : '',
+          '',
+          `> 提出者: ${(call.arguments as any)._agentId || 'agent'}`,
+          `> 时间: ${new Date().toISOString()}`,
+        ].filter(Boolean).join('\n');
+
+        // 如果有 projectId, 写入 change_requests 表
+        if (ctx.projectId) {
+          try {
+            const { getDb } = require('../db') as typeof import('../db');
+            const db = getDb();
+            const rfcId = `rfc-${Date.now().toString(36)}`;
+            db.prepare(`INSERT INTO change_requests (id, project_id, description, status, affected_features)
+              VALUES (?, ?, ?, 'pending', ?)`).run(
+              rfcId, ctx.projectId, rfcDescription,
+              JSON.stringify(affectedFeatures),
+            );
+          } catch (err) {
+            // DB write failure is non-fatal
+          }
+        }
+
+        return {
+          success: true,
+          output: `📋 RFC 已提交: "${title}" [${impact}]\n\nPM 和用户将审查此提案。你可以继续当前任务，但标记此处为可能需要修改的位置。\n\n${rfcDescription}`,
+          action: 'think',
+        };
+      }
+
       case 'todo_write': {
         const todos: TodoItem[] = call.arguments.todos || [];
         const agentId = (call.arguments as any)._agentId || 'default';

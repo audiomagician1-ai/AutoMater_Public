@@ -255,6 +255,46 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 
   // ── Thinking & Planning (v2.1) ──
   {
+    name: 'report_blocked',
+    description: '当你无法获取完成任务所需的关键信息时调用此工具。它会暂停流水线并通知用户。\n使用场景：用户引用了你无法访问的路径/资源、需求描述严重不足无法做出合理分析、存在矛盾需要用户澄清。\n注意：仅在信息缺失会导致输出严重偏离时使用，小的模糊点用 notes 标注即可。',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: '阻塞原因：详细描述缺少什么信息' },
+        suggestions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '建议的解决方式（如"请提供 xxx 目录的文件列表"、"请确认使用的技术栈"等）',
+        },
+        partial_result: { type: 'string', description: '到目前为止能确定的部分结果（如果有的话）' },
+      },
+      required: ['reason', 'suggestions'],
+    },
+  },
+  {
+    name: 'rfc_propose',
+    description: '提出设计变更请求 (RFC)。当你在实现过程中发现设计文档中的问题、矛盾、或更优方案时使用此工具。RFC 会被记录并通知 PM 和用户审批。\n使用场景：发现架构设计不合理、API 设计有冲突、依赖不兼容、性能瓶颈需要架构调整等。\n注意：不要滥用——只在确实需要修改设计时使用，小的实现细节自行决定即可。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'RFC 标题（简短，<30字）' },
+        problem: { type: 'string', description: '当前设计的问题描述' },
+        proposal: { type: 'string', description: '建议的变更方案' },
+        impact: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: '影响范围：low=单个 feature, medium=多个 feature, high=整体架构',
+        },
+        affected_features: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '受影响的 Feature ID 列表',
+        },
+      },
+      required: ['title', 'problem', 'proposal', 'impact'],
+    },
+  },
+  {
     name: 'think',
     description: '用于深度思考和推理的工具。写下你的分析、假设、计划，不会产生任何副作用。在面对复杂问题时，先用 think 理清思路再行动。',
     parameters: {
@@ -585,7 +625,11 @@ export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 're
 const ROLE_TOOLS: Record<AgentRole, string[]> = {
   pm: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'read_file', 'list_files', 'search_files', 'glob_files',  // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
     'web_search', 'fetch_url',
+    'memory_read', 'memory_append',
+    'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
+    'rfc_propose',     // v5.5: RFC 设计变更提案
   ],
   architect: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -593,6 +637,8 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'write_file',
     'web_search', 'fetch_url',
     'memory_read', 'memory_append',
+    'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
+    'rfc_propose',     // v5.5: RFC 设计变更提案
   ],
   developer: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -603,6 +649,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search', 'fetch_url', 'http_request',
     'spawn_researcher',
     'memory_read', 'memory_append',
+    'rfc_propose',     // v5.5: RFC 设计变更提案
     // Computer Use — 调试 GUI/桌面应用
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
     // Playwright 浏览器 — 调试 Web 前端
@@ -627,6 +674,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'analyze_image', 'compare_screenshots', 'visual_assert',
     // 技能进化 (v5.1)
     'skill_search', 'skill_record_usage',
+    'rfc_propose',     // v5.5: RFC 设计变更提案
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',

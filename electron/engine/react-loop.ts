@@ -669,3 +669,230 @@ function compressMessageHistorySimple(messages: Array<{ role: string; content: a
     }
   }
 }
+
+// ═══════════════════════════════════════
+// Generic ReAct Agent Loop (v5.5)
+// ═══════════════════════════════════════
+
+/**
+ * 通用 ReAct 循环 — 任何角色的 Agent 都可以使用。
+ *
+ * 与 reactDeveloperLoop 的区别:
+ *   - 角色无关: 通过参数注入 role / systemPrompt / tools
+ *   - 更轻量: 不含 Code Graph / Skill Context / Shared Decisions 等 developer-specific 逻辑
+ *   - 支持 report_blocked: 检测到阻塞信号时可中断并返回
+ *   - 输出灵活: 最终文本输出通过 finalText 返回
+ *
+ * 使用场景: PM 需求分析 / Architect 架构设计 / Phase 3 文档生成 / QA 审查
+ */
+
+export interface GenericReactConfig {
+  projectId: string;
+  agentId: string;
+  role: import('./tool-registry').AgentRole;
+  systemPrompt: string;
+  userMessage: string;
+  settings: any;
+  workspacePath: string | null;
+  gitConfig: import('./git-provider').GitProviderConfig;
+  win: BrowserWindow | null;
+  signal: AbortSignal;
+  maxIterations?: number;
+  model?: string;
+  timeoutMs?: number;
+  streamLabel?: string;
+}
+
+export interface GenericReactResult {
+  completed: boolean;
+  blocked: boolean;
+  blockReason?: string;
+  blockSuggestions?: string[];
+  finalText: string;
+  filesWritten: string[];
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  iterations: number;
+}
+
+export async function reactAgentLoop(config: GenericReactConfig): Promise<GenericReactResult> {
+  const {
+    projectId, agentId, role, systemPrompt, userMessage,
+    settings, workspacePath, gitConfig, win, signal,
+    maxIterations = 15,
+    model = settings.strongModel,
+    timeoutMs = 180000,
+  } = config;
+
+  const tools = getToolsForRole(role, gitConfig.mode);
+  const toolCtx: ToolContext = { workspacePath: workspacePath || '', projectId, gitConfig };
+
+  let totalCost = 0, totalIn = 0, totalOut = 0;
+  let completed = false, blocked = false;
+  let blockReason = '', blockSuggestions: string[] = [];
+  let finalText = '';
+  const filesWritten = new Set<string>();
+
+  const guardState: GuardReactState = {
+    iteration: 0, totalTokens: 0, totalCost: 0,
+    startTimeMs: Date.now(),
+    consecutiveIdleCount: 0, consecutiveErrorCount: 0,
+    recentCallSignatures: [], taskCompleted: false,
+    filesWritten: new Set<string>(),
+  };
+
+  const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+
+  sendToUI(win, 'agent:log', {
+    projectId, agentId,
+    content: `🔄 开始 ReAct 工具循环 (最多 ${maxIterations} 轮, 角色: ${role})`,
+  });
+
+  for (let iter = 1; iter <= maxIterations && !signal.aborted; iter++) {
+    guardState.iteration = iter;
+    const termCheck = checkReactTermination(guardState, {
+      ...DEFAULT_REACT_CONFIG,
+      maxIterations,
+      maxTimeMs: maxIterations * timeoutMs,
+    }, signal.aborted);
+    if (!termCheck.shouldContinue) {
+      sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 终止: ${termCheck.reason}` });
+      break;
+    }
+
+    try {
+      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
+      const cost = calcCost(model, result.inputTokens, result.outputTokens);
+      totalCost += cost; totalIn += result.inputTokens; totalOut += result.outputTokens;
+      updateAgentStats(agentId, projectId, result.inputTokens, result.outputTokens, cost);
+      guardState.totalTokens = totalIn + totalOut;
+      guardState.totalCost = totalCost;
+
+      const msg = result.message;
+      if (msg.content) {
+        finalText = msg.content;
+        const short = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+        sendToUI(win, 'agent:log', { projectId, agentId, content: `💭 [${iter}] ${short}` });
+      }
+
+      // 无 tool_calls → 结束
+      if (!msg.tool_calls || msg.tool_calls.length === 0) {
+        if (msg.content && workspacePath) {
+          const blocks = parseFileBlocks(msg.content);
+          if (blocks.length > 0) {
+            const written = writeFileBlocks(workspacePath, blocks);
+            for (const w of written) filesWritten.add(w.relativePath);
+            sendToUI(win, 'agent:log', { projectId, agentId, content: `📁 [兼容] 写入 ${written.length} 文件` });
+            sendToUI(win, 'workspace:changed', { projectId });
+          }
+        }
+        break;
+      }
+
+      messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
+
+      for (const tc of msg.tool_calls) {
+        let toolArgs: Record<string, any>;
+        try {
+          toolArgs = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
+        } catch { toolArgs = {}; }
+
+        const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
+        const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
+        if (!guard.allowed) {
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: `拦截: ${guard.reason}` });
+          guardState.consecutiveErrorCount++;
+          continue;
+        }
+        if (guard.repairedArgs) { toolCall.arguments = guard.repairedArgs; toolArgs = guard.repairedArgs; }
+
+        guardState.recentCallSignatures.push(toolCallSignature(tc.function.name, toolArgs));
+        if (guardState.recentCallSignatures.length > 10) guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
+
+        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') toolArgs._agentId = agentId;
+
+        // task_complete
+        if (tc.function.name === 'task_complete') {
+          completed = true; guardState.taskCompleted = true;
+          sendToUI(win, 'agent:log', { projectId, agentId, content: `✅ task_complete: ${toolArgs.summary || '完成'}` });
+          addLog(projectId, agentId, 'output', `Completed: ${toolArgs.summary || '完成'}`);
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: `任务已完成: ${toolArgs.summary}` });
+          continue;
+        }
+
+        // report_blocked
+        if (tc.function.name === 'report_blocked') {
+          blocked = true;
+          blockReason = toolArgs.reason || '未说明原因';
+          blockSuggestions = toolArgs.suggestions || [];
+          sendToUI(win, 'agent:log', { projectId, agentId, content: `🚫 BLOCKED: ${blockReason}\n建议: ${blockSuggestions.join(' / ')}` });
+          addLog(projectId, agentId, 'warning', `BLOCKED: ${blockReason}`);
+          sendToUI(win, 'agent:blocked', { projectId, agentId, reason: blockReason, suggestions: blockSuggestions });
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: '已报告阻塞，等待用户回应。' });
+          continue;
+        }
+
+        // 执行工具
+        const isAsync = ['web_search', 'fetch_url', 'http_request', 'analyze_image', 'compare_screenshots', 'visual_assert'].includes(tc.function.name)
+          || tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_')
+          || tc.function.name.startsWith('mcp_') || tc.function.name.startsWith('skill_');
+
+        const toolResult: ToolResult = isAsync
+          ? await executeToolAsync(toolCall, toolCtx)
+          : executeTool(toolCall, toolCtx);
+
+        const argsSummary = tc.function.name === 'write_file'
+          ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
+          : JSON.stringify(toolArgs).slice(0, 120);
+        sendToUI(win, 'agent:log', {
+          projectId, agentId,
+          content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
+        });
+        emitEvent({ projectId, agentId, type: 'tool:call', data: { tool: tc.function.name, success: toolResult.success } });
+
+        if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
+          filesWritten.add(toolArgs.path);
+          sendToUI(win, 'workspace:changed', { projectId });
+        }
+
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult.output.slice(0, 4000) });
+      }
+
+      const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+      if (hasToolSideEffect(toolCallsThisIter)) guardState.consecutiveIdleCount = 0;
+      else guardState.consecutiveIdleCount++;
+      guardState.consecutiveErrorCount = 0;
+
+      if (completed || blocked) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId,
+          content: `🔚 ReAct 结束 (${iter} 轮, $${totalCost.toFixed(4)})${blocked ? ' [BLOCKED]' : ''}`,
+        });
+        break;
+      }
+
+      if (messages.length > 20) await compressMessageHistorySmart(messages, settings, signal);
+
+    } catch (err: any) {
+      if (signal.aborted) break;
+      guardState.consecutiveErrorCount++;
+      sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误: ${err.message}` });
+      addLog(projectId, agentId, 'error', `iter ${iter}: ${err.message}`);
+      await sleep(2000);
+    }
+  }
+
+  return {
+    completed, blocked,
+    blockReason: blocked ? blockReason : undefined,
+    blockSuggestions: blocked ? blockSuggestions : undefined,
+    finalText,
+    filesWritten: [...filesWritten],
+    totalCost, totalInputTokens: totalIn, totalOutputTokens: totalOut,
+    iterations: guardState.iteration,
+  };
+}

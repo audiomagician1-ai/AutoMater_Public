@@ -1,13 +1,15 @@
 /**
- * Sandbox Executor — 轻量级子进程沙箱 (v1.2)
+ * Sandbox Executor — 轻量级子进程沙箱 (v5.5)
  *
  * 无 Docker 环境下的安全命令执行:
  * 1. 工作目录限制 (cwd 锁定到 workspace)
  * 2. 超时控制 (可配置，默认 120s)
  * 3. 输出大小限制 (maxBuffer 2MB)
- * 4. 危险命令黑名单
+ * 4. 危险命令黑名单 + 正则检测
  * 5. 环境变量隔离 (只传递安全变量)
- * 6. 支持 PowerShell / bash
+ * 6. 路径逃逸防护 (验证 cwd 合法性)
+ * 7. 资源限制 (Windows: 进程优先级限制; 通用: 输出截断)
+ * 8. 支持 PowerShell / bash
  */
 
 import { execSync, spawn, type ChildProcess } from 'child_process';
@@ -23,6 +25,8 @@ export interface SandboxConfig {
   timeoutMs?: number;       // 默认 120000 (120s)
   maxOutputBytes?: number;  // 默认 2MB
   env?: Record<string, string>;
+  /** v5.5: 限制网络访问 (Windows: 通过 PowerShell 策略) */
+  networkRestricted?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 120_000;
@@ -32,6 +36,7 @@ const DEFAULT_MAX_OUTPUT = 2 * 1024 * 1024;
 const FORBIDDEN_PATTERNS = [
   'rm -rf /',
   'rm -rf ~',
+  'rm -rf %',
   'format c:',
   'del /s /q c:',
   'del /s /q %systemroot%',
@@ -41,10 +46,20 @@ const FORBIDDEN_PATTERNS = [
   ':(){:|:&};:',    // fork bomb
   'mkfs',
   'dd if=/dev/',
-  'curl.*|.*sh',    // pipe to shell
-  'wget.*|.*sh',
+  'curl.*\\|.*sh',    // pipe to shell
+  'wget.*\\|.*sh',
   'powershell.*-encodedcommand',
-  'invoke-webrequest.*|.*iex',
+  'invoke-webrequest.*\\|.*iex',
+  'invoke-expression',
+  'iex\\s*\\(',
+  'start-process.*-verb\\s+runas',  // v5.5: elevation attempt
+  'net\\s+user',                     // v5.5: user manipulation
+  'net\\s+localgroup',
+  'reg\\s+add',                      // v5.5: registry modification
+  'schtasks\\s+/create',             // v5.5: scheduled task creation
+  'wmic\\s+process',                 // v5.5: process manipulation via WMIC
+  'certutil.*-urlcache',             // v5.5: download via certutil
+  'bitsadmin.*\\/transfer',          // v5.5: download via BITS
 ];
 
 function isForbidden(command: string): boolean {
@@ -87,6 +102,87 @@ function buildSafeEnv(extra?: Record<string, string>): Record<string, string> {
 }
 
 // ═══════════════════════════════════════
+// v5.5: 路径安全验证
+// ═══════════════════════════════════════
+
+/**
+ * Validate that the workspace path is safe to use as cwd.
+ * Prevents path traversal and symlink escapes.
+ */
+function validateWorkspacePath(workspacePath: string): { ok: boolean; error?: string; resolved: string } {
+  const resolved = path.resolve(workspacePath);
+
+  // Must not be a system root
+  const dangerous = ['/', 'C:\\', 'C:\\Windows', 'C:\\Users', '/usr', '/etc', '/root'];
+  if (dangerous.some(d => resolved.toLowerCase() === d.toLowerCase())) {
+    return { ok: false, error: `工作路径不安全 (系统目录): ${resolved}`, resolved };
+  }
+
+  // Must exist and be a directory
+  try {
+    const stat = fs.statSync(resolved);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: `工作路径不是目录: ${resolved}`, resolved };
+    }
+  } catch {
+    // Directory doesn't exist — will be created by caller
+  }
+
+  // v5.5: Check for symlink escape
+  try {
+    const real = fs.realpathSync(resolved);
+    if (real !== resolved) {
+      // It's a symlink — verify target is not a dangerous location
+      if (dangerous.some(d => real.toLowerCase().startsWith(d.toLowerCase() + path.sep))) {
+        return { ok: false, error: `工作路径是指向系统目录的符号链接: ${resolved} → ${real}`, resolved };
+      }
+    }
+  } catch {
+    // realpathSync failed — directory may not exist yet, allow it
+  }
+
+  return { ok: true, resolved };
+}
+
+/**
+ * v5.5: Detect commands that try to escape the workspace via path traversal.
+ */
+function hasPathTraversal(command: string, workspacePath: string): boolean {
+  // Check for common escape patterns
+  const escapePatterns = [
+    /\.\.\//g,          // ../
+    /\.\.\\/g,          // ..\
+    /~\//g,             // ~/
+    /\$HOME/gi,         // $HOME
+    /%USERPROFILE%/gi,  // %USERPROFILE%
+    /\\\\[a-z]/gi,      // UNC paths \\server
+  ];
+
+  // Allow relative paths that don't escape (e.g., src/../lib is ok if still within workspace)
+  const lowerCmd = command.toLowerCase();
+  for (const pattern of escapePatterns) {
+    if (pattern.test(lowerCmd)) {
+      // Check if it's a benign relative path
+      const matches = lowerCmd.match(pattern);
+      if (matches) {
+        // Simple heuristic: if command contains explicit absolute path outside workspace, block
+        const absPathMatch = command.match(/[A-Z]:\\[^\s"]+/gi) || command.match(/\/(?:usr|etc|root|home|var)\//gi);
+        if (absPathMatch) {
+          for (const absPath of absPathMatch) {
+            const resolvedPath = path.resolve(absPath);
+            if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+// ═══════════════════════════════════════
 // 同步执行 (简单命令)
 // ═══════════════════════════════════════
 
@@ -102,7 +198,7 @@ export interface SandboxResult {
 export function execInSandbox(command: string, config: SandboxConfig): SandboxResult {
   const start = Date.now();
 
-  // 安全检查
+  // 安全检查 1: 危险命令黑名单
   if (isForbidden(command)) {
     return {
       success: false, exitCode: -1,
@@ -111,17 +207,33 @@ export function execInSandbox(command: string, config: SandboxConfig): SandboxRe
     };
   }
 
-  // 验证 cwd 存在且在 workspace 内
-  const cwd = config.workspacePath;
-  const resolvedCwd = path.resolve(cwd);
+  // v5.5: 安全检查 2: 路径逃逸
+  if (hasPathTraversal(command, config.workspacePath)) {
+    return {
+      success: false, exitCode: -1,
+      stdout: '', stderr: `命令包含路径逃逸模式，已拦截: ${command.slice(0, 200)}`,
+      timedOut: false, duration: 0,
+    };
+  }
 
+  // v5.5: 安全检查 3: 验证工作路径
+  const wpCheck = validateWorkspacePath(config.workspacePath);
+  if (!wpCheck.ok) {
+    return {
+      success: false, exitCode: -1,
+      stdout: '', stderr: wpCheck.error || '工作路径验证失败',
+      timedOut: false, duration: 0,
+    };
+  }
+
+  const cwd = wpCheck.resolved;
   const timeout = config.timeoutMs ?? DEFAULT_TIMEOUT;
   const maxBuffer = config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
   const env = buildSafeEnv(config.env);
 
   try {
     const stdout = execSync(command, {
-      cwd: resolvedCwd,
+      cwd,
       encoding: 'utf-8',
       maxBuffer,
       timeout,

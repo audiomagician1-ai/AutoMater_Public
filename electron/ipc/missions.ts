@@ -9,16 +9,29 @@ import {
   type MissionType, type MissionConfig,
 } from '../engine/mission-runner';
 
+// v5.5: 运行中的 Mission AbortController 注册表
+const runningMissions = new Map<string, AbortController>();
+
 export function setupMissionHandlers() {
   // 创建并启动 mission
   ipcMain.handle('mission:create', async (_event, projectId: string, type: MissionType, config?: MissionConfig) => {
     try {
       const id = createMission(projectId, type, config);
       const win = BrowserWindow.getAllWindows()[0] ?? null;
+
+      // v5.5: 创建 AbortController 用于取消
+      const abortCtrl = new AbortController();
+      runningMissions.set(id, abortCtrl);
+
       // 异步执行（不阻塞 IPC）
-      runMission(id, win).catch(err => {
-        console.error(`[Mission ${id}] Error:`, err);
+      runMission(id, win, abortCtrl.signal).catch(err => {
+        if (err.message !== 'Cancelled') {
+          console.error(`[Mission ${id}] Error:`, err);
+        }
+      }).finally(() => {
+        runningMissions.delete(id);
       });
+
       return { success: true, missionId: id };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -40,8 +53,13 @@ export function setupMissionHandlers() {
     return getMissionTasks(missionId);
   });
 
-  // 取消 mission
+  // 取消 mission — v5.5: 同时 abort 运行中的 LLM 调用
   ipcMain.handle('mission:cancel', (_event, missionId: string) => {
+    const ctrl = runningMissions.get(missionId);
+    if (ctrl) {
+      ctrl.abort();
+      runningMissions.delete(missionId);
+    }
     cancelMission(missionId);
     return { success: true };
   });

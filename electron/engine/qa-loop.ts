@@ -1,7 +1,8 @@
 /**
  * QA Loop — QA 审查循环
  *
- * TDD 模式: 先跑测试/lint → 再 LLM 审查
+ * v5.5 增强: 始终尝试 test/lint 执行 (不再仅在检测到测试文件时才跑)
+ * 流程: 程序化检查 → test/lint 执行 → LLM 深度审查
  * 从 orchestrator.ts 拆出 (v2.5)
  */
 
@@ -32,6 +33,37 @@ export interface QAResult {
 }
 
 // ═══════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════
+
+/** Detect if workspace has any test infrastructure */
+function detectTestInfra(workspacePath: string): { hasTests: boolean; hasLint: boolean; framework: string } {
+  const hasPackageJson = fs.existsSync(path.join(workspacePath, 'package.json'));
+  const hasRequirements = fs.existsSync(path.join(workspacePath, 'requirements.txt'));
+  const hasPyproject = fs.existsSync(path.join(workspacePath, 'pyproject.toml'));
+  const hasCargoToml = fs.existsSync(path.join(workspacePath, 'Cargo.toml'));
+  const hasGoMod = fs.existsSync(path.join(workspacePath, 'go.mod'));
+  const hasTsConfig = fs.existsSync(path.join(workspacePath, 'tsconfig.json'));
+
+  let framework = 'unknown';
+  if (hasPackageJson) framework = 'node';
+  else if (hasRequirements || hasPyproject) framework = 'python';
+  else if (hasCargoToml) framework = 'rust';
+  else if (hasGoMod) framework = 'go';
+
+  const hasLint = hasTsConfig ||
+    fs.existsSync(path.join(workspacePath, '.eslintrc.json')) ||
+    fs.existsSync(path.join(workspacePath, '.eslintrc.js')) ||
+    fs.existsSync(path.join(workspacePath, 'eslint.config.js'));
+
+  return {
+    hasTests: hasPackageJson || hasRequirements || hasPyproject || hasCargoToml || hasGoMod,
+    hasLint,
+    framework,
+  };
+}
+
+// ═══════════════════════════════════════
 // QA 审查
 // ═══════════════════════════════════════
 
@@ -49,14 +81,8 @@ export async function runQAReview(
     }
   }
 
-  // 检测项目类型
-  const hasTestFiles = filesWritten.some(f =>
-    f.includes('test') || f.includes('spec') || f.includes('__tests__')
-  );
-  const hasPackageJson = fs.existsSync(path.join(workspacePath, 'package.json'));
-  const hasRequirements = fs.existsSync(path.join(workspacePath, 'requirements.txt'));
-  const hasCargoToml = fs.existsSync(path.join(workspacePath, 'Cargo.toml'));
-
+  // ═══ v5.5: 始终尝试 test + lint (不再仅在有测试文件时) ═══
+  const infra = detectTestInfra(workspacePath);
   let testResults = '';
   let testRan = false;
   let testPassed = true;
@@ -65,9 +91,10 @@ export async function runQAReview(
   let lintPassed = true;
   let lintOutput = '';
 
-  if (hasTestFiles || hasPackageJson || hasRequirements || hasCargoToml) {
-    const sandboxCfg: SandboxConfig = { workspacePath, timeoutMs: 120_000 };
+  const sandboxCfg: SandboxConfig = { workspacePath, timeoutMs: 120_000 };
 
+  // Always attempt test execution if any test framework is detected
+  if (infra.hasTests) {
     try {
       const testResult = sbRunTest(sandboxCfg);
       testRan = true;
@@ -79,7 +106,10 @@ export async function runQAReview(
     } catch (e: any) {
       testResults += `## 测试执行\n⚠️ 无法运行: ${e.message}\n\n`;
     }
+  }
 
+  // Always attempt lint/type-check if any lint tool is detected
+  if (infra.hasLint || infra.hasTests) {
     try {
       const lintResult = sbRunLint(sandboxCfg);
       if (lintResult.stdout && lintResult.stdout !== '未检测到 lint/type-check 配置') {
@@ -91,7 +121,7 @@ export async function runQAReview(
         testResults += `\`\`\`\n${lintOutput}\n\`\`\`\n\n`;
       }
     } catch (err) {
-      log.warn('Test/lint execution failed during QA', err);
+      log.warn('Lint execution failed during QA', err);
     }
   }
 
@@ -102,6 +132,28 @@ export async function runQAReview(
     { ran: testRan, passed: testPassed, output: testOutput },
     { ran: lintRan, passed: lintPassed, output: lintOutput },
   );
+
+  // v5.5: 测试失败是硬性失败 — 不依赖 LLM 判断
+  if (testRan && !testPassed) {
+    const failMsg = [
+      `测试执行失败 (硬性规则):`,
+      testOutput.slice(0, 2000),
+      '',
+      ...(programCheck.issues.length > 0 ? [
+        '程序化检查问题:',
+        ...programCheck.issues.map((iss, i) => `${i + 1}. [${iss.severity}] ${iss.file || ''}: ${iss.description}`),
+      ] : []),
+    ].join('\n');
+
+    return {
+      verdict: 'fail',
+      score: Math.max(0, 30 - programCheck.deductions),
+      summary: '测试执行失败 — 必须修复后重新提交',
+      feedbackText: failMsg,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  }
 
   // 如果程序化检查已判定 fail，直接返回 (节省 LLM 调用)
   if (programCheck.programVerdict === 'fail') {
@@ -128,11 +180,16 @@ export async function runQAReview(
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const qaPrompt = (projectId ? getTeamPrompt(projectId, 'qa') : null) ?? QA_SYSTEM_PROMPT;
 
+  // v5.5: 增强 prompt — 包含测试/lint 执行结果 + 明确的评分标准
+  const testContext = testResults
+    ? `\n## 自动化测试/Lint 执行结果\n${testResults}\n重要: 如果测试或lint未通过, verdict 必须为 fail。`
+    : '\n注意: 该项目未检测到自动化测试框架, 请特别注意代码逻辑正确性。';
+
   const result = await callLLM(settings, settings.strongModel, [
     { role: 'system', content: qaPrompt },
     {
       role: 'user',
-      content: `请审查以下 Feature 的实现代码:\n\nFeature ID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n\n${testResults}## 实现的文件\n${filesContent.join('\n\n')}\n\n请给出审查结果（JSON 格式，不要用 markdown 代码块包裹）。${testResults ? '\n注意: 如果测试失败，verdict 应为 fail。' : ''}`,
+      content: `请审查以下 Feature 的实现代码:\n\nFeature ID: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${testContext}\n## 实现的文件\n${filesContent.join('\n\n')}\n\n请给出审查结果（JSON 格式，不要用 markdown 代码块包裹）。`,
     },
   ], signal, 4096);
 
@@ -165,6 +222,17 @@ export async function runQAReview(
       suggestion: '',
     }));
     issues = [...programIssueDescs, ...issues];
+  }
+
+  // v5.5: lint 失败也强制扣分
+  if (lintRan && !lintPassed) {
+    score = Math.max(0, score - 15);
+    issues.unshift({
+      severity: 'major',
+      file: '',
+      description: '[程序检查] Lint/类型检查失败 — 代码有编译错误或 lint 违规',
+      suggestion: '修复 lint/type-check 报告的所有错误',
+    });
   }
 
   // 硬规则: score < 60 → 强制 fail (不管 LLM 说什么)

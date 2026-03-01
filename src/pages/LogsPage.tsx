@@ -1,10 +1,12 @@
 /**
- * LogsPage — 实时日志 + 持久化历史 (v4.0)
+ * LogsPage — 实时日志 + 持久化历史 (v5.0)
  *
  * - 进入页面时从 DB 加载历史日志
- * - IPC 推送的实时日志追加到底部
+ * - IPC 推送的实时日志插入到顶部 (新日志在上)
  * - 支持按 Agent 过滤、按关键词搜索
- * - 分页加载更早日志 (Load More)
+ * - 分页加载更早 (更旧) 日志 (Load More 在底部)
+ * - Agent ID 自动映射为用户设置的名字
+ * - 大段日志内容自动分段显示
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -50,6 +52,175 @@ function StreamPanel({ agentId, label, content }: { agentId: string; label: stri
   );
 }
 
+// ═══════════════════════════════════════
+// Agent 名称解析 + 日志格式化
+// ═══════════════════════════════════════
+
+/** 角色前缀 → role 映射 */
+const ROLE_PREFIXES: Record<string, string> = {
+  'pm': 'pm',
+  'arch': 'architect',
+  'dev': 'developer',
+  'qa': 'qa',
+  'reviewer': 'reviewer',
+  'devops': 'devops',
+};
+
+/** 角色 → 默认中文名称 + Emoji */
+const ROLE_DEFAULTS: Record<string, string> = {
+  'pm': '📋 产品经理',
+  'architect': '🏗️ 架构师',
+  'developer': '💻 开发者',
+  'qa': '🧪 测试工程师',
+  'reviewer': '🔍 代码审查',
+  'devops': '🚀 DevOps',
+};
+
+/**
+ * 将 agentId (如 "pm-mm7w48p4") 解析为用户友好的显示名称。
+ * 优先级: 用户自定义名 > 角色默认中文名 > 内置名 > 原始ID
+ */
+function resolveAgentName(agentId: string, nameMap: Record<string, string>): string {
+  // 1. 内置名称 (system, meta-agent)
+  if (nameMap[agentId]) return nameMap[agentId];
+
+  // 2. 从 agentId 前缀推断角色
+  const prefix = agentId.split('-')[0];
+  const role = ROLE_PREFIXES[prefix];
+  if (role) {
+    // 用户自定义名称
+    if (nameMap[`role:${role}`]) return nameMap[`role:${role}`];
+    // 默认角色名称
+    if (ROLE_DEFAULTS[role]) return ROLE_DEFAULTS[role];
+  }
+
+  // 3. 特殊 ID 模式
+  if (agentId.startsWith('pm-req-batch')) return '📋 PM子需求';
+  if (agentId.startsWith('qa-spec-batch')) return '🧪 测试规格';
+
+  return agentId;
+}
+
+/** 角色 → 标签颜色 */
+function getAgentColor(agentId: string): string {
+  const prefix = agentId.split('-')[0];
+  switch (prefix) {
+    case 'pm': return 'text-blue-400 bg-blue-500/10';
+    case 'arch': return 'text-purple-400 bg-purple-500/10';
+    case 'dev': return 'text-green-400 bg-green-500/10';
+    case 'qa': return 'text-yellow-400 bg-yellow-500/10';
+    case 'system': return 'text-slate-400 bg-slate-500/10';
+    default:
+      if (agentId === 'meta-agent') return 'text-cyan-400 bg-cyan-500/10';
+      if (agentId === 'system') return 'text-slate-400 bg-slate-500/10';
+      return 'text-forge-400 bg-forge-500/10';
+  }
+}
+
+/**
+ * 格式化大段日志内容 — 将连续长文本分段显示，提高可读性。
+ * - JSON 块用代码样式
+ * - 长文本按双换行分段
+ * - Markdown 标题加粗
+ */
+function FormatLogContent({ content }: { content: string }) {
+  // 短内容直接显示
+  if (content.length < 200 && !content.includes('\n')) {
+    return <span className="text-slate-300">{content}</span>;
+  }
+
+  // 检测是否是大段 JSON
+  const jsonMatch = content.match(/^\s*[\[{]/);
+  if (jsonMatch && content.length > 300) {
+    // 截取前 500 字符做预览
+    const preview = content.slice(0, 500);
+    return (
+      <details className="inline group">
+        <summary className="cursor-pointer text-slate-400 hover:text-slate-200 transition-colors">
+          <span className="text-slate-500">[JSON 数据 · {content.length} 字符]</span>
+          {' '}<span className="text-xs text-slate-600 group-open:hidden">点击展开 ▸</span>
+        </summary>
+        <pre className="mt-1 p-2 bg-slate-800/60 rounded text-xs text-slate-400 overflow-x-auto max-h-60 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">
+          {content}
+        </pre>
+      </details>
+    );
+  }
+
+  // 多段内容分段展示
+  const paragraphs = content.split(/\n{2,}|\n(?=#{1,3}\s)|(?<=\n)(?=---)/);
+  if (paragraphs.length <= 1) {
+    // 单段但很长 — 用换行分割
+    const lines = content.split('\n');
+    if (lines.length <= 2) {
+      return <span className="text-slate-300 break-all">{content}</span>;
+    }
+    return (
+      <div className="text-slate-300 space-y-0.5">
+        {lines.map((line, i) => {
+          if (!line.trim()) return null;
+          // Markdown 标题
+          if (/^#{1,3}\s/.test(line)) {
+            return <div key={i} className="font-semibold text-slate-200 mt-1">{line.replace(/^#+\s*/, '')}</div>;
+          }
+          // 列表项
+          if (/^\s*[-*]\s/.test(line)) {
+            return <div key={i} className="pl-3 text-slate-400">{line}</div>;
+          }
+          return <div key={i} className="break-all">{line}</div>;
+        })}
+      </div>
+    );
+  }
+
+  // 多段内容
+  return (
+    <div className="text-slate-300 space-y-2">
+      {paragraphs.map((para, i) => {
+        const trimmed = para.trim();
+        if (!trimmed) return null;
+        if (/^#{1,3}\s/.test(trimmed)) {
+          return <div key={i} className="font-semibold text-slate-200">{trimmed.replace(/^#+\s*/, '')}</div>;
+        }
+        if (/^```/.test(trimmed)) {
+          return <pre key={i} className="p-2 bg-slate-800/60 rounded text-xs text-slate-400 overflow-x-auto whitespace-pre-wrap">{trimmed}</pre>;
+        }
+        return <div key={i} className="break-all leading-relaxed">{trimmed}</div>;
+      })}
+    </div>
+  );
+}
+
+/** 单条日志行 — 格式优化版 */
+function LogRow({ log, agentNameMap }: {
+  log: { id: string; agentId: string; content: string; timestamp: number };
+  agentNameMap: Record<string, string>;
+}) {
+  const displayName = resolveAgentName(log.agentId, agentNameMap);
+  const colorClass = getAgentColor(log.agentId);
+  const isLong = log.content.length > 300 || log.content.includes('\n');
+
+  return (
+    <div className={`flex gap-3 rounded px-2 py-1 transition-colors ${isLong ? 'flex-col bg-slate-800/30 border-l-2 border-slate-700/50 mb-1' : 'hover:bg-slate-800/50 items-start'}`}>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="text-slate-600 text-xs whitespace-nowrap">
+          {new Date(log.timestamp).toLocaleTimeString()}
+        </span>
+        <span className={`text-xs whitespace-nowrap px-1.5 py-0.5 rounded ${colorClass}`}>
+          {displayName}
+        </span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <FormatLogContent content={log.content} />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
+// LogsPage Main Component
+// ═══════════════════════════════════════
+
 export function LogsPage() {
   const { logs: realtimeLogs, activeStreams, currentProjectId } = useAppStore();
 
@@ -64,10 +235,28 @@ export function LogsPage() {
   const [keyword, setKeyword] = useState('');
   const [searchText, setSearchText] = useState('');
 
-  // ── 滚动 ──
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // ── 滚动 (新日志在顶部，不再需要 autoScroll 到底部) ──
+  const topRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+
+  // ── 团队成员名称映射 (agentId → display name) ──
+  const [agentNameMap, setAgentNameMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!currentProjectId) return;
+    window.agentforge.team.list(currentProjectId).then((members: any[]) => {
+      const map: Record<string, string> = {};
+      // 内置名称
+      map['system'] = '🖥️ 系统';
+      map['meta-agent'] = '🤵 管家';
+      for (const m of members) {
+        // team_members 的 role 会对应 orchestrator 生成的 agentId 前缀
+        // 例如 role='pm' → agentId='pm-xxx', role='developer' → agentId='dev-1'
+        map[`role:${m.role}`] = m.name;
+      }
+      setAgentNameMap(map);
+    }).catch(() => {});
+  }, [currentProjectId]);
 
   /** 从 DB 加载日志 */
   const loadLogs = useCallback(async (opts?: { offset?: number; append?: boolean }) => {
@@ -118,19 +307,12 @@ export function LogsPage() {
     return () => clearTimeout(timer);
   }, [keyword]);
 
-  // 自动滚到底部
+  // 新日志到达时确保滚动到顶部可见
   useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
     }
-  }, [realtimeLogs.length, autoScroll]);
-
-  const handleScroll = () => {
-    if (!containerRef.current) return;
-    const el = containerRef.current;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    setAutoScroll(atBottom);
-  };
+  }, [realtimeLogs.length]);
 
   // 合并: DB 历史 + 实时推送 (去重 by content+agent 近似匹配)
   const mergedLogs = useMemo(() => {
@@ -152,9 +334,9 @@ export function LogsPage() {
         source: 'realtime' as const,
       }));
 
-    // 合并并按时间排序，实时日志在同一时间戳时排后面
+    // 合并并按时间降序排序 (新日志在前)
     const all = [...dbEntries, ...rtEntries];
-    all.sort((a, b) => a.timestamp - b.timestamp || (a.source === 'db' ? -1 : 1));
+    all.sort((a, b) => b.timestamp - a.timestamp || (a.source === 'realtime' ? -1 : 1));
     return all;
   }, [dbLogs, realtimeLogs, currentProjectId]);
 
@@ -183,14 +365,12 @@ export function LogsPage() {
           <span className="text-sm text-slate-500">
             {mergedLogs.length} 条{totalCount > 0 ? ` / ${totalCount} 总计` : ''}
           </span>
-          {!autoScroll && (
-            <button
-              onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }}
-              className="text-xs px-2 py-1 rounded bg-forge-600/20 text-forge-400 hover:bg-forge-600/30 transition-colors"
-            >
-              ↓ 回到底部
-            </button>
-          )}
+          <button
+            onClick={() => { if (containerRef.current) containerRef.current.scrollTop = 0; }}
+            className="text-xs px-2 py-1 rounded bg-forge-600/20 text-forge-400 hover:bg-forge-600/30 transition-colors"
+          >
+            ↑ 回到最新
+          </button>
         </div>
       </div>
 
@@ -215,7 +395,7 @@ export function LogsPage() {
           className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
         >
           <option value="">全部 Agent</option>
-          {agentIds.map(id => <option key={id} value={id}>{id}</option>)}
+          {agentIds.map(id => <option key={id} value={id}>{resolveAgentName(id, agentNameMap)}</option>)}
         </select>
       </div>
 
@@ -228,24 +408,12 @@ export function LogsPage() {
         </div>
       )}
 
-      {/* 日志列表 */}
+      {/* 日志列表 (新日志在上) */}
       <div
         ref={containerRef}
-        onScroll={handleScroll}
         className="flex-1 bg-slate-900 border border-slate-800 rounded-xl overflow-y-auto p-4 font-mono text-sm"
       >
-        {/* Load more */}
-        {hasMore && (
-          <div className="text-center mb-3">
-            <button
-              onClick={handleLoadMore}
-              disabled={loading}
-              className="text-xs px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-50"
-            >
-              {loading ? '加载中...' : `加载更早日志 (还有 ${totalCount - dbLogs.length} 条)`}
-            </button>
-          </div>
-        )}
+        <div ref={topRef} />
 
         {!initialLoaded && (
           <div className="text-slate-600 text-center py-8">加载中...</div>
@@ -257,20 +425,24 @@ export function LogsPage() {
           </div>
         )}
 
-        <div className="space-y-0.5">
+        <div className="space-y-1">
           {mergedLogs.map(log => (
-            <div key={log.id} className="flex gap-3 hover:bg-slate-800/50 rounded px-2 py-0.5 transition-colors">
-              <span className="text-slate-600 text-xs whitespace-nowrap flex-shrink-0">
-                {new Date(log.timestamp).toLocaleTimeString()}
-              </span>
-              <span className="text-forge-400 text-xs whitespace-nowrap flex-shrink-0 w-16 truncate">
-                {log.agentId}
-              </span>
-              <span className="text-slate-300 break-all">{log.content}</span>
-            </div>
+            <LogRow key={log.id} log={log} agentNameMap={agentNameMap} />
           ))}
         </div>
-        <div ref={bottomRef} />
+
+        {/* Load more (旧日志) — 现在在底部 */}
+        {hasMore && (
+          <div className="text-center mt-4">
+            <button
+              onClick={handleLoadMore}
+              disabled={loading}
+              className="text-xs px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-50"
+            >
+              {loading ? '加载中...' : `加载更早日志 (还有 ${totalCount - dbLogs.length} 条)`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -30,7 +30,8 @@ import {
   stopOrchestrator as _stopOrchestrator, registerOrchestrator, unregisterOrchestrator,
   spawnAgent, updateAgentStats, checkBudget, lockNextFeature, getTeamPrompt,
 } from './agent-manager';
-import { reactDeveloperLoop, getAgentReactStates as _getAgentReactStates, getContextSnapshots as _getContextSnapshots } from './react-loop';
+import { reactDeveloperLoop, reactAgentLoop, getAgentReactStates as _getAgentReactStates, getContextSnapshots as _getContextSnapshots } from './react-loop';
+import type { GenericReactResult } from './react-loop';
 import { runQAReview } from './qa-loop';
 
 // ── 引擎依赖 ──
@@ -50,6 +51,7 @@ import { createCheckpoint } from './mission';
 import { extractFromProjectMemory } from './cross-project';
 import { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkConsistency } from './doc-manager';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
+import { claimFiles, releaseFiles, getClaimsSummary, predictAffectedFiles, cleanupDecisionLog } from './decision-log';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -58,7 +60,7 @@ import type { GitProviderConfig } from './git-provider';
 
 export { stopOrchestrator } from './agent-manager';
 export { getAgentReactStates, getContextSnapshots } from './react-loop';
-export type { AgentReactState, ReactIterationState, MessageTokenBreakdown } from './react-loop';
+export type { AgentReactState, ReactIterationState, MessageTokenBreakdown, GenericReactConfig, GenericReactResult } from './react-loop';
 
 // ═══════════════════════════════════════
 // Main Orchestrator Entry Point
@@ -92,6 +94,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   ensureGlobalMemory();
   if (workspacePath) ensureProjectMemory(workspacePath);
+  if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
 
   emitEvent({
     projectId, agentId: 'system', type: 'project:start',
@@ -290,20 +293,39 @@ async function phasePMAnalysis(
   let features: any[] = [];
   try {
     if (signal.aborted) return null;
-    const [onChunk] = createStreamCallback(win, projectId, pmId);
-    sendToUI(win, 'agent:stream-start', { projectId, agentId: pmId, label: 'PM 需求分析' });
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
-    const pmResult = await callLLM(settings, settings.strongModel, [
-      { role: 'system', content: pmPrompt },
-      { role: 'user', content: `用户需求:\n${project.wish}\n\n请分析此需求，拆解为 Feature 清单。直接输出 JSON 数组，不要用 markdown 代码块包裹。` },
-    ], signal, 16384, 2, onChunk);
-    sendToUI(win, 'agent:stream-end', { projectId, agentId: pmId });
+    const workspacePath = project.workspace_path || '';
+    const gitConfig = { mode: project.git_mode || 'local', workspacePath, githubRepo: project.github_repo, githubToken: project.github_token };
 
-    const pmCost = calcCost(settings.strongModel, pmResult.inputTokens, pmResult.outputTokens);
-    addLog(projectId, pmId, 'output', pmResult.content);
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ PM 分析完成 (${pmResult.inputTokens + pmResult.outputTokens} tokens, $${pmCost.toFixed(4)})` });
+    // v5.5: PM 使用 ReAct 循环 — 可以读文件、搜索、发现信息不足时阻塞
+    const pmReactResult = await reactAgentLoop({
+      projectId, agentId: pmId, role: 'pm',
+      systemPrompt: pmPrompt,
+      userMessage: `用户需求:\n${project.wish}\n\n请分析此需求，拆解为 Feature 清单。\n\n**重要**: 如果需求中引用了本地文件/目录，请先用 read_file / list_files 等工具查看内容，再做分析。如果确实无法访问或信息严重不足，使用 report_blocked 工具阻塞。\n\n分析完成后，调用 task_complete 工具，在 summary 字段中输出完整的 JSON Feature 数组（不要 markdown 代码块包裹）。`,
+      settings,
+      workspacePath: workspacePath || null,
+      gitConfig,
+      win, signal,
+      maxIterations: 15,
+      model: settings.strongModel,
+    });
 
-    const parseResult = parseStructuredOutput(pmResult.content, PM_FEATURE_SCHEMA);
+    // 检查阻塞
+    if (pmReactResult.blocked) {
+      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `🚫 PM 分析被阻塞: ${pmReactResult.blockReason}\n请在需求中补充信息后重新启动。` });
+      addLog(projectId, pmId, 'warning', `BLOCKED: ${pmReactResult.blockReason}`);
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      sendToUI(win, 'project:status', { projectId, status: 'paused' });
+      notify('⚠️ AgentForge 需要你的帮助', `PM 分析遇到阻塞: ${pmReactResult.blockReason}`);
+      return null;
+    }
+
+    // 提取 Feature JSON — 从 task_complete 的 summary 或最终文本中解析
+    const textToParse = pmReactResult.finalText || '';
+    addLog(projectId, pmId, 'output', textToParse);
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ PM 分析完成 (${pmReactResult.totalInputTokens + pmReactResult.totalOutputTokens} tokens, $${pmReactResult.totalCost.toFixed(4)})` });
+
+    const parseResult = parseStructuredOutput(textToParse, PM_FEATURE_SCHEMA);
     if (parseResult.ok) {
       features = parseResult.data;
       if (parseResult.warnings.length > 0) {
@@ -315,7 +337,7 @@ async function phasePMAnalysis(
       addLog(projectId, pmId, 'error', `Parse failed: ${parseResult.error}`);
     }
     db.prepare("UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ?")
-      .run(pmResult.inputTokens, pmResult.outputTokens, pmCost, pmId);
+      .run(pmReactResult.totalInputTokens, pmReactResult.totalOutputTokens, pmReactResult.totalCost, pmId);
   } catch (err: any) {
     if (signal.aborted) return null;
     addLog(projectId, pmId, 'error', err.message);
@@ -591,6 +613,7 @@ async function phaseArchitect(
 // ═══════════════════════════════════════
 
 const BATCH_DOC_SIZE = 5; // 每批处理的 Feature 数
+const PHASE3_TIMEOUT_MS = 300_000; // Phase 3 单次 LLM 调用超时 5 分钟 (子需求生成量大)
 
 async function phaseReqsAndTestSpecs(
   projectId: string, features: any[], settings: AppSettings,
@@ -626,7 +649,7 @@ async function phaseReqsAndTestSpecs(
           role: 'user',
           content: `## 设计文档上下文\n${designContext}\n\n## Feature 列表 (${batch.length} 个, 请为每个单独输出子需求文档)\n\n${batchFeatureDesc}\n\n请为以上每个 Feature 分别编写详细子需求文档。用 "---FEATURE: Fxxx---" 分隔每个 Feature 的文档。`,
         },
-      ], signal, 16384);
+      ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
       const reqCost = calcCost(settings.strongModel, reqResult.inputTokens, reqResult.outputTokens);
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 批次 ${bi + 1}/${batches.length} 子需求生成完成 ($${reqCost.toFixed(4)})` });
@@ -641,7 +664,7 @@ async function phaseReqsAndTestSpecs(
       }
     } catch (err: any) {
       if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${err.message}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${err.message}${err.message.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     // 批量测试规格: 一次调用生成多个 Feature 的测试规格
@@ -659,7 +682,7 @@ async function phaseReqsAndTestSpecs(
             role: 'user',
             content: `## 多个 Feature 的子需求文档\n\n${batchReqDocs}\n\n请为以上每个 Feature 分别编写功能测试规格文档。用 "---FEATURE: Fxxx---" 分隔每个 Feature 的文档。`,
           },
-        ], signal, 16384);
+        ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
         const specCost = calcCost(settings.strongModel, specResult.inputTokens, specResult.outputTokens);
         sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 批次 ${bi + 1}/${batches.length} 测试规格生成完成 ($${specCost.toFixed(4)})` });
@@ -674,7 +697,7 @@ async function phaseReqsAndTestSpecs(
       }
     } catch (err: any) {
       if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${err.message}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${err.message}${err.message.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     createCheckpoint(projectId, `Phase 3: 批次 ${bi + 1}/${batches.length} 文档已生成`);
@@ -767,6 +790,25 @@ async function workerLoop(
       }
     }
 
+    // v5.5: 共享决策日志 — 声明计划修改的文件, 检测与其他 Worker 的冲突
+    if (workspacePath) {
+      const plannedFiles = predictAffectedFiles(feature);
+      const conflicts = claimFiles(workspacePath, workerId, feature.id, plannedFiles);
+      if (conflicts.length > 0) {
+        const conflictMsg = conflicts.map(c =>
+          `⚠️ ${c.otherWorkerId}(${c.otherFeatureId}) 正在修改: ${c.overlappingFiles.join(', ')}`
+        ).join('\n');
+        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔒 文件冲突检测:\n${conflictMsg}\n将注意避免冲突修改` });
+        // Inject conflict awareness into feature context for the developer
+        feature._conflictWarning = `注意: 以下文件正被其他 Worker 修改，请协调避免冲突:\n${conflictMsg}`;
+      }
+      // Inject other workers' active claims as context
+      const otherClaims = getClaimsSummary(workspacePath, workerId);
+      if (otherClaims) {
+        feature._otherWorkerClaims = otherClaims;
+      }
+    }
+
     let passed = false;
     let qaFeedback = '';
 
@@ -821,6 +863,11 @@ async function workerLoop(
     }
 
     if (signal.aborted) break;
+
+    // v5.5: 释放决策日志中的文件声明
+    if (workspacePath) {
+      releaseFiles(workspacePath, workerId, feature.id);
+    }
 
     // QA pass → 进入 pm_pending 状态 (等 Phase 6 PM 验收); QA fail → 直接 failed
     const newStatus = passed ? 'qa_passed' : 'failed';

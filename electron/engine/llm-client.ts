@@ -122,13 +122,14 @@ export async function callLLM(
   signal?: AbortSignal,
   maxTokens: number = 16384,
   retries: number = 2,
-  onChunk?: StreamCallback
+  onChunk?: StreamCallback,
+  timeoutMs: number = 180000,
 ): Promise<LLMResult> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) throw new Error('Aborted');
     try {
-      return await _callLLMOnce(settings, model, messages, signal, maxTokens, onChunk);
+      return await _callLLMOnce(settings, model, messages, signal, maxTokens, onChunk, timeoutMs);
     } catch (err: any) {
       lastError = err;
       if (signal?.aborted) throw err;
@@ -153,10 +154,11 @@ async function _callLLMOnce(
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
   maxTokens: number = 16384,
-  onChunk?: StreamCallback
+  onChunk?: StreamCallback,
+  timeoutMs: number = 180000,
 ): Promise<LLMResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const combinedSignal = signal
     ? anySignal([signal, controller.signal])
     : controller.signal;
