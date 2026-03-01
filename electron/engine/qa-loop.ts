@@ -251,3 +251,117 @@ export async function runQAReview(
     outputTokens: result.outputTokens,
   };
 }
+
+// ═══════════════════════════════════════
+// TDD Mode: 测试骨架生成 (G14)
+// ═══════════════════════════════════════
+
+/**
+ * TDD 模式: 在 Developer 编码之前, 由 QA 先生成测试骨架。
+ * Developer 的任务变为"让这些测试通过"。
+ *
+ * @returns 生成的测试文件列表 (相对路径) 和内容
+ */
+export async function generateTestSkeleton(
+  settings: any,
+  signal: AbortSignal,
+  feature: any,
+  workspacePath: string,
+  projectId?: string,
+): Promise<{ files: Array<{ path: string; content: string }>; tokensUsed: number }> {
+  const qaPrompt = (projectId ? getTeamPrompt(projectId, 'qa') : null) ?? QA_SYSTEM_PROMPT;
+  const infra = detectTestInfra(workspacePath);
+
+  let framework = 'jest';
+  let testExt = '.test.ts';
+  let testDir = '__tests__';
+  switch (infra.framework) {
+    case 'python':
+      framework = 'pytest';
+      testExt = '_test.py';
+      testDir = 'tests';
+      break;
+    case 'rust':
+      framework = 'cargo test';
+      testExt = '.rs';
+      testDir = 'tests';
+      break;
+    case 'go':
+      framework = 'go test';
+      testExt = '_test.go';
+      testDir = '';
+      break;
+  }
+
+  // 读取 feature 的子需求文档 (如有)
+  const reqDocPath = path.join(workspacePath, `.agentforge/docs/requirements/${feature.id}.md`);
+  let reqDoc = '';
+  if (fs.existsSync(reqDocPath)) {
+    reqDoc = fs.readFileSync(reqDocPath, 'utf-8').slice(0, 3000);
+  }
+
+  // 读取 feature 的测试规格 (如有)
+  const testSpecPath = path.join(workspacePath, `.agentforge/docs/test_specs/${feature.id}.md`);
+  let testSpec = '';
+  if (fs.existsSync(testSpecPath)) {
+    testSpec = fs.readFileSync(testSpecPath, 'utf-8').slice(0, 3000);
+  }
+
+  const prompt = `你是 QA 工程师, 负责为以下 Feature 在 Developer 编码之前生成测试骨架 (TDD 模式)。
+
+Feature: ${feature.id}
+标题: ${feature.title || feature.description}
+描述: ${feature.description}
+验收标准: ${feature.acceptance_criteria || '无'}
+
+${reqDoc ? `## 子需求文档\n${reqDoc}\n` : ''}
+${testSpec ? `## 测试规格\n${testSpec}\n` : ''}
+
+项目使用 ${framework} 测试框架。
+
+## 要求
+1. 为每个验收标准生成至少一个测试用例
+2. 测试应该有清晰的 describe/it 描述
+3. 断言先写好，实现体标注为 TODO 或使用 placeholder
+4. 测试文件名使用 ${testExt} 后缀
+5. 测试应该是可运行的（导入路径可以用预期路径）
+
+## 输出格式
+输出 JSON 数组, 每个元素包含:
+- path: 测试文件的相对路径 (如 "${testDir ? testDir + '/' : ''}feature-name${testExt}")
+- content: 完整的测试文件内容
+
+直接输出 JSON, 不要用 markdown 代码块包裹。`;
+
+  const result = await callLLM(settings, settings.strongModel, [
+    { role: 'system', content: qaPrompt },
+    { role: 'user', content: prompt },
+  ], signal, 8192);
+
+  let files: Array<{ path: string; content: string }> = [];
+  try {
+    const cleaned = result.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    files = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    log.warn('Failed to parse TDD test skeleton output', { raw: result.content.slice(0, 200) });
+    // Fallback: 将整个输出作为单个测试文件
+    if (result.content.includes('import') || result.content.includes('describe') || result.content.includes('def test_')) {
+      files = [{
+        path: `${testDir ? testDir + '/' : ''}${(feature.id || 'feature').toLowerCase()}${testExt}`,
+        content: result.content,
+      }];
+    }
+  }
+
+  // 写入测试文件到工作区
+  for (const file of files) {
+    if (!file.path || !file.content) continue;
+    const fullPath = path.join(workspacePath, file.path);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, file.content, 'utf-8');
+    log.info('TDD: wrote test skeleton', { path: file.path });
+  }
+
+  return { files, tokensUsed: result.inputTokens + result.outputTokens };
+}

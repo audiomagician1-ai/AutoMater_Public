@@ -126,13 +126,13 @@ export interface ContextResult {
  * 为某个 Feature 收集开发上下文
  * v1.1: 内部使用 ContextSection[] 结构化构建, 同时返回 ContextSnapshot
  */
-export function collectDeveloperContext(
+export async function collectDeveloperContext(
   workspacePath: string,
   projectId: string,
   feature: any,
   tokenBudget: number = 6000,
   agentId?: string
-): ContextResult {
+): Promise<ContextResult> {
   const sectionList: ContextSection[] = [];
   let totalChars = 0;
   let filesIncluded = 0;
@@ -295,7 +295,7 @@ export function collectDeveloperContext(
 
     try {
       // 构建 Code Graph 并用 multi-hop 遍历查找相关文件
-      const graph = buildCodeGraph(workspacePath, 300);
+      const graph = await buildCodeGraph(workspacePath, 300);
       const keywords = extractKeywords(feature.title + ' ' + feature.description);
       const seeds = inferSeedFiles(graph, depFiles, keywords, 5);
 

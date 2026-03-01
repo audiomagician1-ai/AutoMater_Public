@@ -988,12 +988,20 @@ export function OverviewPage() {
     return unsub;
   }, [currentProjectId, load]);
 
+  const [starting, setStarting] = useState(false);
+
   const handleStart = async () => {
-    if (!currentProjectId) return;
+    if (!currentProjectId || starting) return;
     if (!settingsConfigured) { setGlobalPage('settings'); return; }
-    await window.agentforge.project.start(currentProjectId);
-    addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队开始工作' });
-    load();
+    setStarting(true);
+    try {
+      await window.agentforge.project.start(currentProjectId);
+      addLog({ projectId: currentProjectId, agentId: 'system', content: '🚀 Agent 团队开始工作' });
+      load();
+    } finally {
+      // 1.5 秒后才允许再次点击，防止快速双击
+      setTimeout(() => setStarting(false), 1500);
+    }
   };
   const handleStop = async () => {
     if (!currentProjectId) return;
@@ -1112,15 +1120,15 @@ export function OverviewPage() {
                   <span className="text-[10px] text-emerald-400/60 group-hover:text-red-400/80 transition-colors">点击暂停</span>
                 </button>
               ) : canResume ? (
-                <button onClick={handleStart}
-                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-amber-900/30 hover:bg-emerald-900/40 border border-amber-500/20 hover:border-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/10">
+                <button onClick={handleStart} disabled={starting}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-amber-900/30 hover:bg-emerald-900/40 border border-amber-500/20 hover:border-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed">
                   <span className="text-lg">▶️</span>
                   <span className="text-sm font-bold text-amber-300 group-hover:text-emerald-300 transition-colors">已暂停</span>
                   <span className="text-[10px] text-amber-400/60 group-hover:text-emerald-400/80 transition-colors">点击继续</span>
                 </button>
               ) : canStart ? (
-                <button onClick={handleStart}
-                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-forge-800/50 hover:bg-forge-700/60 border border-forge-500/20 hover:border-forge-400/40 transition-all hover:shadow-lg hover:shadow-forge-500/20">
+                <button onClick={handleStart} disabled={starting}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-forge-800/50 hover:bg-forge-700/60 border border-forge-500/20 hover:border-forge-400/40 transition-all hover:shadow-lg hover:shadow-forge-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
                   <span className="text-lg group-hover:scale-110 group-hover:rotate-12 transition-all">🚀</span>
                   <span className="text-sm font-bold text-forge-300 group-hover:text-white transition-colors">启动开发</span>
                 </button>

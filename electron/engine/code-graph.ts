@@ -62,10 +62,19 @@ const CODE_EXTENSIONS = new Set([
   '.rs',
 ]);
 
+/** 让出主线程 — 避免 Electron UI 冻结 */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+/** 每处理 YIELD_BATCH 个文件后让出一次事件循环 */
+const YIELD_BATCH = 50;
+
 /**
- * 为工作区构建完整的 Code Graph
+ * 为工作区构建完整的 Code Graph（async — 不阻塞主线程）
+ * v5.7: 改为 async，内部文件读取循环定期 yield，解决 Electron 主进程冻结问题
  */
-export function buildCodeGraph(workspacePath: string, maxFiles: number = 500): CodeGraph {
+export async function buildCodeGraph(workspacePath: string, maxFiles: number = 500): Promise<CodeGraph> {
   const t0 = Date.now();
   const files = collectFiles(workspacePath, '', maxFiles);
   const nodes = new Map<string, CodeGraphNode>();
@@ -75,11 +84,15 @@ export function buildCodeGraph(workspacePath: string, maxFiles: number = 500): C
     nodes.set(file, { file, imports: [], importedBy: [] });
   }
 
-  // 解析每个文件的 imports
+  // 解析每个文件的 imports（定期 yield 避免阻塞）
   let edgeCount = 0;
   const fileSet = new Set(files);
 
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    // 每 YIELD_BATCH 个文件让出一次事件循环
+    if (i > 0 && i % YIELD_BATCH === 0) await yieldToEventLoop();
+
+    const file = files[i];
     const absPath = path.join(workspacePath, file.replace(/\//g, path.sep));
     let content: string;
     try {

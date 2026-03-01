@@ -145,6 +145,14 @@ export async function initDatabase(): Promise<void> {
     db.exec(`ALTER TABLE features ADD COLUMN sub_group TEXT`);
   } catch { /* 列已存在 */ }
 
+  // v6.0: features 两层索引 (G10) — group_id 用于大项目分组管理
+  try {
+    db.exec(`ALTER TABLE features ADD COLUMN group_id TEXT`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_features_group ON features(project_id, group_id)`);
+  } catch { /* 索引已存在 */ }
+
   // v4.2: features 表增加文档追踪 + PM 验收字段
   const v42Migrations = [
     `ALTER TABLE features ADD COLUMN requirement_doc_ver INTEGER NOT NULL DEFAULT 0`,
@@ -154,6 +162,15 @@ export async function initDatabase(): Promise<void> {
     `ALTER TABLE features ADD COLUMN pm_verdict_feedback TEXT`,
   ];
   for (const sql of v42Migrations) {
+    try { db.exec(sql); } catch { /* 列已存在 */ }
+  }
+
+  // v5.6: features 表增加 last_error / last_error_at — 用于 circuit-breaker 续跑判断
+  const v56Migrations = [
+    `ALTER TABLE features ADD COLUMN last_error TEXT`,
+    `ALTER TABLE features ADD COLUMN last_error_at TEXT`,
+  ];
+  for (const sql of v56Migrations) {
     try { db.exec(sql); } catch { /* 列已存在 */ }
   }
 

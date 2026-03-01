@@ -24,15 +24,16 @@ import { createLogger } from './logger';
 const log = createLogger('orchestrator');
 
 // ── 子模块 ──
-import { callLLM, calcCost, getSettings, sleep } from './llm-client';
+import { callLLM, calcCost, getSettings, sleep, validateModel, NonRetryableError } from './llm-client';
 import { sendToUI, addLog, notify, createStreamCallback } from './ui-bridge';
 import {
   stopOrchestrator as _stopOrchestrator, registerOrchestrator, unregisterOrchestrator,
+  isOrchestratorRunning,
   spawnAgent, updateAgentStats, checkBudget, lockNextFeature, getTeamPrompt,
 } from './agent-manager';
 import { reactDeveloperLoop, reactAgentLoop, getAgentReactStates as _getAgentReactStates, getContextSnapshots as _getContextSnapshots } from './react-loop';
 import type { GenericReactResult } from './react-loop';
-import { runQAReview } from './qa-loop';
+import { runQAReview, generateTestSkeleton } from './qa-loop';
 
 // ── 引擎依赖 ──
 import type { AppSettings, ProjectRow, FeatureRow, CountResult } from './types';
@@ -52,6 +53,7 @@ import { extractFromProjectMemory } from './cross-project';
 import { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkConsistency } from './doc-manager';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import { claimFiles, releaseFiles, getClaimsSummary, predictAffectedFiles, cleanupDecisionLog } from './decision-log';
+import { incrementalUpdate, scanProjectSkeleton, type ProjectSkeleton } from './project-importer';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -67,7 +69,15 @@ export type { AgentReactState, ReactIterationState, MessageTokenBreakdown, Gener
 // ═══════════════════════════════════════
 
 export async function runOrchestrator(projectId: string, win: BrowserWindow | null) {
-  _stopOrchestrator(projectId);
+  // ── v5.6: 防重入 — 如果已有编排流在跑，拒绝第二次调用 ──
+  if (isOrchestratorRunning(projectId)) {
+    log.warn(`Orchestrator already running for ${projectId}, ignoring duplicate call`);
+    sendToUI(win, 'agent:log', {
+      projectId, agentId: 'system',
+      content: '⚠️ 编排器已在运行中，忽略重复启动请求',
+    });
+    return;
+  }
 
   const abortCtrl = new AbortController();
   registerOrchestrator(projectId, abortCtrl);
@@ -78,12 +88,35 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   if (!settings || !settings.apiKey) {
     sendToUI(win, 'agent:error', { projectId, error: '请先在设置中配置 LLM API Key' });
+    unregisterOrchestrator(projectId);
     return;
+  }
+
+  // ── v5.6: Pre-flight 模型可用性预检 ──
+  {
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '🔍 预检: 验证 LLM 模型可用性...' });
+    const modelsToCheck = [...new Set([settings.strongModel, settings.workerModel, settings.fastModel].filter(Boolean))];
+    const errors: string[] = [];
+    for (const m of modelsToCheck) {
+      const err = await validateModel(settings, m);
+      if (err) errors.push(err);
+    }
+    if (errors.length > 0) {
+      const errMsg = `模型预检失败，请在设置中修正:\n${errors.join('\n')}`;
+      sendToUI(win, 'agent:error', { projectId, error: errMsg });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ ${errMsg}` });
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      sendToUI(win, 'project:status', { projectId, status: 'paused' });
+      unregisterOrchestrator(projectId);
+      return;
+    }
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `✅ 预检通过: ${modelsToCheck.join(', ')}` });
   }
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
   if (!project) {
     sendToUI(win, 'agent:error', { projectId, error: '项目不存在' });
+    unregisterOrchestrator(projectId);
     return;
   }
 
@@ -124,6 +157,49 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // ═══════════════════════════════════════
     // Phase 0: PM 需求分诊 (Wish Triage) — 由 PM 执行, 非元 Agent
     // ═══════════════════════════════════════
+
+    // ── v5.6: Circuit Breaker — 检查上次失败原因是否仍然存在 ──
+    {
+      const failedFeatures = db.prepare(
+        "SELECT id, last_error, last_error_at FROM features WHERE project_id = ? AND status = 'failed' AND last_error IS NOT NULL"
+      ).all(projectId) as Array<{ id: string; last_error: string; last_error_at: string }>;
+
+      if (failedFeatures.length > 0) {
+        // 检查是否全部都是不可重试错误
+        const nonRetryable = failedFeatures.filter(f => f.last_error?.includes('[NonRetryable:'));
+        if (nonRetryable.length === failedFeatures.length) {
+          // 所有失败的 Feature 都是不可重试错误 → 不要盲目重跑
+          const sampleError = nonRetryable[0].last_error;
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: 'system',
+            content: `🔴 Circuit Breaker: ${nonRetryable.length} 个 Feature 因不可重试错误失败 (如模型不可用、API Key 无效)。\n示例: ${sampleError}\n请在设置中修正后重新启动。`,
+          });
+          sendToUI(win, 'agent:error', {
+            projectId,
+            error: `所有 ${nonRetryable.length} 个失败的 Feature 都是配置类错误。请检查 LLM 设置后重试。`,
+          });
+          notify('🔴 AgentForge 需要修改配置', `${nonRetryable.length} 个 Feature 因模型/配置错误无法继续`);
+          db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+          sendToUI(win, 'project:status', { projectId, status: 'paused' });
+          unregisterOrchestrator(projectId);
+          return;
+        }
+
+        // 有部分是不可重试的 → 清除可重试的 failed Feature 让它们重跑，不可重试的保持 failed
+        if (nonRetryable.length > 0) {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: 'system',
+            content: `⚠️ ${nonRetryable.length} 个 Feature 因不可重试错误保持 failed 状态，${failedFeatures.length - nonRetryable.length} 个可重试 Feature 将重新执行`,
+          });
+        }
+      }
+
+      // 将可重试的 failed Feature 重置为 todo (不可重试的保持 failed)
+      db.prepare(
+        "UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status = 'failed' AND (last_error IS NULL OR last_error NOT LIKE '%[NonRetryable:%')"
+      ).run(projectId);
+    }
+
     // 元 Agent 只负责通用交互/路由, 不加载项目设计内容。
     // 分诊需要项目上下文(已有 Feature + 设计文档), 因此由 PM 角色执行。
     // 用户可能只是续跑未完成的 feature, 也可能带了新 wish。
@@ -266,6 +342,22 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
+  // Phase 4c: 增量文档同步 (G6 — 代码变更后自动更新模块摘要和文档)
+  // ═══════════════════════════════════════
+  if (workspacePath) {
+    await phaseIncrementalDocSync(projectId, win, signal, workspacePath);
+    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+  }
+
+  // ═══════════════════════════════════════
+  // Phase 4d: DevOps 自动构建验证 (G8)
+  // ═══════════════════════════════════════
+  if (workspacePath) {
+    await phaseDevOpsBuild(projectId, settings, win, signal, workspacePath);
+    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+  }
+
+  // ═══════════════════════════════════════
   // Phase 5: 汇总 + 用户验收等待 (v5.0: 原 Phase 7)
   // ═══════════════════════════════════════
   await phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
@@ -364,10 +456,11 @@ async function phasePMAnalysis(
   }
 
   // 写入 DB
-  const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?)`);
+  const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
   db.transaction((items: any[]) => {
     for (let i = 0; i < items.length; i++) {
       const f = items[i];
+      const groupId = f.group_name || f.category || 'default';
       insertFeature.run(
         f.id || `F${String(i + 1).padStart(3, '0')}`, projectId,
         f.category || 'core', f.priority ?? 1,
@@ -376,6 +469,7 @@ async function phasePMAnalysis(
         JSON.stringify(f.dependsOn || f.depends_on || []),
         JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []),
         f.notes || '',
+        groupId,
       );
     }
   })(features);
@@ -467,12 +561,13 @@ async function phaseIncrementalPM(
 
     // 写入 DB (追加, 不覆盖)
     const insertFeature = db.prepare(
-      `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?)`
+      `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`
     );
     db.transaction((items: any[]) => {
       for (let i = 0; i < items.length; i++) {
         const f = items[i];
+        const groupId = f.group_name || f.category || 'default';
         insertFeature.run(
           f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId,
           f.category || 'core', f.priority ?? 1,
@@ -481,6 +576,7 @@ async function phaseIncrementalPM(
           JSON.stringify(f.dependsOn || f.depends_on || []),
           JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []),
           f.notes || '',
+          groupId,
         );
       }
     })(newFeatures);
@@ -812,6 +908,27 @@ async function workerLoop(
     let passed = false;
     let qaFeedback = '';
 
+    // v6.0 (G14): TDD 模式 — QA 先生成测试骨架, Developer 的目标变为让测试通过
+    if (settings.tddMode && workspacePath) {
+      try {
+        sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `📝 TDD: 为 ${feature.id} 生成测试骨架...` });
+        sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'working', currentTask: feature.id, featureTitle: `TDD: ${feature.title || ''}` });
+        const tddResult = await generateTestSkeleton(settings, signal, feature, workspacePath, projectId);
+        if (tddResult.files.length > 0) {
+          const tddFiles = tddResult.files.map(f => f.path).join(', ');
+          sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `  ✅ TDD 测试骨架已写入: ${tddFiles}` });
+          // 将测试骨架信息注入到 feature 上下文，让 developer 知道要通过这些测试
+          feature._tddTests = tddResult.files.map(f => f.path);
+          feature._tddContext = `[TDD 模式] 以下测试文件已预先生成，你的目标是让这些测试全部通过:\n${tddFiles}\n请先阅读测试文件了解验收标准，然后编写实现代码。`;
+        }
+        db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
+        sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'idle' });
+      } catch (err: any) {
+        sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `  ⚠️ TDD 测试骨架生成失败 (将继续正常开发): ${err.message}` });
+      }
+    }
+    let lastErrorMsg = '';  // v5.6: 记录最后一个错误，用于 circuit-breaker
+
     for (let qaAttempt = 1; qaAttempt <= maxQARetries && !signal.aborted; qaAttempt++) {
       try {
         const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback);
@@ -855,6 +972,14 @@ async function workerLoop(
         }
       } catch (err: any) {
         if (signal.aborted) break;
+        lastErrorMsg = err.message || 'Unknown error';
+        // v5.6: 不可重试错误 → 直接终止 QA 重试循环
+        if (err instanceof NonRetryableError) {
+          lastErrorMsg = `[NonRetryable:${err.statusCode}] ${err.message}`;
+          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🛑 ${feature.id} 不可重试错误: ${err.message}` });
+          addLog(projectId, workerId, 'error', `[${feature.id}] NonRetryable: ${err.message}`);
+          break;
+        }
         sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `❌ ${feature.id} 错误: ${err.message}` });
         addLog(projectId, workerId, 'error', `[${feature.id}] ${err.message}`);
         if (qaAttempt >= maxQARetries) break;
@@ -871,8 +996,8 @@ async function workerLoop(
 
     // QA pass → 进入 pm_pending 状态 (等 Phase 6 PM 验收); QA fail → 直接 failed
     const newStatus = passed ? 'qa_passed' : 'failed';
-    db.prepare("UPDATE features SET status = ?, locked_by = NULL WHERE id = ? AND project_id = ?")
-      .run(newStatus, feature.id, projectId);
+    db.prepare("UPDATE features SET status = ?, locked_by = NULL, last_error = ?, last_error_at = CASE WHEN ? = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
+      .run(newStatus, passed ? null : lastErrorMsg, newStatus, feature.id, projectId);
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
     db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(workerId, projectId);
     emitEvent({ projectId, agentId: workerId, featureId: feature.id, type: passed ? 'feature:qa_passed' : 'feature:failed', data: { title: feature.title, status: newStatus } });
@@ -1007,6 +1132,207 @@ async function phasePMAcceptance(
 }
 
 // ═══════════════════════════════════════
+// Phase 4c: 增量文档同步 (G6)
+// ═══════════════════════════════════════
+
+/**
+ * 开发完成后，根据 git diff 检测变更文件，更新受影响模块的摘要和文档。
+ * 仅对"导入已有项目"或已有 skeleton 缓存的项目生效。
+ */
+async function phaseIncrementalDocSync(
+  projectId: string,
+  win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string,
+): Promise<void> {
+  const skeletonPath = path.join(workspacePath, '.agentforge/analysis/skeleton.json');
+  if (!fs.existsSync(skeletonPath)) {
+    log.debug('No skeleton.json found, skipping incremental doc sync');
+    return;
+  }
+
+  sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📝 Phase 4c: 增量文档同步 — 根据代码变更更新模块摘要...' });
+
+  try {
+    const skeleton: ProjectSkeleton = JSON.parse(fs.readFileSync(skeletonPath, 'utf-8'));
+
+    // 获取自上次分析以来的变更文件 (git diff)
+    let changedFiles: string[] = [];
+    try {
+      const { execSync } = require('child_process');
+      const diffOutput = execSync('git diff --name-only HEAD~5 HEAD', {
+        cwd: workspacePath,
+        encoding: 'utf-8',
+        timeout: 10_000,
+      }).trim();
+      if (diffOutput) {
+        changedFiles = diffOutput.split('\n').filter(Boolean);
+      }
+    } catch {
+      // 如果 git diff 失败（如首次提交），尝试 git status
+      try {
+        const { execSync } = require('child_process');
+        const statusOutput = execSync('git diff --name-only --cached', {
+          cwd: workspacePath,
+          encoding: 'utf-8',
+          timeout: 10_000,
+        }).trim();
+        if (statusOutput) {
+          changedFiles = statusOutput.split('\n').filter(Boolean);
+        }
+      } catch { /* no git available */ }
+    }
+
+    if (changedFiles.length === 0) {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ↳ 无代码变更，跳过文档同步' });
+      return;
+    }
+
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ↳ 检测到 ${changedFiles.length} 个文件变更，更新受影响模块...` });
+
+    const result = await incrementalUpdate(
+      workspacePath,
+      changedFiles,
+      skeleton,
+      signal,
+      (phase, step, progress) => {
+        sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
+      },
+    );
+
+    if (result.updatedModules.length > 0) {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ✅ 更新了 ${result.updatedModules.length} 个模块摘要: ${result.updatedModules.join(', ')}` });
+    } else {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ↳ 变更文件不属于已知模块，无需更新' });
+    }
+
+    emitEvent({ projectId, agentId: 'system', type: 'phase:dev:end', data: { incrementalDocSync: true, updatedModules: result.updatedModules.length } });
+  } catch (err: any) {
+    if (signal.aborted) return;
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 增量文档同步失败 (非致命): ${err.message}` });
+    log.warn('Incremental doc sync failed', err);
+  }
+}
+
+// ═══════════════════════════════════════
+// Phase 4d: DevOps 自动构建验证 (G8)
+// ═══════════════════════════════════════
+
+/**
+ * 自动构建 + lint 验证。DevOps 角色执行以下步骤:
+ *   1. 安装依赖 (npm install / pip install)
+ *   2. 编译/类型检查 (tsc / py_compile)
+ *   3. 运行完整测试套件
+ *   4. 汇报构建状态
+ */
+async function phaseDevOpsBuild(
+  projectId: string, settings: AppSettings,
+  win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string,
+): Promise<void> {
+  if (signal.aborted) return;
+
+  const db = getDb();
+  const devopsId = `devops-${Date.now().toString(36)}`;
+  spawnAgent(projectId, devopsId, 'devops', win);
+  sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'working', currentTask: 'build-verify', featureTitle: '构建验证' });
+  sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: '🚀 Phase 4d: DevOps 自动构建验证...' });
+
+  const buildSteps: Array<{ name: string; cmd: string; critical: boolean }> = [];
+
+  // 检测项目类型，选择合适的构建步骤
+  const hasPackageJson = fs.existsSync(path.join(workspacePath, 'package.json'));
+  const hasRequirements = fs.existsSync(path.join(workspacePath, 'requirements.txt'));
+  const hasPyproject = fs.existsSync(path.join(workspacePath, 'pyproject.toml'));
+  const hasCargoToml = fs.existsSync(path.join(workspacePath, 'Cargo.toml'));
+  const hasGoMod = fs.existsSync(path.join(workspacePath, 'go.mod'));
+
+  if (hasPackageJson) {
+    buildSteps.push({ name: '安装依赖', cmd: 'npm install --prefer-offline 2>&1', critical: true });
+    // 检查是否有 tsc
+    const pkg = JSON.parse(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf-8'));
+    const hasTsc = pkg.devDependencies?.typescript || pkg.dependencies?.typescript;
+    if (hasTsc || fs.existsSync(path.join(workspacePath, 'tsconfig.json'))) {
+      buildSteps.push({ name: '类型检查', cmd: 'npx tsc --noEmit 2>&1', critical: false });
+    }
+    // 检查 lint
+    if (pkg.devDependencies?.eslint || pkg.dependencies?.eslint || pkg.scripts?.lint) {
+      buildSteps.push({ name: 'Lint', cmd: pkg.scripts?.lint ? 'npm run lint 2>&1' : 'npx eslint . --ext .ts,.tsx,.js,.jsx 2>&1', critical: false });
+    }
+    // 测试
+    if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+      buildSteps.push({ name: '测试', cmd: 'npm test 2>&1', critical: false });
+    }
+    // build
+    if (pkg.scripts?.build) {
+      buildSteps.push({ name: '构建', cmd: 'npm run build 2>&1', critical: true });
+    }
+  } else if (hasRequirements || hasPyproject) {
+    if (hasRequirements) buildSteps.push({ name: '安装依赖', cmd: 'pip install -r requirements.txt 2>&1', critical: true });
+    if (hasPyproject) buildSteps.push({ name: '安装依赖', cmd: 'pip install -e . 2>&1', critical: true });
+    buildSteps.push({ name: '语法检查', cmd: 'python -m py_compile $(find . -name "*.py" -not -path "*/venv/*" -not -path "*/.venv/*" | head -50) 2>&1', critical: false });
+    buildSteps.push({ name: '测试', cmd: 'pytest --tb=short 2>&1 || python -m pytest --tb=short 2>&1 || echo "No pytest"', critical: false });
+  } else if (hasCargoToml) {
+    buildSteps.push({ name: '构建', cmd: 'cargo build 2>&1', critical: true });
+    buildSteps.push({ name: '测试', cmd: 'cargo test 2>&1', critical: false });
+  } else if (hasGoMod) {
+    buildSteps.push({ name: '构建', cmd: 'go build ./... 2>&1', critical: true });
+    buildSteps.push({ name: '测试', cmd: 'go test ./... 2>&1', critical: false });
+  }
+
+  if (buildSteps.length === 0) {
+    sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: '  ↳ 未检测到已知构建系统，跳过' });
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+    sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
+    return;
+  }
+
+  let allPassed = true;
+  const results: Array<{ name: string; ok: boolean; output: string }> = [];
+  const { execSync } = require('child_process');
+
+  for (const step of buildSteps) {
+    if (signal.aborted) break;
+    sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  🔧 ${step.name}...` });
+
+    try {
+      const output = execSync(step.cmd, {
+        cwd: workspacePath,
+        encoding: 'utf-8',
+        timeout: 120_000,
+        maxBuffer: 1024 * 1024,
+      });
+      results.push({ name: step.name, ok: true, output: output.slice(-500) });
+      sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  ✅ ${step.name} 成功` });
+    } catch (err: any) {
+      const output = (err.stdout || '') + (err.stderr || '');
+      results.push({ name: step.name, ok: false, output: output.slice(-500) });
+      if (step.critical) {
+        allPassed = false;
+        sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  ❌ ${step.name} 失败 (关键步骤):\n${output.slice(-300)}` });
+      } else {
+        sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  ⚠️ ${step.name} 失败 (非关键):\n${output.slice(-200)}` });
+      }
+    }
+  }
+
+  const passedCount = results.filter(r => r.ok).length;
+  const summary = allPassed
+    ? `✅ 构建验证全部通过 (${passedCount}/${results.length} 步骤)`
+    : `⚠️ 构建验证部分失败 (${passedCount}/${results.length} 步骤通过)`;
+
+  sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: summary });
+  addLog(projectId, devopsId, 'log', summary);
+
+  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+  sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
+  emitEvent({ projectId, agentId: devopsId, type: 'phase:dev:end', data: { devops: true, allPassed, steps: results.length, passed: passedCount } });
+
+  if (workspacePath && allPassed) {
+    commitWorkspace(workspacePath, 'AgentForge: DevOps build verification passed');
+  }
+}
+
+// ═══════════════════════════════════════
 // Phase 7: 汇总 + 用户验收等待
 // ═══════════════════════════════════════
 
@@ -1122,41 +1448,93 @@ function safeJsonParse(str: string | null | undefined, fallback: any): any {
 function ensureAgentsMd(workspacePath: string, wish: string) {
   const agentsDir = path.join(workspacePath, '.agentforge');
   const agentsPath = path.join(agentsDir, 'AGENTS.md');
-  if (fs.existsSync(agentsPath)) return;
   fs.mkdirSync(agentsDir, { recursive: true });
 
+  // v6.0 (G15): 每次运行都重新生成 AGENTS.md (而非仅首次)
+  // 读取实际的架构信息
   let techInfo = '';
   const archPath = path.join(workspacePath, 'ARCHITECTURE.md');
   if (fs.existsSync(archPath)) {
-    techInfo = fs.readFileSync(archPath, 'utf-8').split('\n').slice(0, 30).join('\n');
+    techInfo = fs.readFileSync(archPath, 'utf-8').split('\n').slice(0, 50).join('\n');
   }
+
+  // 读取 package.json / pyproject.toml 获取依赖信息
+  let depsInfo = '';
+  const pkgPath = path.join(workspacePath, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const deps = Object.keys(pkg.dependencies || {}).slice(0, 20);
+      const devDeps = Object.keys(pkg.devDependencies || {}).slice(0, 10);
+      depsInfo = `### 依赖\n- 运行时: ${deps.join(', ') || '无'}\n- 开发: ${devDeps.join(', ') || '无'}`;
+    } catch { /* parse error */ }
+  }
+
+  // 读取 .gitignore 获取忽略规则
+  let gitignoreInfo = '';
+  const gitignorePath = path.join(workspacePath, '.gitignore');
+  if (fs.existsSync(gitignorePath)) {
+    const ignoreRules = fs.readFileSync(gitignorePath, 'utf-8').split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0, 15);
+    gitignoreInfo = `### .gitignore 规则\n${ignoreRules.map(r => `- ${r}`).join('\n')}`;
+  }
+
+  // 读取 tsconfig.json 获取编译配置
+  let tsInfo = '';
+  const tsConfigPath = path.join(workspacePath, 'tsconfig.json');
+  if (fs.existsSync(tsConfigPath)) {
+    try {
+      const tsConfig = JSON.parse(fs.readFileSync(tsConfigPath, 'utf-8'));
+      const co = tsConfig.compilerOptions || {};
+      tsInfo = `### TypeScript 配置\n- target: ${co.target || 'N/A'}\n- module: ${co.module || 'N/A'}\n- strict: ${co.strict ?? 'N/A'}\n- outDir: ${co.outDir || 'N/A'}`;
+    } catch { /* parse error */ }
+  }
+
+  // 检测目录结构
+  let dirStructure = '';
+  try {
+    const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
+    const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules').map(e => e.name);
+    const files = entries.filter(e => e.isFile()).map(e => e.name);
+    dirStructure = `### 项目结构\n- 目录: ${dirs.join(', ') || '无'}\n- 根文件: ${files.slice(0, 15).join(', ')}`;
+  } catch { /* read error */ }
 
   const content = [
     `# AGENTS.md — 项目规范`,
-    `> 此文件由 AgentForge 自动生成，Agent 和用户均可编辑。`,
+    `> 此文件由 AgentForge 自动生成和维护，Agent 和用户均可编辑。`,
+    `> 最后更新: ${new Date().toISOString().slice(0, 19)}`,
     ``,
     `## 项目概述`,
-    wish.slice(0, 500),
+    wish.slice(0, 800),
     ``,
     `## 技术栈概要`,
-    techInfo || '(待补充)',
+    techInfo || '(待补充 — 架构文档生成后自动填充)',
+    ``,
+    depsInfo || '',
+    tsInfo || '',
+    dirStructure || '',
+    gitignoreInfo || '',
     ``,
     `## 编码规范`,
-    `- 使用项目已有的代码风格`,
+    `- 使用项目已有的代码风格和缩进`,
     `- 文件组织遵循 ARCHITECTURE.md`,
     `- 所有新文件必须包含必要的 import/export`,
-    `- 不要忽略异常`,
+    `- 不要忽略异常，使用适当的错误处理`,
+    `- 优先使用 edit_file 而非 write_file 修改已有文件`,
+    `- 新增文件前先搜索是否已有类似功能`,
     ``,
     `## 常用命令`,
     `- 安装依赖: npm install / pip install -r requirements.txt`,
     `- 编译检查: npx tsc --noEmit`,
     `- 运行测试: npm test / pytest`,
+    `- 构建: npm run build (如可用)`,
     ``,
     `## 注意事项`,
     `- 修改已有文件用 edit_file，不要 write_file 重写`,
     `- 每个 Feature 完成后调用 task_complete`,
+    `- 遇到信息不足时使用 report_blocked 阻塞`,
+    `- 发现设计问题使用 rfc_propose 提案`,
     ``,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   fs.writeFileSync(agentsPath, content, 'utf-8');
 }

@@ -189,12 +189,12 @@ export async function scanProjectSkeleton(
   await yieldToEventLoop();
   onProgress?.(0, '扫描文件结构...', 0.1);
 
-  // 2. 收集代码文件 + LOC 统计（一次读取同时收集 LOC）
+  // 2. 收集代码文件 + LOC 统计（一次读取同时收集 LOC，async 定期 yield）
   const allFiles: string[] = [];
   const locByExt: Record<string, number> = {};
   const fileLOCMap = new Map<string, number>(); // 文件 → 行数（供 detectModules 复用）
   let totalLOC = 0;
-  collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
+  await collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
   for (const v of Object.values(locByExt)) totalLOC += v;
 
   if (allFiles.length >= MAX_SCAN_FILES) {
@@ -209,12 +209,14 @@ export async function scanProjectSkeleton(
 
   await yieldToEventLoop();
   onProgress?.(0, '构建代码依赖图...', 0.4);
+  log.info('Phase 0: Building code graph', { files: allFiles.length });
 
-  // 4. Code Graph
-  const graph = buildCodeGraph(workspacePath, 2000);
+  // 4. Code Graph (async — 不阻塞主线程)
+  const graph = await buildCodeGraph(workspacePath, 2000);
 
+  log.info('Phase 0: Code graph built', { nodes: graph.fileCount, edges: graph.edgeCount, ms: graph.buildTimeMs });
   await yieldToEventLoop();
-  onProgress?.(0, '推断入口文件...', 0.7);
+  onProgress?.(0, `依赖图完成 (${graph.fileCount} 节点, ${graph.edgeCount} 边)，推断入口文件...`, 0.7);
 
   // 5. 入口文件推断
   const entryFiles = inferEntryFiles(workspacePath, allFiles);
@@ -640,22 +642,31 @@ export async function importProject(
   docsGenerated: number;
 }> {
   log.info('=== Project Import Start ===', { workspacePath, projectId });
+  const t0Import = Date.now();
 
   // Phase 0: 静态扫描 (async, 带进度回调)
+  log.info('Phase 0: Starting...');
   const skeleton = await scanProjectSkeleton(workspacePath, onProgress);
+  log.info('Phase 0: Done', { files: skeleton.fileCount, modules: skeleton.modules.length, ms: Date.now() - t0Import });
 
   // Phase 1: 模块摘要
+  log.info('Phase 1: Starting module summarization...');
   const summaries = await summarizeModules(workspacePath, skeleton, signal, onProgress);
+  log.info('Phase 1: Done', { summaries: summaries.length, ms: Date.now() - t0Import });
 
   // Phase 2: 架构合成
+  log.info('Phase 2: Starting architecture synthesis...');
   const { architectureMd } = await synthesizeArchitecture(
     workspacePath, skeleton, summaries, signal, onProgress,
   );
+  log.info('Phase 2: Done', { ms: Date.now() - t0Import });
 
   // Phase 3: 文档填充
+  log.info('Phase 3: Starting document population...');
   const { docsGenerated } = await populateDocuments(
     workspacePath, projectId, skeleton, summaries, architectureMd, signal, onProgress,
   );
+  log.info('Phase 3: Done', { docs: docsGenerated, ms: Date.now() - t0Import });
 
   log.info('=== Project Import Complete ===', {
     files: skeleton.fileCount,
@@ -670,15 +681,16 @@ export async function importProject(
 // Internal Helpers
 // ═══════════════════════════════════════
 
-/** 递归收集代码文件并统计 LOC（同时填充 fileLOCMap 供后续复用） */
-function collectCodeFilesRecursive(
+/** 递归收集代码文件并统计 LOC（同时填充 fileLOCMap 供后续复用）
+ *  v5.7: 改为 async + 定期 yield，避免大项目阻塞 Electron 主线程 */
+async function collectCodeFilesRecursive(
   basePath: string,
   relative: string,
   result: string[],
   locByExt: Record<string, number>,
   fileLOCMap: Map<string, number>,
   maxFiles: number,
-): void {
+): Promise<void> {
   if (result.length >= maxFiles) return;
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
@@ -693,7 +705,7 @@ function collectCodeFilesRecursive(
 
     if (entry.isDirectory()) {
       if (!IGNORE_DIRS.has(entry.name)) {
-        collectCodeFilesRecursive(basePath, rel, result, locByExt, fileLOCMap, maxFiles);
+        await collectCodeFilesRecursive(basePath, rel, result, locByExt, fileLOCMap, maxFiles);
       }
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
@@ -705,6 +717,8 @@ function collectCodeFilesRecursive(
           locByExt[ext] = (locByExt[ext] || 0) + lines;
           fileLOCMap.set(rel, lines);
         } catch { /* skip unreadable */ }
+        // 每 50 个文件让出一次事件循环
+        if (result.length % 50 === 0) await yieldToEventLoop();
       }
     }
   }

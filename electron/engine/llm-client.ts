@@ -40,6 +40,19 @@ export interface LLMResult {
 
 export type StreamCallback = (chunk: string) => void;
 
+/**
+ * 不可重试的 LLM 错误 — 模型不存在、API Key 无效、权限不足等。
+ * react-loop / workerLoop 见到此错误应立即终止，不再重试。
+ */
+export class NonRetryableError extends Error {
+  public readonly statusCode: number;
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = 'NonRetryableError';
+    this.statusCode = statusCode;
+  }
+}
+
 export interface ToolCallMessage {
   role: 'assistant';
   content: string | null;
@@ -98,8 +111,42 @@ export function getSettings(): AppSettings | null {
 // Utilities
 // ═══════════════════════════════════════
 
+/**
+ * 预检模型可用性 — 发送一条极简请求，验证模型名称有效 + API 连通
+ * 返回 null 表示通过，否则返回错误描述
+ */
+export async function validateModel(settings: AppSettings, model: string): Promise<string | null> {
+  if (!model?.trim()) return `模型名称为空`;
+  try {
+    await callLLM(settings, model, [
+      { role: 'user', content: 'hi' },
+    ], undefined, 1, 0); // maxTokens=1, retries=0 — 极低开销
+    return null; // 通过
+  } catch (err: any) {
+    if (err instanceof NonRetryableError) {
+      return `模型 ${model} 不可用: ${err.message}`;
+    }
+    // 网络错误等也报出来
+    return `模型 ${model} 连接失败: ${err.message}`;
+  }
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 统一处理 LLM API 的 HTTP 错误响应。
+ * 4xx（除 429）→ NonRetryableError，其余 → 普通 Error。
+ */
+async function throwOnHttpError(res: Response, provider: string): Promise<void> {
+  if (res.ok) return;
+  const errText = await res.text().catch(() => '(failed to read body)');
+  const errMsg = `${provider} API ${res.status}: ${errText}`;
+  if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+    throw new NonRetryableError(errMsg, res.status);
+  }
+  throw new Error(errMsg);
 }
 
 /** Combine multiple AbortSignals — any one aborts → combined aborts */
@@ -133,13 +180,8 @@ export async function callLLM(
     } catch (err: any) {
       lastError = err;
       if (signal?.aborted) throw err;
-      // Don't retry on client errors (4xx) except rate limiting (429)
-      const msg = err.message ?? '';
-      const statusMatch = msg.match(/API (\d{3})/);
-      if (statusMatch) {
-        const status = parseInt(statusMatch[1], 10);
-        if (status >= 400 && status < 500 && status !== 429) throw err;
-      }
+      // v5.6: NonRetryableError 直接冒泡，不重试
+      if (err instanceof NonRetryableError) throw err;
       if (attempt < retries) {
         const delay = Math.min(2000 * Math.pow(2, attempt), 15000);
         await sleep(delay);
@@ -192,7 +234,7 @@ async function _callOpenAI(
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+  if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
   if (!stream) {
     const data = await res.json() as any;
@@ -264,7 +306,7 @@ async function _callAnthropic(
     headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+  if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
   if (!stream) {
     const data = await res.json() as any;
@@ -370,7 +412,7 @@ async function _callOpenAIWithTools(
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+  if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
   const data = await res.json() as any;
   const choice = data.choices[0];
@@ -468,7 +510,7 @@ async function _callAnthropicWithTools(
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+  if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
   const data = await res.json() as any;
 

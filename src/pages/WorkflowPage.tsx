@@ -9,6 +9,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 
+/** Mission record from DB */
+interface MissionRecord {
+  id: string;
+  type: string;
+  status: string;
+  plan?: string;
+  conclusion?: string;
+  token_usage?: number;
+  cost_usd?: number;
+  created_at?: string;
+  completed_at?: string;
+}
+
 // ═══════════════════════════════════════
 // Mission Types (临时工作流)
 // ═══════════════════════════════════════
@@ -31,7 +44,8 @@ const PIPELINE_COMPACT = [
   { id: 'architect', icon: '🏗️', label: '架构',   color: 'bg-blue-500' },
   { id: 'docs',      icon: '📋', label: '文档',   color: 'bg-cyan-500' },
   { id: 'dev',       icon: '💻', label: '开发',   color: 'bg-amber-500' },
-  { id: 'qa',        icon: '🧪', label: '验收',   color: 'bg-emerald-500' },
+  { id: 'qa',        icon: '🧪', label: 'QA',     color: 'bg-emerald-500' },
+  { id: 'devops',    icon: '🚀', label: 'DevOps', color: 'bg-rose-500' },
   { id: 'accept',    icon: '🎯', label: '交付',   color: 'bg-orange-500' },
 ];
 

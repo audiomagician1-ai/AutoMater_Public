@@ -10,7 +10,7 @@
 
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
-import { callLLM, callLLMWithTools, calcCost, sleep, type StreamCallback } from './llm-client';
+import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { updateAgentStats, checkBudget, getTeamPrompt } from './agent-manager';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
@@ -222,7 +222,7 @@ export async function reactDeveloperLoop(
   // ── Code Graph ──
   if (workspacePath) {
     try {
-      const graph = buildCodeGraph(workspacePath, 300);
+      const graph = await buildCodeGraph(workspacePath, 300);
       const summary = graphSummary(graph);
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
@@ -235,7 +235,7 @@ export async function reactDeveloperLoop(
 
   // 构建初始消息列表
   const initialContext = workspacePath
-    ? collectDeveloperContext(workspacePath, projectId, feature, 5000, workerId)
+    ? await collectDeveloperContext(workspacePath, projectId, feature, 5000, workerId)
     : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
 
   if (initialContext.snapshot) {
@@ -585,6 +585,15 @@ export async function reactDeveloperLoop(
 
     } catch (err: any) {
       if (signal.aborted) break;
+      // v5.6: 不可重试错误（模型不存在、API Key 无效等）→ 立即终止，不等 consecutive count
+      if (err instanceof NonRetryableError) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🛑 ${feature.id} 不可重试错误 (${err.statusCode}): ${err.message}`,
+        });
+        addLog(projectId, workerId, 'error', `[${feature.id}] NonRetryable: ${err.message}`);
+        break;
+      }
       guardState.consecutiveErrorCount++;
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
@@ -879,6 +888,12 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
 
     } catch (err: any) {
       if (signal.aborted) break;
+      // v5.6: 不可重试错误立即终止
+      if (err instanceof NonRetryableError) {
+        sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 不可重试错误 (${err.statusCode}): ${err.message}` });
+        addLog(projectId, agentId, 'error', `NonRetryable: ${err.message}`);
+        break;
+      }
       guardState.consecutiveErrorCount++;
       sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误: ${err.message}` });
       addLog(projectId, agentId, 'error', `iter ${iter}: ${err.message}`);

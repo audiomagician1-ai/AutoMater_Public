@@ -10,10 +10,10 @@
  * - 进度报告生成
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
 
-type TabId = 'timeline' | 'analytics' | 'checkpoints' | 'knowledge';
+type TabId = 'timeline' | 'replay' | 'analytics' | 'checkpoints' | 'knowledge';
 
 const EVENT_ICONS: Record<string, string> = {
   'project:start': '🚀',
@@ -54,6 +54,13 @@ export default function TimelinePage() {
   const [filterType, setFilterType] = useState<string>('all');
   const [loading, setLoading] = useState(false);
 
+  // G12: Replay state
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(500); // ms per event
+  const [replayFeatureFilter, setReplayFeatureFilter] = useState<string>('all');
+  const replayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const projectId = currentProjectId;
 
   const loadData = useCallback(async () => {
@@ -78,6 +85,30 @@ export default function TimelinePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // G12: Replay timer
+  const replayEvents = replayFeatureFilter === 'all'
+    ? events
+    : events.filter(e => e.featureId === replayFeatureFilter);
+
+  useEffect(() => {
+    if (replayPlaying && replayEvents.length > 0) {
+      replayTimerRef.current = setInterval(() => {
+        setReplayIndex(prev => {
+          if (prev >= replayEvents.length - 1) {
+            setReplayPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, replaySpeed);
+    }
+    return () => {
+      if (replayTimerRef.current) clearInterval(replayTimerRef.current);
+    };
+  }, [replayPlaying, replaySpeed, replayEvents.length]);
+
+  const replayFeatureIds = [...new Set(events.filter(e => e.featureId).map(e => e.featureId))];
+
   useEffect(() => {
     if (tab === 'knowledge' && !knowledgeStats) {
       window.agentforge.knowledge.getStats().then(setKnowledgeStats).catch(() => {});
@@ -101,7 +132,7 @@ export default function TimelinePage() {
     <div className="h-full flex flex-col bg-slate-900">
       {/* Tab bar */}
       <div className="flex items-center border-b border-slate-700 px-4">
-        {(['timeline', 'analytics', 'checkpoints', 'knowledge'] as TabId[]).map(t => (
+        {(['timeline', 'replay', 'analytics', 'checkpoints', 'knowledge'] as TabId[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -111,7 +142,7 @@ export default function TimelinePage() {
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t === 'timeline' ? '📜 时间线' : t === 'analytics' ? '📊 分析' : t === 'checkpoints' ? '🏁 检查点' : '🌐 经验池'}
+            {t === 'timeline' ? '📜 时间线' : t === 'replay' ? '🎬 重放' : t === 'analytics' ? '📊 分析' : t === 'checkpoints' ? '🏁 检查点' : '🌐 经验池'}
           </button>
         ))}
         <div className="ml-auto">
@@ -202,6 +233,135 @@ export default function TimelinePage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── Replay Tab (G12) ── */}
+        {tab === 'replay' && !loading && (
+          <div>
+            {/* Replay controls */}
+            <div className="bg-slate-800 rounded-lg p-4 mb-4">
+              <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => { setReplayIndex(0); setReplayPlaying(false); }}
+                  className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded"
+                  title="重置"
+                >⏮</button>
+                <button
+                  onClick={() => setReplayIndex(Math.max(0, replayIndex - 1))}
+                  className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded"
+                  title="上一步"
+                >⏪</button>
+                <button
+                  onClick={() => setReplayPlaying(!replayPlaying)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded transition-colors ${
+                    replayPlaying ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
+                  {replayPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button
+                  onClick={() => setReplayIndex(Math.min(replayEvents.length - 1, replayIndex + 1))}
+                  className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded"
+                  title="下一步"
+                >⏩</button>
+                <button
+                  onClick={() => { setReplayIndex(replayEvents.length - 1); setReplayPlaying(false); }}
+                  className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded"
+                  title="到末尾"
+                >⏭</button>
+
+                <div className="ml-4 flex items-center gap-2">
+                  <span className="text-xs text-slate-400">速度:</span>
+                  {[1000, 500, 200, 50].map(speed => (
+                    <button
+                      key={speed}
+                      onClick={() => setReplaySpeed(speed)}
+                      className={`px-2 py-0.5 text-xs rounded ${
+                        replaySpeed === speed ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {speed >= 1000 ? '1x' : speed >= 500 ? '2x' : speed >= 200 ? '5x' : '20x'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="ml-4 flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Feature:</span>
+                  <select
+                    value={replayFeatureFilter}
+                    onChange={e => { setReplayFeatureFilter(e.target.value); setReplayIndex(0); setReplayPlaying(false); }}
+                    className="text-xs bg-slate-700 text-slate-300 rounded px-2 py-1 border-none"
+                  >
+                    <option value="all">全部</option>
+                    {replayFeatureIds.map(fid => (
+                      <option key={fid} value={fid}>{fid}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="relative h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 bg-indigo-500 rounded-full transition-all duration-200"
+                  style={{ width: `${replayEvents.length > 0 ? (replayIndex / (replayEvents.length - 1)) * 100 : 0}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-1 text-[10px] text-slate-500">
+                <span>事件 {replayIndex + 1} / {replayEvents.length}</span>
+                <span>{replayEvents[replayIndex]?.timestamp?.replace('T', ' ').slice(0, 19) || ''}</span>
+              </div>
+            </div>
+
+            {/* Current event detail */}
+            {replayEvents.length > 0 && replayIndex < replayEvents.length && (
+              <div className="bg-slate-800 rounded-lg p-4 mb-4 border border-indigo-500/30">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">{EVENT_ICONS[replayEvents[replayIndex].type] || '•'}</span>
+                  <div>
+                    <div className="text-sm font-medium text-indigo-300">{replayEvents[replayIndex].type}</div>
+                    <div className="text-xs text-slate-400">
+                      {replayEvents[replayIndex].agentId && `Agent: ${replayEvents[replayIndex].agentId}`}
+                      {replayEvents[replayIndex].featureId && ` | Feature: ${replayEvents[replayIndex].featureId}`}
+                      {replayEvents[replayIndex].costUsd > 0 && ` | 成本: $${replayEvents[replayIndex].costUsd.toFixed(4)}`}
+                      {replayEvents[replayIndex].durationMs && ` | 耗时: ${replayEvents[replayIndex].durationMs}ms`}
+                    </div>
+                  </div>
+                </div>
+                <pre className="text-xs text-slate-300 bg-slate-900 rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
+                  {JSON.stringify(replayEvents[replayIndex].data, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            {/* Event timeline (scrolled to current) */}
+            <div className="space-y-0.5 max-h-[40vh] overflow-auto">
+              {replayEvents.slice(0, replayIndex + 1).map((evt, i) => (
+                <div
+                  key={evt.id || i}
+                  className={`flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                    i === replayIndex ? 'bg-indigo-900/50 border border-indigo-500/30' : 'bg-slate-800/30 hover:bg-slate-800/60'
+                  }`}
+                  onClick={() => { setReplayIndex(i); setReplayPlaying(false); }}
+                >
+                  <span className="flex-shrink-0">{EVENT_ICONS[evt.type] || '•'}</span>
+                  <span className="font-mono text-indigo-400 w-32 truncate">{evt.type}</span>
+                  {evt.featureId && <span className="bg-slate-700 px-1 rounded text-slate-300">{evt.featureId}</span>}
+                  <span className="text-slate-500 truncate flex-1">
+                    {typeof evt.data === 'object' ? JSON.stringify(evt.data).slice(0, 80) : String(evt.data).slice(0, 80)}
+                  </span>
+                  <span className="text-[10px] text-slate-600 flex-shrink-0">{evt.timestamp?.slice(11, 19)}</span>
+                </div>
+              ))}
+            </div>
+
+            {replayEvents.length === 0 && (
+              <div className="text-center text-slate-500 py-12">
+                <div className="text-4xl mb-2">🎬</div>
+                <div>暂无事件可重放。运行项目后再试。</div>
+              </div>
+            )}
           </div>
         )}
 

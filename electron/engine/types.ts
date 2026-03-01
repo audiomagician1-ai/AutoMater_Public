@@ -25,6 +25,8 @@ export interface AppSettings {
   workerCount: number;
   /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
+  /** TDD 模式: QA 先生成测试骨架, Developer 围绕测试编码 (G14) */
+  tddMode?: boolean;
 }
 
 // ═══════════════════════════════════════

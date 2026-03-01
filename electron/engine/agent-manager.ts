@@ -19,8 +19,25 @@ export function getRunningOrchestrators() {
   return runningOrchestrators;
 }
 
-export function registerOrchestrator(projectId: string, ctrl: AbortController) {
+/**
+ * 注册编排器。如果该 projectId 已有运行中的编排器，先 abort 旧的再注册新的。
+ * 返回 true 表示是「全新启动」，false 表示「替换了旧实例」。
+ */
+export function registerOrchestrator(projectId: string, ctrl: AbortController): boolean {
+  const existing = runningOrchestrators.get(projectId);
+  if (existing) {
+    existing.abort();
+    runningOrchestrators.delete(projectId);
+  }
   runningOrchestrators.set(projectId, ctrl);
+  return !existing;
+}
+
+/**
+ * 检查某个项目是否有编排器正在运行
+ */
+export function isOrchestratorRunning(projectId: string): boolean {
+  return runningOrchestrators.has(projectId);
 }
 
 export function unregisterOrchestrator(projectId: string) {
@@ -118,7 +135,25 @@ export function lockNextFeature(projectId: string, workerId: string): any | null
     const passedRows = db.prepare("SELECT id FROM features WHERE project_id = ? AND status = 'passed'").all(projectId) as { id: string }[];
     const passedSet = new Set(passedRows.map(r => r.id));
 
-    const todos = db.prepare("SELECT * FROM features WHERE project_id = ? AND status = 'todo' ORDER BY priority ASC, id ASC").all(projectId) as any[];
+    // v6.0 (G10): 两层索引 — 优先从同 group 中选择 feature
+    // 先检查当前 worker 正在处理的 group (如有)
+    const currentGroup = db.prepare(
+      "SELECT group_id FROM features WHERE project_id = ? AND locked_by = ? AND status = 'in_progress' LIMIT 1"
+    ).get(projectId, workerId) as { group_id: string } | undefined;
+
+    // 查询所有 todo features, 按 group 亲和力 + priority 排序
+    let todos: any[];
+    if (currentGroup?.group_id) {
+      // 同 group 优先 (group affinity ordering)
+      todos = db.prepare(
+        `SELECT * FROM features WHERE project_id = ? AND status = 'todo'
+         ORDER BY CASE WHEN group_id = ? THEN 0 ELSE 1 END, priority ASC, id ASC`
+      ).all(projectId, currentGroup.group_id) as any[];
+    } else {
+      todos = db.prepare(
+        "SELECT * FROM features WHERE project_id = ? AND status = 'todo' ORDER BY priority ASC, id ASC"
+      ).all(projectId) as any[];
+    }
 
     for (const f of todos) {
       let deps: string[] = [];
@@ -138,4 +173,37 @@ export function lockNextFeature(projectId: string, workerId: string): any | null
   });
 
   return tryLock();
+}
+
+/**
+ * v6.0 (G10): 按 group 返回 Feature 统计摘要 (两层索引)
+ * 用于大项目中快速了解各 group 进度, 而不需要加载所有 feature 详情
+ */
+export function getFeatureGroupSummary(projectId: string): Array<{
+  groupId: string;
+  total: number;
+  done: number;
+  inProgress: number;
+  failed: number;
+}> {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      COALESCE(group_id, 'default') as group_id,
+      COUNT(*) as total,
+      SUM(CASE WHEN status IN ('passed','qa_passed') THEN 1 ELSE 0 END) as done,
+      SUM(CASE WHEN status IN ('in_progress','reviewing') THEN 1 ELSE 0 END) as in_progress,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+    FROM features WHERE project_id = ?
+    GROUP BY group_id
+    ORDER BY group_id
+  `).all(projectId) as any[];
+
+  return rows.map(r => ({
+    groupId: r.group_id,
+    total: r.total,
+    done: r.done,
+    inProgress: r.in_progress,
+    failed: r.failed,
+  }));
 }

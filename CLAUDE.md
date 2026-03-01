@@ -1,12 +1,12 @@
 # AgentForge — 项目大脑
 
-> 最后更新: 2026-03-01 | 版本: v5.5
+> 最后更新: 2026-03-01 | 版本: v6.0
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v5.5 — 成熟产品，迭代优化中
-**最高优先级**: 工作流可靠性 + Token 效率 + 大项目分析能力
-**MUST NOT**: 不引入重大架构变更（已稳定），不破坏现有 5 阶段流水线
+**当前阶段**: v6.0 — 成熟产品，完整流水线 + 全角色激活
+**最高优先级**: 工作流可靠性 + Token 效率 + 大项目分析能力 + 构建验证
+**MUST NOT**: 不引入重大架构变更（已稳定），不破坏现有流水线
 
 ## 2. PROJECT IDENTITY
 
@@ -40,9 +40,9 @@ AgentForge/
 │   │   ├── meta-agent.ts  # meta-agent:chat (元Agent 对话)
 │   │   └── missions.ts    # ephemeralMission:* (7 个处理器)
 │   └── engine/            # Agent 引擎核心 (40 个模块)
-│       ├── orchestrator.ts    # 5 阶段编排器 (入口)
+│       ├── orchestrator.ts    # 多阶段编排器 (入口, v6.0: +DevOps +增量文档同步)
 │       ├── react-loop.ts      # Developer ReAct 循环 (25 轮上限)
-│       ├── qa-loop.ts         # QA 审查 (程序化检查 + LLM 审查)
+│       ├── qa-loop.ts         # QA 审查 (程序化检查 + LLM 审查 + TDD 测试骨架生成)
 │       ├── tool-registry.ts   # 42+ 工具定义 + 角色权限
 │       ├── tool-executor.ts   # 工具执行分发 (同步 + 异步)
 │       ├── llm-client.ts      # LLM 调用 (流式/非流式)
@@ -50,7 +50,7 @@ AgentForge/
 │       ├── context-collector.ts # 3 层上下文记忆 (Hot/Warm/Cold)
 │       ├── sandbox-executor.ts  # 子进程沙箱 (命令黑名单+环境隔离)
 │       ├── mission-runner.ts  # 临时工作流 (Planner→Worker→Judge)
-│       ├── project-importer.ts # 已有项目导入分析 (4-Phase)
+│       ├── project-importer.ts # 已有项目导入分析 (4-Phase + 增量更新)
 │       ├── doc-manager.ts     # 文档 CRUD (设计/需求/测试规格)
 │       ├── change-manager.ts  # 需求变更检测 + 级联更新
 │       ├── memory-system.ts   # 3 层记忆 (Global/Project/Role)
@@ -88,14 +88,18 @@ AgentForge/
 
 ## 3. ARCHITECTURE
 
-### 5 阶段流水线 (v5.0)
+### 流水线 (v6.0)
 
 ```
-Phase 1: PM 需求分析 → Feature 清单
-Phase 2: Architect 架构+产品设计 → ARCHITECTURE.md + design.md
-Phase 3: 批量子需求拆分 + 测试规格 (每批 4-5 Features)
-Phase 4: Developer ReAct 实现 + QA 审查 + 自动重试 (最多 3 轮)
-Phase 5: PM 批量验收 → 用户验收等待
+Phase 1:  PM 需求分析 → Feature 清单 (带 group_id 两层索引)
+Phase 2:  Architect 架构+产品设计 → ARCHITECTURE.md + design.md
+Phase 3:  批量子需求拆分 + 测试规格 (每批 5 Features)
+Phase 4a: [TDD可选] QA 生成测试骨架
+Phase 4b: Developer ReAct 实现 + QA 审查 + 自动重试 (最多 3 轮)
+Phase 4c: PM 批量验收
+Phase 4d: 增量文档同步 (G6 — 基于 git diff 更新模块摘要)
+Phase 4e: DevOps 自动构建验证 (G8 — install → lint → test → build)
+Phase 5:  汇总 + AGENTS.md 自动生成 + 用户验收等待
 ```
 
 续跑时: PM 分诊 (detectImplicitChanges) 判断新需求 vs 迭代变更
@@ -108,7 +112,7 @@ Phase 5: PM 批量验收 → 用户验收等待
 | Architect | architect-* | 11 | 架构设计, ARCHITECTURE.md, 技术选型 |
 | Developer | developer-* | 37 | ReAct 编码, 文件操作, Shell, Git, 浏览器, 视觉 |
 | QA | qa-* | 24 | 程序化检查 + LLM 代码审查, 测试执行 |
-| DevOps | devops-* | 10 | (定义存在, 流水线未调用) |
+| DevOps | devops-* | 10 | 自动构建验证 (install→lint→test→build), Phase 4e |
 | Researcher | researcher-* | 6 | 只读子 Agent, 8 轮上限 |
 
 ### 元 Agent
@@ -123,7 +127,7 @@ Phase 5: PM 批量验收 → 用户验收等待
 |----|---------|------|
 | settings | key, value | 应用配置 |
 | projects | id, name, wish, status, workspace_path, config | 项目 |
-| features | id, project_id, category, priority, status, locked_by | Feature 清单 |
+| features | id, project_id, category, priority, status, locked_by, group_id | Feature 清单 (两层索引) |
 | agents | id, project_id, role, status, token/cost 统计 | Agent 实例 |
 | agent_logs | project_id, agent_id, type, content | 持久化日志 |
 | wishes | id, project_id, content, status | 需求队列 |
@@ -162,7 +166,7 @@ Phase 5: PM 批量验收 → 用户验收等待
 
 ## 4. CURRENT STATE
 
-**版本**: v5.5 (5 阶段流水线 + 元 Agent + 临时工作流 + 项目导入)
+**版本**: v6.0 (全阶段流水线 + DevOps + TDD + 增量文档 + 事件重放)
 
 ### 已完成
 - [x] 5 阶段编排流水线 (PM→Arch→Reqs→Dev+QA→Accept)
@@ -181,12 +185,22 @@ Phase 5: PM 批量验收 → 用户验收等待
 - [x] Electron 通知 + 用户验收面板
 - [x] 右键版本历史 + 文档 5 级树
 
-### 已知差距 (按优先级)
-- [ ] 并行 Worker 无共享决策日志 → 可能冲突
-- [ ] Sandbox 无实质隔离 (execSync + 黑名单, 无容器)
-- [ ] QA 纯文本审查为主, run_test/run_lint 只在有测试时执行
-- [ ] DevOps 角色定义但未在流水线中使用
-- [ ] RFC 机制 (Agent→PM 反向反馈) 未实现
+### v6.0 新增
+- [x] G1: 并行 Worker 共享决策日志 (文件级 claim/release/conflict)
+- [x] G2: Sandbox 硬化 (路径遍历防护, 符号链接检测, 扩展黑名单)
+- [x] G3: QA 程序化测试 (始终 run_test/run_lint, 测试失败=硬规则 fail)
+- [x] G6: 增量文档同步 (git diff → 受影响模块摘要自动更新)
+- [x] G7: Mission cancel 真正中断 LLM 调用 (AbortController)
+- [x] G8: DevOps 自动构建验证 (检测框架 → install/lint/test/build)
+- [x] G9: RFC 机制 (rfc_propose 工具 → change_requests 表)
+- [x] G10: Feature 两层索引 (group_id + group-affinity 锁定)
+- [x] G12: Event Stream Replay UI (时间线重放 + 播放控制)
+- [x] G14: TDD 模式 (QA 先生成测试骨架, Developer 围绕测试编码)
+- [x] G15: AGENTS.md 自动生成 (每次运行重新生成, 含依赖/配置/目录结构)
+
+### 已知差距 (低优先级)
+- [ ] Docker 容器级沙箱隔离 (当前用进程级+黑名单)
+- [ ] 游戏引擎集成 (Tier 5 工具)
 
 ## 5. AGENT GUIDELINES
 

@@ -31,10 +31,16 @@ export type EventType =
   | 'phase:architect:end'
   | 'phase:dev:start'
   | 'phase:dev:end'
+  | 'phase:docs:end'
+  | 'phase:incremental-pm:end'
+  | 'phase:design-doc:end'
+  | 'phase:pm-acceptance:end'
+  | 'phase:devops:build'
   // Feature lifecycle
   | 'feature:locked'
   | 'feature:passed'
   | 'feature:failed'
+  | 'feature:qa_passed'
   | 'feature:qa:start'
   | 'feature:qa:result'
   // ReAct loop
