@@ -192,6 +192,14 @@ interface AgentForgeAPI {
     deprecate(id: string, reason: string): Promise<{ success: boolean }>;
     getRanked(): Promise<Array<SkillEvolutionEntry & { score: number }>>;
   };
+
+  /** v5.2: 缩放控制 */
+  zoom: {
+    /** 获取当前缩放倍率 (1.0 = 100%) */
+    get(): number;
+    /** 设置缩放倍率 (0.5 ~ 3.0) */
+    set(factor: number): void;
+  };
 }
 
 /** 需求条目 (v3.1) */
@@ -286,6 +294,8 @@ interface AppSettings {
   workerCount: number;
   /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
+  /** UI 缩放倍率 (1.0 = 100%, 默认 1.5) */
+  zoomFactor?: number;
 }
 
 /** MCP 服务器配置 (v5.0) */

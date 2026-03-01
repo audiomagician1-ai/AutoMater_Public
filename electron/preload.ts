@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
 /**
  * Preload — 暴露安全的 API 给渲染进程
@@ -145,6 +145,17 @@ contextBridge.exposeInMainWorld('agentforge', {
     getKnowledge: (id: string) => ipcRenderer.invoke('skill-evolution:get-knowledge', id),
     deprecate: (id: string, reason: string) => ipcRenderer.invoke('skill-evolution:deprecate', id, reason),
     getRanked: () => ipcRenderer.invoke('skill-evolution:get-ranked'),
+  },
+
+  // ── 缩放控制 (v5.2) ──
+  zoom: {
+    /** 获取当前缩放倍率 (1.0 = 100%) */
+    get: (): number => webFrame.getZoomFactor(),
+    /** 设置缩放倍率 (0.5 ~ 3.0) */
+    set: (factor: number): void => {
+      const clamped = Math.min(3.0, Math.max(0.5, factor));
+      webFrame.setZoomFactor(clamped);
+    },
   },
 });
 

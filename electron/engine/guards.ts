@@ -362,7 +362,7 @@ export function checkReactTermination(
     return { shouldContinue: false, reason: 'task_complete', message: 'Agent called task_complete' };
   }
 
-  if (state.iteration >= config.maxIterations) {
+  if (config.maxIterations > 0 && state.iteration >= config.maxIterations) {
     return { shouldContinue: false, reason: 'max_iterations', message: `Reached ${config.maxIterations} iterations` };
   }
 

@@ -112,9 +112,22 @@ export function App() {
     // 检查设置
     window.agentforge.settings.get().then(s => {
       if (s.apiKey) setSettingsConfigured(true);
+      // v5.2: 应用保存的缩放倍率 (默认 1.5)
+      const zoom = s.zoomFactor ?? 1.5;
+      window.agentforge.zoom.set(zoom);
     });
 
-    return () => unsubs.forEach(fn => fn());
+    // v5.2: 监听主进程下发的缩放变化, 持久化到设置
+    const unsubZoom = window.agentforge.on('zoom:changed', (factor: number) => {
+      window.agentforge.settings.get().then(s => {
+        window.agentforge.settings.save({ ...s, zoomFactor: factor });
+      });
+    });
+
+    return () => {
+      unsubs.forEach(fn => fn());
+      unsubZoom();
+    };
   }, []);
 
   // 定时拉取统计

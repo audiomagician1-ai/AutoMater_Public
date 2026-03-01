@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
 import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
@@ -9,6 +9,11 @@ import { setupMcpHandlers, initMcpAndSkills, shutdownMcpAndSkills } from './ipc/
 import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
+
+/** 允许的缩放倍率 (50%~300%) */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3.0;
+const ZOOM_STEP = 0.1;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -37,6 +42,56 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // ── 注册缩放快捷键 ──
+  setupZoomShortcuts();
+}
+
+/**
+ * 注册 Ctrl+= / Ctrl+- / Ctrl+0 缩放快捷键。
+ * 通过 webContents 事件监听 (before-input-event) 实现，
+ * 避免使用 globalShortcut (仅在窗口聚焦时生效且可能覆盖系统快捷键)。
+ */
+function setupZoomShortcuts() {
+  if (!mainWindow) return;
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!input.control && !input.meta) return;
+    if (input.type !== 'keyDown') return;
+
+    const win = mainWindow;
+    if (!win) return;
+
+    switch (input.key) {
+      case '=':
+      case '+': {
+        // Ctrl+= 放大
+        const current = win.webContents.getZoomFactor();
+        const next = Math.min(ZOOM_MAX, current + ZOOM_STEP);
+        win.webContents.setZoomFactor(next);
+        win.webContents.send('zoom:changed', next);
+        event.preventDefault();
+        break;
+      }
+      case '-': {
+        // Ctrl+- 缩小
+        const current = win.webContents.getZoomFactor();
+        const next = Math.max(ZOOM_MIN, current - ZOOM_STEP);
+        win.webContents.setZoomFactor(next);
+        win.webContents.send('zoom:changed', next);
+        event.preventDefault();
+        break;
+      }
+      case '0': {
+        // Ctrl+0 重置为默认 (从设置读取, 或 1.5)
+        const defaultZoom = 1.5;
+        win.webContents.setZoomFactor(defaultZoom);
+        win.webContents.send('zoom:changed', defaultZoom);
+        event.preventDefault();
+        break;
+      }
+    }
   });
 }
 

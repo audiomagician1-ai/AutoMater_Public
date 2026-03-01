@@ -66,11 +66,19 @@ export function updateAgentStats(agentId: string, projectId: string, inputTokens
 // 预算防护
 // ═══════════════════════════════════════
 
+/**
+ * 检查项目预算是否超限。
+ * budget=0 表示无上限 (永远返回 ok=true)。
+ */
 export function checkBudget(projectId: string, settings: any): { ok: boolean; spent: number; budget: number } {
   const db = getDb();
   const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as any;
   const spent = row?.total ?? 0;
-  const budget = settings.dailyBudgetUsd ?? 50;
+  const budget = settings.dailyBudgetUsd ?? 0;
+  // 0 = 无上限
+  if (budget <= 0) {
+    return { ok: true, spent, budget: 0 };
+  }
   return { ok: spent < budget, spent, budget };
 }
 
