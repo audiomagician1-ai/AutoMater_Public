@@ -281,6 +281,7 @@ async function phasePMAnalysis(
   const db = getDb();
   const pmId = `pm-${Date.now().toString(36)}`;
   spawnAgent(projectId, pmId, 'pm', win);
+  sendToUI(win, 'agent:status', { projectId, agentId: pmId, status: 'working', currentTask: 'pm-analysis', featureTitle: '需求分析' });
   sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '🧠 Phase 1: 产品经理开始分析需求...' });
   addLog(projectId, pmId, 'log', '开始分析需求: ' + project.wish);
   db.prepare("UPDATE projects SET status = 'initializing', updated_at = datetime('now') WHERE id = ?").run(projectId);
@@ -535,6 +536,7 @@ async function phaseArchitect(
   const db = getDb();
   const archId = `arch-${Date.now().toString(36)}`;
   spawnAgent(projectId, archId, 'architect', win);
+  sendToUI(win, 'agent:status', { projectId, agentId: archId, status: 'working', currentTask: 'architecture', featureTitle: '架构 + 产品设计' });
   sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '🏗️ Phase 2: 架构师开始设计技术方案 + 产品设计...' });
   addLog(projectId, archId, 'log', '开始架构 + 产品设计');
 
@@ -747,11 +749,13 @@ async function workerLoop(
       if (inProgress.c > 0) { await sleep(3000); continue; }
       sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: '✅ 没有更多任务，下班了' });
       db.prepare("UPDATE agents SET status = 'idle', current_task = NULL, last_active_at = datetime('now') WHERE id = ? AND project_id = ?").run(workerId, projectId);
+      sendToUI(win, 'agent:status', { projectId, agentId: workerId, status: 'idle', currentTask: null });
       break;
     }
 
     db.prepare("UPDATE agents SET status = 'working', current_task = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?")
       .run(feature.id, workerId, projectId);
+    sendToUI(win, 'agent:status', { projectId, agentId: workerId, status: 'working', currentTask: feature.id, featureTitle: feature.title || feature.description });
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'in_progress', agentId: workerId });
     sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔨 开始: ${feature.id} — ${feature.title || feature.description}` });
 
@@ -779,6 +783,7 @@ async function workerLoop(
           sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'reviewing', agentId: qaId });
           db.prepare("UPDATE features SET status = 'reviewing' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
           db.prepare("UPDATE agents SET status = 'working', current_task = ? WHERE id = ? AND project_id = ?").run(feature.id, qaId, projectId);
+          sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'working', currentTask: feature.id, featureTitle: feature.title || feature.description });
           sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `🔍 审查 ${feature.id}...` });
 
           const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath, projectId);

@@ -41,6 +41,10 @@ export function App() {
       updateAgentStatus(data.agentId, 'idle', null);
     }));
 
+    unsubs.push(window.agentforge.on('agent:status', (data: any) => {
+      updateAgentStatus(data.agentId, data.status, data.currentTask ?? null, data.featureTitle);
+    }));
+
     unsubs.push(window.agentforge.on('feature:status', (data: any) => {
       updateFeatureStatus(data.featureId, data.status);
     }));

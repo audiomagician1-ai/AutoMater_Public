@@ -224,28 +224,32 @@ function ContextSectionCard({ section, tokenBudget }: { section: ContextSection;
 // ═══════════════════════════════════════
 // MemberContextCard — 单个团队成员的上下文面板
 // ═══════════════════════════════════════
-function MemberContextCard({ member, snapshot, isSelected, onSelect }: {
+function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect }: {
   member: TeamMember;
   snapshot: ContextSnapshot | null;
+  agentStatus?: { status: string; currentTask: string | null; featureTitle?: string } | null;
   isSelected: boolean;
   onSelect: () => void;
 }) {
   const meta = getRoleMeta(member.role);
   const caps = (() => { try { return JSON.parse(member.capabilities || '[]'); } catch { return []; } })();
+  const isWorking = agentStatus?.status === 'working';
 
   return (
     <div
       className={`rounded-xl border transition-all cursor-pointer ${
         isSelected
           ? 'border-forge-500/50 bg-forge-500/5 ring-1 ring-forge-500/20'
-          : 'border-slate-800 bg-slate-900/30 hover:border-slate-700 hover:bg-slate-900/50'
+          : isWorking
+            ? 'border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400/50'
+            : 'border-slate-800 bg-slate-900/30 hover:border-slate-700 hover:bg-slate-900/50'
       }`}
       onClick={onSelect}
     >
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2.5">
           {/* 头像区 */}
-          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-base border border-slate-700/50 shrink-0`}>
+          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-base border border-slate-700/50 shrink-0 ${isWorking ? 'ring-1 ring-emerald-500/30' : ''}`}>
             {meta.icon}
           </div>
           {/* 基本信息 */}
@@ -254,19 +258,30 @@ function MemberContextCard({ member, snapshot, isSelected, onSelect }: {
               <span className={`font-medium text-xs ${meta.color} truncate`}>{member.name}</span>
               <span className="text-[9px] px-1 py-0.5 rounded bg-slate-800 text-slate-500 uppercase shrink-0">{member.role}</span>
             </div>
-            <div className="flex gap-1 mt-0.5 overflow-hidden">
-              {caps.slice(0, 2).map((c: string) => (
-                <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-800/50 text-slate-500 truncate">{c}</span>
-              ))}
-              {caps.length > 2 && <span className="text-[9px] text-slate-600">+{caps.length - 2}</span>}
-            </div>
+            {isWorking && agentStatus.featureTitle ? (
+              <div className="text-[9px] text-emerald-400 truncate mt-0.5">
+                🔨 {agentStatus.featureTitle}
+              </div>
+            ) : (
+              <div className="flex gap-1 mt-0.5 overflow-hidden">
+                {caps.slice(0, 2).map((c: string) => (
+                  <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-800/50 text-slate-500 truncate">{c}</span>
+                ))}
+                {caps.length > 2 && <span className="text-[9px] text-slate-600">+{caps.length - 2}</span>}
+              </div>
+            )}
           </div>
           {/* 状态指示 */}
           <div className="shrink-0">
-            {snapshot ? (
+            {isWorking ? (
               <div className="flex items-center gap-1">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] text-emerald-400 font-mono">{formatTokens(snapshot.totalTokens)}</span>
+                <span className="text-[10px] text-emerald-400 font-medium">工作中</span>
+              </div>
+            ) : snapshot ? (
+              <div className="flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span className="text-[10px] text-blue-400 font-mono">{formatTokens(snapshot.totalTokens)}</span>
               </div>
             ) : (
               <div className="flex items-center gap-1">
@@ -337,10 +352,31 @@ function StandbyPanel({ member }: { member: TeamMember }) {
 }
 
 // ═══════════════════════════════════════
+// Agent status matching helper
+// ═══════════════════════════════════════
+function findAgentStatusForMember(
+  member: TeamMember,
+  agentStatuses: Map<string, { status: string; currentTask: string | null; featureTitle?: string }>
+) {
+  // Match by role prefix: pm-xxx → pm, arch-xxx → architect, dev-xxx → developer, qa-xxx → qa
+  const rolePrefixes: Record<string, string[]> = {
+    pm: ['pm-'], architect: ['arch-'], developer: ['dev-'], qa: ['qa-'],
+    devops: ['devops-'], reviewer: ['review-'],
+  };
+  const prefixes = rolePrefixes[member.role] || [];
+  for (const [agentId, status] of agentStatuses) {
+    if (prefixes.some(p => agentId.startsWith(p)) && status.status === 'working') {
+      return status;
+    }
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════
 // ContextPage — 主页面
 // ═══════════════════════════════════════
 export function ContextPage() {
-  const { currentProjectId, contextSnapshots } = useAppStore();
+  const { currentProjectId, contextSnapshots, agentStatuses } = useAppStore();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -486,6 +522,7 @@ export function ContextPage() {
                 key={member.id}
                 member={member}
                 snapshot={snap}
+                agentStatus={findAgentStatusForMember(member, agentStatuses)}
                 isSelected={selected?.id === member.id}
                 onSelect={() => setSelectedMemberId(member.id)}
               />

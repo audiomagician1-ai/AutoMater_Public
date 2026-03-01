@@ -400,7 +400,7 @@ function AgentDetailPanel({ agent, onClose }: { agent: any; onClose: () => void 
 // TeamPage — 主页面 (v3.1: 手动编辑团队)
 // ═══════════════════════════════════════
 export function TeamPage() {
-  const { currentProjectId, agentReactStates, contextSnapshots } = useAppStore();
+  const { currentProjectId, agentReactStates, contextSnapshots, agentStatuses } = useAppStore();
   const [agents, setAgents] = useState<any[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<any>(null);
@@ -712,12 +712,15 @@ export function TeamPage() {
               const info = ROLE_INFO[agent.role] || { icon: '🤖', title: agent.role };
               const reactState = agentReactStates.get(agent.id);
               const snapshot = contextSnapshots.get(agent.id);
+              const liveStatus = agentStatuses.get(agent.id);
               const latestIter = reactState?.iterations[reactState.iterations.length - 1];
               const hasContext = !!snapshot || !!reactState;
+              const isWorking = agent.status === 'working' || liveStatus?.status === 'working';
 
               return (
                 <button key={agent.id} onClick={() => setSelectedAgent(agent)}
                   className={`text-left bg-slate-900 border rounded-xl p-4 space-y-3 transition-all ${
+                    isWorking ? 'border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-lg ring-1 ring-emerald-500/10' :
                     hasContext ? 'border-forge-500/30 hover:border-forge-400/50 hover:shadow-lg' : 'border-slate-800 hover:border-slate-700'
                   }`}>
                   <div className="flex items-center gap-3">
@@ -726,8 +729,17 @@ export function TeamPage() {
                       <div className="font-medium text-slate-200 truncate">{info.title}</div>
                       <div className="text-xs text-slate-500 font-mono">{agent.id}</div>
                     </div>
-                    <div className={`w-2.5 h-2.5 rounded-full ${STATUS_STYLES[agent.status] || 'bg-slate-600'}`} title={agent.status} />
+                    <div className={`w-2.5 h-2.5 rounded-full ${
+                      isWorking ? 'bg-emerald-500 animate-pulse' : (STATUS_STYLES[agent.status] || 'bg-slate-600')
+                    }`} title={isWorking ? 'working' : agent.status} />
                   </div>
+                  {/* Live task info */}
+                  {isWorking && (liveStatus?.featureTitle || agent.current_task) && (
+                    <div className="text-xs text-emerald-400 truncate flex items-center gap-1">
+                      <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                      🔨 {liveStatus?.featureTitle || agent.current_task}
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-slate-800/50 rounded-lg p-2">
                       <div className="text-sm font-semibold text-slate-200">{agent.session_count}</div>
@@ -752,7 +764,7 @@ export function TeamPage() {
                       <span className="text-[10px] text-slate-500 shrink-0">{formatTokens(latestIter.totalContextTokens)} ctx</span>
                     </div>
                   )}
-                  {agent.current_task && <div className="text-xs text-forge-400 truncate">🔨 {agent.current_task}</div>}
+                  {agent.current_task && !isWorking && <div className="text-xs text-forge-400 truncate">🔨 {agent.current_task}</div>}
                   {hasContext && <div className="text-[10px] text-slate-600 text-center">点击查看详情 →</div>}
                 </button>
               );

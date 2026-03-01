@@ -83,8 +83,8 @@ interface AppState {
   updateFeatureStatus: (featureId: string, status: string) => void;
 
   // Agent 实时状态
-  agentStatuses: Map<string, { status: string; currentTask: string | null }>;
-  updateAgentStatus: (agentId: string, status: string, currentTask: string | null) => void;
+  agentStatuses: Map<string, { status: string; currentTask: string | null; featureTitle?: string }>;
+  updateAgentStatus: (agentId: string, status: string, currentTask: string | null, featureTitle?: string) => void;
 
   // 设置已配置
   settingsConfigured: boolean;
@@ -188,9 +188,9 @@ export const useAppStore = create<AppState>((set) => ({
   }),
 
   agentStatuses: new Map(),
-  updateAgentStatus: (agentId, status, currentTask) => set((state) => {
+  updateAgentStatus: (agentId, status, currentTask, featureTitle?) => set((state) => {
     const next = new Map(state.agentStatuses);
-    next.set(agentId, { status, currentTask });
+    next.set(agentId, { status, currentTask, featureTitle });
     return { agentStatuses: next };
   }),
 

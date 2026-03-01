@@ -178,6 +178,25 @@ function MiniProgressBar({ counts, width }: { counts: Record<string, number>; wi
 // Interactive Graph Component
 // ═══════════════════════════════════════
 
+// Agent role icon mapping
+const AGENT_ROLE_ICONS: Record<string, { icon: string; color: string }> = {
+  pm: { icon: '🧠', color: '#8b5cf6' },
+  architect: { icon: '🏗️', color: '#3b82f6' },
+  developer: { icon: '💻', color: '#10b981' },
+  qa: { icon: '🧪', color: '#f59e0b' },
+  devops: { icon: '🚀', color: '#06b6d4' },
+  reviewer: { icon: '👁️', color: '#a855f7' },
+};
+
+function getAgentRoleIcon(agentId: string): { icon: string; color: string } {
+  if (agentId.startsWith('pm')) return AGENT_ROLE_ICONS.pm;
+  if (agentId.startsWith('arch')) return AGENT_ROLE_ICONS.architect;
+  if (agentId.startsWith('dev')) return AGENT_ROLE_ICONS.developer;
+  if (agentId.startsWith('qa')) return AGENT_ROLE_ICONS.qa;
+  if (agentId.startsWith('devops')) return AGENT_ROLE_ICONS.devops;
+  return { icon: '🤖', color: '#64748b' };
+}
+
 function InteractiveGraph({
   features,
   onDrillDown,
@@ -191,6 +210,7 @@ function InteractiveGraph({
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [tooltipAgent, setTooltipAgent] = useState<{ agentId: string; x: number; y: number } | null>(null);
   const [viewLevel, setViewLevel] = useState<ViewLevel>('module');
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([
     { level: 'module', label: '系统模块' },
@@ -395,10 +415,32 @@ function InteractiveGraph({
 
   const getAgentForFeature = (featureId: string) => {
     for (const [agentId, status] of agentStatuses.entries()) {
-      if (status.currentTask?.includes(featureId)) return { agentId, ...status };
+      if (status.status === 'working' && status.currentTask === featureId) return { agentId, ...status };
     }
     return null;
   };
+
+  // Get all active agents working on features within a given set of feature IDs
+  const getAgentsForFeatureSet = (featureIds: Set<string>) => {
+    const agents: Array<{ agentId: string; status: string; currentTask: string | null; featureTitle?: string }> = [];
+    for (const [agentId, status] of agentStatuses.entries()) {
+      if (status.status === 'working' && status.currentTask && featureIds.has(status.currentTask)) {
+        agents.push({ agentId, ...status });
+      }
+    }
+    return agents;
+  };
+
+  // Build module→featureIds lookup for aggregate nodes
+  const moduleFeatureIds = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const f of enriched) {
+      const key = f.group_name || f.category || 'other';
+      if (!m.has(key)) m.set(key, new Set());
+      m.get(key)!.add(f.id);
+    }
+    return m;
+  }, [enriched]);
 
   return (
     <div className="space-y-2">
@@ -480,15 +522,18 @@ function InteractiveGraph({
                 const isAggregate = !!node.childCount;
                 const agent = !isAggregate && node.feature ? getAgentForFeature(node.id) : null;
 
+                // For aggregate nodes: find all agents working on features in this module
+                const moduleAgents = isAggregate ? getAgentsForFeatureSet(moduleFeatureIds.get(node.id) || new Set()) : [];
+
                 return (
                   <g key={node.id} transform={`translate(${node.x}, ${node.y})`}
                     onMouseEnter={() => setHoveredNode(node.id)}
-                    onMouseLeave={() => setHoveredNode(null)}
+                    onMouseLeave={() => { setHoveredNode(null); setTooltipAgent(null); }}
                     onDoubleClick={() => handleDoubleClick(node)}
                     className="cursor-pointer"
                   >
                     {/* Glow for active */}
-                    {(node.status === 'in_progress' || agent) && (
+                    {(node.status === 'in_progress' || agent || moduleAgents.length > 0) && (
                       <rect width={node.width} height={node.height} rx={10} fill="none" stroke={sc.stroke} strokeWidth={2} opacity={0.3}>
                         <animate attributeName="opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite" />
                       </rect>
@@ -524,12 +569,89 @@ function InteractiveGraph({
                       </>
                     )}
 
-                    {/* Feature extras */}
-                    {!isAggregate && agent && (
-                      <text x={26} y={node.height * 0.75} fontSize={9} fill="#5c7cfa" fontFamily="sans-serif">
-                        🤖 {agent.agentId}
-                      </text>
+                    {/* ═══ Agent avatar(s) on module nodes ═══ */}
+                    {isAggregate && moduleAgents.length > 0 && (
+                      <g transform={`translate(${node.width - 8}, ${node.height - 28})`}>
+                        {moduleAgents.slice(0, 3).map((ma, idx) => {
+                          const ri = getAgentRoleIcon(ma.agentId);
+                          return (
+                            <g key={ma.agentId} transform={`translate(${-idx * 20}, 0)`}
+                              onMouseEnter={(e) => {
+                                const svgRect = containerRef.current?.getBoundingClientRect();
+                                if (svgRect) {
+                                  setTooltipAgent({
+                                    agentId: ma.agentId,
+                                    x: e.clientX - svgRect.left,
+                                    y: e.clientY - svgRect.top,
+                                  });
+                                }
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const svgRect = containerRef.current?.getBoundingClientRect();
+                                if (svgRect) {
+                                  setTooltipAgent(prev => prev?.agentId === ma.agentId ? null : {
+                                    agentId: ma.agentId,
+                                    x: e.clientX - svgRect.left,
+                                    y: e.clientY - svgRect.top,
+                                  });
+                                }
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <circle cx={0} cy={0} r={10} fill="#0f172a" stroke={ri.color} strokeWidth={1.5}>
+                                <animate attributeName="stroke-opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+                              </circle>
+                              <text x={0} y={4} textAnchor="middle" fontSize={10}>{ri.icon}</text>
+                            </g>
+                          );
+                        })}
+                        {moduleAgents.length > 3 && (
+                          <text x={-60} y={4} fontSize={8} fill="#94a3b8" textAnchor="end">+{moduleAgents.length - 3}</text>
+                        )}
+                      </g>
                     )}
+
+                    {/* ═══ Agent avatar on feature nodes ═══ */}
+                    {!isAggregate && agent && (
+                      <g transform={`translate(${node.width - 16}, ${node.height / 2})`}
+                        onMouseEnter={(e) => {
+                          const svgRect = containerRef.current?.getBoundingClientRect();
+                          if (svgRect) {
+                            setTooltipAgent({
+                              agentId: agent.agentId,
+                              x: e.clientX - svgRect.left,
+                              y: e.clientY - svgRect.top,
+                            });
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const svgRect = containerRef.current?.getBoundingClientRect();
+                          if (svgRect) {
+                            setTooltipAgent(prev => prev?.agentId === agent.agentId ? null : {
+                              agentId: agent.agentId,
+                              x: e.clientX - svgRect.left,
+                              y: e.clientY - svgRect.top,
+                            });
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        {(() => {
+                          const ri = getAgentRoleIcon(agent.agentId);
+                          return (
+                            <>
+                              <circle cx={0} cy={0} r={12} fill="#0f172a" stroke={ri.color} strokeWidth={2}>
+                                <animate attributeName="stroke-opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite" />
+                              </circle>
+                              <text x={0} y={4} textAnchor="middle" fontSize={12}>{ri.icon}</text>
+                            </>
+                          );
+                        })()}
+                      </g>
+                    )}
+
                     {!isAggregate && (
                       <text x={node.width - 8} y={14} fontSize={9} fill="#475569" textAnchor="end">P{node.feature?.priority ?? ''}</text>
                     )}
@@ -539,6 +661,55 @@ function InteractiveGraph({
             </g>
           </svg>
         </div>
+
+        {/* Agent tooltip overlay */}
+        {tooltipAgent && (() => {
+          const agentData = agentStatuses.get(tooltipAgent.agentId);
+          if (!agentData) return null;
+          const ri = getAgentRoleIcon(tooltipAgent.agentId);
+          const roleName = tooltipAgent.agentId.startsWith('pm') ? '产品经理'
+            : tooltipAgent.agentId.startsWith('arch') ? '架构师'
+            : tooltipAgent.agentId.startsWith('dev') ? '开发者'
+            : tooltipAgent.agentId.startsWith('qa') ? 'QA'
+            : 'Agent';
+          return (
+            <div
+              className="absolute z-30 pointer-events-none"
+              style={{ left: tooltipAgent.x + 16, top: tooltipAgent.y - 10 }}
+            >
+              <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-2xl min-w-[180px]">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-base">{ri.icon}</span>
+                  <div>
+                    <div className="text-xs font-bold text-slate-200">{roleName}</div>
+                    <div className="text-[9px] text-slate-500 font-mono">{tooltipAgent.agentId}</div>
+                  </div>
+                  <span className="ml-auto w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: ri.color }} />
+                </div>
+                <div className="border-t border-slate-800 pt-1.5 space-y-0.5">
+                  <div className="text-[10px]">
+                    <span className="text-slate-500">状态: </span>
+                    <span style={{ color: ri.color }} className="font-medium">
+                      {agentData.status === 'working' ? '工作中' : agentData.status === 'idle' ? '待机' : agentData.status}
+                    </span>
+                  </div>
+                  {agentData.currentTask && (
+                    <div className="text-[10px]">
+                      <span className="text-slate-500">任务: </span>
+                      <span className="text-slate-300 font-mono">{agentData.currentTask}</span>
+                    </div>
+                  )}
+                  {agentData.featureTitle && (
+                    <div className="text-[10px]">
+                      <span className="text-slate-500">内容: </span>
+                      <span className="text-slate-300">{agentData.featureTitle.slice(0, 50)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
