@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactStates } from '../engine/orchestrator';
+import { runChangeRequest } from '../engine/change-manager';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
 
@@ -530,6 +531,44 @@ export function setupProjectHandlers() {
 
     const { getChangelog } = require('../engine/doc-manager');
     return getChangelog(project.workspace_path);
+  });
+
+  // ── v4.3: 提交需求变更 ──
+  ipcMain.handle('project:submit-change', async (_event, projectId: string, description: string) => {
+    const db = getDb();
+    const id = 'cr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    db.prepare("INSERT INTO change_requests (id, project_id, description) VALUES (?, ?, ?)")
+      .run(id, projectId, description);
+
+    const win = BrowserWindow.getAllWindows()[0];
+    const abortCtrl = new AbortController();
+
+    // 异步执行变更流程
+    runChangeRequest(projectId, id, description, win, abortCtrl.signal)
+      .catch(err => {
+        console.error('[ChangeRequest] Error:', err);
+      });
+
+    return { success: true, changeRequestId: id };
+  });
+
+  // ── v4.3: 获取变更请求列表 ──
+  ipcMain.handle('project:list-changes', (_event, projectId: string) => {
+    const db = getDb();
+    return db.prepare("SELECT * FROM change_requests WHERE project_id = ? ORDER BY created_at DESC")
+      .all(projectId);
+  });
+
+  // ── v4.3: 获取影响分析 ──
+  ipcMain.handle('project:get-impact-analysis', (_event, changeRequestId: string) => {
+    const db = getDb();
+    const row = db.prepare("SELECT * FROM change_requests WHERE id = ?").get(changeRequestId) as any;
+    if (!row) return null;
+    return {
+      ...row,
+      impactAnalysis: row.impact_analysis ? JSON.parse(row.impact_analysis) : null,
+      affectedFeatures: row.affected_features ? JSON.parse(row.affected_features) : [],
+    };
   });
 }
 

@@ -157,6 +157,21 @@ export async function initDatabase(): Promise<void> {
     try { db.exec(sql); } catch { /* 列已存在 */ }
   }
 
+  // v4.3: change_requests 表 (需求变更管理)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS change_requests (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      impact_analysis TEXT,
+      affected_features TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+  `);
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在

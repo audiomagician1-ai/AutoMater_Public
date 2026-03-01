@@ -113,6 +113,12 @@ interface AgentForgeAPI {
     getDesignDoc(projectId: string): Promise<string | null>;
     /** v4.2: 获取文档变更日志 */
     getDocChangelog(projectId: string): Promise<DocChangeEntry[]>;
+    /** v4.3: 提交需求变更 */
+    submitChange(projectId: string, description: string): Promise<{ success: boolean; changeRequestId: string }>;
+    /** v4.3: 获取变更请求列表 */
+    listChanges(projectId: string): Promise<ChangeRequestItem[]>;
+    /** v4.3: 获取影响分析 */
+    getImpactAnalysis(changeRequestId: string): Promise<ChangeRequestDetail | null>;
   };
   /** v3.1: 需求队列 */
   wish: {
@@ -189,6 +195,30 @@ interface DocChangeEntry {
   action: 'create' | 'update';
   summary: string;
   agentId: string;
+}
+
+/** 变更请求列表项 (v4.3) */
+interface ChangeRequestItem {
+  id: string;
+  project_id: string;
+  description: string;
+  status: 'pending' | 'analyzing' | 'updating' | 'completed' | 'failed';
+  affected_features: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+/** 变更请求详情 (v4.3) */
+interface ChangeRequestDetail extends ChangeRequestItem {
+  impactAnalysis: {
+    affectedFeatures: Array<{ featureId: string; reason: string; severity: 'major' | 'minor' }>;
+    docsToUpdate: Array<{ type: string; id: string; changeDescription: string }>;
+    newFeaturesNeeded: Array<{ title: string; description: string; reason: string }>;
+    riskLevel: 'low' | 'medium' | 'high';
+    riskNotes: string;
+    impactPercent: number;
+  } | null;
+  affectedFeatures: string[];
 }
 
 interface AppSettings {
