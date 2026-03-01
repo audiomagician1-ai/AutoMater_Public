@@ -140,6 +140,11 @@ export async function initDatabase(): Promise<void> {
     );
   `);
 
+  // v4.1: features 表增加 sub_group 字段
+  try {
+    db.exec(`ALTER TABLE features ADD COLUMN sub_group TEXT`);
+  } catch { /* 列已存在 */ }
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在

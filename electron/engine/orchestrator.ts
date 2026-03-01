@@ -150,11 +150,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       return;
     }
 
-    const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, title, description, depends_on, status, acceptance_criteria, notes) VALUES (?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?)`);
+    const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?)`);
     db.transaction((items: any[]) => {
       for (let i = 0; i < items.length; i++) {
         const f = items[i];
-        insertFeature.run(f.id || `F${String(i + 1).padStart(3, '0')}`, projectId, f.category || 'core', f.priority ?? 1, f.title || f.description || '', f.description || '', JSON.stringify(f.dependsOn || f.depends_on || []), JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []), f.notes || '');
+        insertFeature.run(f.id || `F${String(i + 1).padStart(3, '0')}`, projectId, f.category || 'core', f.priority ?? 1, f.group_name || f.category || '', f.sub_group || '', f.title || f.description || '', f.description || '', JSON.stringify(f.dependsOn || f.depends_on || []), JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []), f.notes || '');
       }
     })(features);
 

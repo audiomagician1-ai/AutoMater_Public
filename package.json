@@ -25,8 +25,10 @@
     ]
   },
   "dependencies": {
+    "@types/dagre": "^0.7.54",
     "better-sqlite3": "^11.7.0",
     "clsx": "^2.1.0",
+    "dagre": "^0.8.5",
     "lucide-react": "^0.468.0",
     "playwright-core": "^1.58.2",
     "react": "^19.0.0",

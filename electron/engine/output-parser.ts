@@ -392,6 +392,8 @@ export const PM_FEATURE_SCHEMA: SchemaSpec = {
     id:          { type: 'string',  required: true, default: '' },
     category:    { type: 'string',  required: false, default: 'core', enum: ['infrastructure', 'core', 'ui', 'api', 'testing', 'docs'] },
     priority:    { type: 'number',  required: false, default: 1, min: 0, max: 2 },
+    group_name:  { type: 'string',  required: false, default: '' },
+    sub_group:   { type: 'string',  required: false, default: '' },
     title:       { type: 'string',  required: true },
     description: { type: 'string',  required: true },
     dependsOn:   { type: 'array',   required: false, default: [] },
