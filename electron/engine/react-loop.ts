@@ -1,0 +1,603 @@
+/**
+ * ReAct Developer Loop — 多轮工具调用核心
+ *
+ * 思考 → 行动 → 观察 循环，最多 25 轮
+ * 支持 function-calling (OpenAI/Anthropic)、兼容 <<<FILE>>> 模式
+ * 消息历史智能压缩 (LLM Summarizer + fallback truncation)
+ *
+ * 从 orchestrator.ts 拆出 (v2.5)
+ */
+
+import { BrowserWindow } from 'electron';
+import { getDb } from '../db';
+import { callLLM, callLLMWithTools, calcCost, sleep, type StreamCallback } from './llm-client';
+import { sendToUI, addLog } from './ui-bridge';
+import { updateAgentStats, checkBudget } from './agent-manager';
+import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
+import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
+import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
+import { DEVELOPER_REACT_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
+import { parseFileBlocks, writeFileBlocks } from './file-writer';
+import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
+import { runResearcher } from './sub-agent';
+import { buildCodeGraph, graphSummary } from './code-graph';
+import { readRecentDecisions, formatDecisionsForContext, appendSharedDecision } from './memory-system';
+import { emitEvent } from './event-store';
+import type { GitProviderConfig } from './git-provider';
+
+// ═══════════════════════════════════════
+// Types
+// ═══════════════════════════════════════
+
+export interface ReactResult {
+  completed: boolean;
+  filesWritten: string[];
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  iterations: number;
+}
+
+export interface MessageTokenBreakdown {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  tokens: number;
+  count: number;
+}
+
+export interface ReactIterationState {
+  iteration: number;
+  timestamp: number;
+  messageCount: number;
+  totalContextTokens: number;
+  breakdown: MessageTokenBreakdown[];
+  inputTokensThisCall: number;
+  outputTokensThisCall: number;
+  costThisCall: number;
+  cumulativeCost: number;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  filesWritten: string[];
+  toolCallsThisIteration: string[];
+  completed: boolean;
+}
+
+export interface AgentReactState {
+  agentId: string;
+  featureId: string;
+  iterations: ReactIterationState[];
+  maxContextWindow: number;
+}
+
+// ═══════════════════════════════════════
+// ReAct State Cache (for UI monitoring)
+// ═══════════════════════════════════════
+
+const agentReactStateCache = new Map<string, Map<string, AgentReactState>>();
+
+export function getAgentReactStates(projectId: string): Map<string, AgentReactState> {
+  return agentReactStateCache.get(projectId) ?? new Map();
+}
+
+function cacheAgentReactState(projectId: string, state: AgentReactState) {
+  if (!agentReactStateCache.has(projectId)) {
+    agentReactStateCache.set(projectId, new Map());
+  }
+  agentReactStateCache.get(projectId)!.set(state.agentId, state);
+}
+
+// ═══════════════════════════════════════
+// Context Snapshot Cache
+// ═══════════════════════════════════════
+
+const contextSnapshotCache = new Map<string, Map<string, ContextSnapshot>>();
+
+export function getContextSnapshots(projectId: string): Map<string, ContextSnapshot> {
+  return contextSnapshotCache.get(projectId) ?? new Map();
+}
+
+function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
+  if (!contextSnapshotCache.has(projectId)) {
+    contextSnapshotCache.set(projectId, new Map());
+  }
+  contextSnapshotCache.get(projectId)!.set(snapshot.agentId, snapshot);
+}
+
+// ═══════════════════════════════════════
+// Token Estimation Utilities
+// ═══════════════════════════════════════
+
+function estimateMsgTokens(content: any): number {
+  if (!content) return 0;
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  return Math.ceil(text.length / 1.5);
+}
+
+function computeMessageBreakdown(messages: Array<{ role: string; content: any }>): { breakdown: MessageTokenBreakdown[]; total: number } {
+  const map: Record<string, { tokens: number; count: number }> = {};
+  let total = 0;
+  for (const m of messages) {
+    const role = m.role as string;
+    const t = estimateMsgTokens(m.content);
+    if (!map[role]) map[role] = { tokens: 0, count: 0 };
+    map[role].tokens += t;
+    map[role].count += 1;
+    total += t;
+  }
+  const breakdown: MessageTokenBreakdown[] = Object.entries(map).map(([role, v]) => ({
+    role: role as any,
+    tokens: v.tokens,
+    count: v.count,
+  }));
+  return { breakdown, total };
+}
+
+// ═══════════════════════════════════════
+// ReAct Developer Loop
+// ═══════════════════════════════════════
+
+export async function reactDeveloperLoop(
+  projectId: string, workerId: string, settings: any,
+  win: BrowserWindow | null, signal: AbortSignal,
+  workspacePath: string | null, gitConfig: GitProviderConfig,
+  feature: any, qaFeedback: string
+): Promise<ReactResult> {
+  const db = getDb();
+  const MAX_ITERATIONS = 25;
+
+  // ── v1.3: Dynamic Model Selection ──
+  const featureComplexity = estimateFeatureComplexity(feature);
+  let depCount = 0;
+  try { depCount = JSON.parse(feature.depends_on || '[]').length; } catch {}
+  const taskComplexity: TaskComplexity = {
+    type: 'development',
+    featureComplexity,
+    dependencyCount: depCount,
+    hasQAFeedback: !!qaFeedback,
+    qaAttempt: qaFeedback ? 2 : 1,
+  };
+  const modelSelection = selectModelTier(taskComplexity);
+  const model = resolveModel(modelSelection.tier, settings);
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: workerId,
+    content: `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
+  });
+
+  const tools = getToolsForRole('developer', gitConfig.mode);
+
+  const toolCtx: ToolContext = {
+    workspacePath: workspacePath || '',
+    projectId,
+    gitConfig,
+    callVision: async (prompt: string, imageBase64: string, mimeType?: string) => {
+      const visionModel = resolveModel('strong', settings);
+      const messages = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${mimeType || 'image/png'};base64,${imageBase64}` } },
+          ],
+        },
+      ];
+      const result = await callLLM(settings, visionModel, messages as any, signal, 4096);
+      return result.content;
+    },
+  };
+
+  let totalCost = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+  let completed = false;
+  const filesWritten = new Set<string>();
+
+  // ── Step 1: 规划 ──
+  sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `📋 ${feature.id} 制定开发计划...` });
+
+  let plan: FeaturePlan | null = null;
+  try {
+    const planCtx = workspacePath
+      ? collectLightContext(workspacePath, projectId, feature, undefined, 2000, workerId)
+      : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
+
+    const planModel = resolveModel(selectModelTier({ type: 'planning' }).tier, settings);
+    const planResult = await callLLM(settings, planModel, [
+      { role: 'system', content: PLANNER_FEATURE_PROMPT },
+      {
+        role: 'user',
+        content: `Feature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\nQA 反馈（需修复）:\n${qaFeedback}` : ''}\n\n${planCtx.contextText}`,
+      },
+    ], signal, 4096);
+
+    const planCost = calcCost(planModel, planResult.inputTokens, planResult.outputTokens);
+    totalCost += planCost;
+    totalIn += planResult.inputTokens;
+    totalOut += planResult.outputTokens;
+    updateAgentStats(workerId, projectId, planResult.inputTokens, planResult.outputTokens, planCost);
+
+    plan = parsePlanFromLLM(planResult.content, feature.id, feature.title || feature.description);
+    const planSummary = plan.steps.map((s, i) => `  ${i + 1}. ${s.description}`).join('\n');
+    sendToUI(win, 'agent:log', {
+      projectId, agentId: workerId,
+      content: `📋 ${feature.id} 计划 (${plan.steps.length} 步):\n${planSummary}`,
+    });
+    addLog(projectId, workerId, 'plan', `[${feature.id}] Plan:\n${planSummary}`);
+  } catch (err: any) {
+    sendToUI(win, 'agent:log', {
+      projectId, agentId: workerId,
+      content: `⚠️ ${feature.id} 规划失败，使用默认计划: ${err.message}`,
+    });
+    plan = parsePlanFromLLM('', feature.id, feature.title || feature.description);
+  }
+
+  // ── Step 2: ReAct 循环 ──
+  if (workspacePath) {
+    try {
+      const graph = buildCodeGraph(workspacePath, 300);
+      const summary = graphSummary(graph);
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `📊 ${feature.id} ${summary}`,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  // 构建初始消息列表
+  const initialContext = workspacePath
+    ? collectDeveloperContext(workspacePath, projectId, feature, 5000, workerId)
+    : { contextText: '', estimatedTokens: 0, filesIncluded: 0 };
+
+  if (initialContext.snapshot) {
+    cacheContextSnapshot(projectId, initialContext.snapshot);
+    sendToUI(win, 'agent:context-snapshot', {
+      projectId,
+      snapshot: initialContext.snapshot,
+    });
+  }
+
+  const planText = plan ? getPlanSummary(plan) : '';
+
+  let sharedDecisionsText = '';
+  if (workspacePath) {
+    const decisions = readRecentDecisions(workspacePath, 20);
+    sharedDecisionsText = formatDecisionsForContext(decisions, workerId);
+  }
+
+  const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
+    { role: 'system', content: DEVELOPER_REACT_PROMPT },
+    {
+      role: 'user',
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+    },
+  ];
+
+  sendToUI(win, 'agent:log', {
+    projectId, agentId: workerId,
+    content: `🔄 ${feature.id} 开始 ReAct 工具循环 (最多 ${MAX_ITERATIONS} 轮)`,
+  });
+
+  const reactState: AgentReactState = {
+    agentId: workerId,
+    featureId: feature.id,
+    iterations: [],
+    maxContextWindow: 128000,
+  };
+
+  for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
+    const budget = checkBudget(projectId, settings);
+    if (!budget.ok) break;
+
+    try {
+      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
+      const cost = calcCost(model, result.inputTokens, result.outputTokens);
+      totalCost += cost;
+      totalIn += result.inputTokens;
+      totalOut += result.outputTokens;
+      updateAgentStats(workerId, projectId, result.inputTokens, result.outputTokens, cost);
+
+      const msg = result.message;
+
+      if (msg.content) {
+        const shortThought = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `💭 ${feature.id} [${iter}] ${shortThought}`,
+        });
+      }
+
+      // ── 无 tool_calls → 纯文本回复 ──
+      if (!msg.tool_calls || msg.tool_calls.length === 0) {
+        if (msg.content && workspacePath) {
+          const fileBlocks = parseFileBlocks(msg.content);
+          if (fileBlocks.length > 0) {
+            const written = writeFileBlocks(workspacePath, fileBlocks);
+            for (const w of written) filesWritten.add(w.relativePath);
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `📁 ${feature.id} [兼容模式] 写入 ${written.length} 文件`,
+            });
+            sendToUI(win, 'workspace:changed', { projectId });
+          }
+          if (msg.content.toUpperCase().includes('COMPLETED')) {
+            completed = true;
+          }
+        }
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔚 ${feature.id} ReAct 循环结束 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
+        });
+        break;
+      }
+
+      // ── 执行 tool calls ──
+      messages.push({
+        role: 'assistant',
+        content: msg.content,
+        tool_calls: msg.tool_calls,
+      });
+
+      for (const tc of msg.tool_calls) {
+        let toolArgs: Record<string, any>;
+        try {
+          toolArgs = typeof tc.function.arguments === 'string'
+            ? JSON.parse(tc.function.arguments)
+            : tc.function.arguments;
+        } catch {
+          toolArgs = {};
+        }
+
+        const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
+
+        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') {
+          toolArgs._agentId = workerId;
+        }
+
+        // ── task_complete ──
+        if (tc.function.name === 'task_complete') {
+          completed = true;
+          const summary = toolArgs.summary || '完成';
+          const changedFiles = toolArgs.files_changed || [...filesWritten];
+
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `✅ ${feature.id} task_complete: ${summary}`,
+          });
+          addLog(projectId, workerId, 'output', `[${feature.id}] Completed: ${summary}\nFiles: ${changedFiles.join(', ')}`);
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: `任务已标记完成: ${summary}`,
+          });
+          continue;
+        }
+
+        // 执行工具
+        let toolResult: ToolResult;
+        const isAsync = tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_') || ['web_search', 'fetch_url', 'http_request'].includes(tc.function.name);
+
+        // ── spawn_researcher 子 Agent ──
+        if (tc.function.name === 'spawn_researcher') {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `🔬 ${feature.id} 启动研究子 Agent: ${(toolArgs.question || '').slice(0, 80)}...`,
+          });
+
+          try {
+            const researchModel = resolveModel('worker', settings);
+            const researchResult = await runResearcher(
+              toolArgs.question || '',
+              toolCtx,
+              async (msgs, tools) => {
+                return await callLLMWithTools(settings, researchModel, msgs, tools, signal, 8192);
+              },
+              signal,
+            );
+
+            const resCost = calcCost(researchModel, researchResult.inputTokens, researchResult.outputTokens);
+            totalCost += resCost;
+            totalIn += researchResult.inputTokens;
+            totalOut += researchResult.outputTokens;
+            updateAgentStats(workerId, projectId, researchResult.inputTokens, researchResult.outputTokens, resCost);
+
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `🔬 ${feature.id} 研究子 Agent 完成 (读取 ${researchResult.filesRead.length} 文件, $${resCost.toFixed(4)})`,
+            });
+
+            toolResult = {
+              success: researchResult.success,
+              output: `研究结论:\n${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(', ') || '无'}`,
+              action: 'read',
+            };
+          } catch (resErr: any) {
+            toolResult = { success: false, output: `研究子 Agent 失败: ${resErr.message}`, action: 'read' };
+          }
+        } else if (isAsync) {
+          toolResult = await executeToolAsync(toolCall, toolCtx);
+        } else {
+          toolResult = executeTool(toolCall, toolCtx);
+        }
+
+        // 推送工具调用日志
+        const argsSummary = tc.function.name === 'write_file'
+          ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')} bytes`
+          : tc.function.name === 'edit_file'
+          ? `path=${toolArgs.path}, replace ${(toolArgs.old_string || '').length}→${(toolArgs.new_string || '').length} chars`
+          : JSON.stringify(toolArgs).slice(0, 150);
+        sendToUI(win, 'agent:tool-call', {
+          projectId, agentId: workerId,
+          tool: tc.function.name,
+          args: argsSummary,
+          success: toolResult.success,
+          outputPreview: toolResult.output.slice(0, 200),
+        });
+        emitEvent({
+          projectId, agentId: workerId, featureId: feature.id,
+          type: 'tool:call',
+          data: { tool: tc.function.name, args: argsSummary, success: toolResult.success },
+        });
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
+        });
+
+        // 记录写入/编辑的文件
+        if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
+          filesWritten.add(toolArgs.path);
+          sendToUI(win, 'workspace:changed', { projectId });
+          if (workspacePath) {
+            appendSharedDecision(workspacePath, {
+              agentId: workerId,
+              featureId: feature.id,
+              type: tc.function.name === 'write_file' ? 'file_created' : 'other',
+              description: `${tc.function.name} ${toolArgs.path}`,
+            });
+          }
+        }
+
+        // 将工具结果加入消息历史
+        if ((tc.function.name === 'screenshot' || tc.function.name === 'browser_screenshot') && (toolResult as any)._imageBase64) {
+          const base64 = (toolResult as any)._imageBase64;
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: [
+              { type: 'text', text: toolResult.output },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
+            ] as any,
+          });
+        } else {
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: toolResult.output.slice(0, 4000),
+          });
+        }
+      }
+
+      // ═══ 推送 Agent ReAct 迭代状态 ═══
+      const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+      const { breakdown, total: contextTokens } = computeMessageBreakdown(messages);
+      const iterState: ReactIterationState = {
+        iteration: iter,
+        timestamp: Date.now(),
+        messageCount: messages.length,
+        totalContextTokens: contextTokens,
+        breakdown,
+        inputTokensThisCall: result.inputTokens,
+        outputTokensThisCall: result.outputTokens,
+        costThisCall: cost,
+        cumulativeCost: totalCost,
+        cumulativeInputTokens: totalIn,
+        cumulativeOutputTokens: totalOut,
+        filesWritten: [...filesWritten],
+        toolCallsThisIteration: toolCallsThisIter,
+        completed,
+      };
+      reactState.iterations.push(iterState);
+      cacheAgentReactState(projectId, reactState);
+      sendToUI(win, 'agent:react-state', {
+        projectId,
+        agentId: workerId,
+        state: reactState,
+        latestIteration: iterState,
+      });
+
+      if (completed) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔚 ${feature.id} ReAct 完成 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
+        });
+        break;
+      }
+
+      // ── 消息窗口压缩 ──
+      if (messages.length > 30) {
+        await compressMessageHistorySmart(messages, settings, signal);
+      }
+
+    } catch (err: any) {
+      if (signal.aborted) break;
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${err.message}`,
+      });
+      addLog(projectId, workerId, 'error', `[${feature.id}] iter ${iter}: ${err.message}`);
+      await sleep(2000);
+    }
+  }
+
+  // 更新 feature 的 affected_files
+  if (filesWritten.size > 0) {
+    const existingFiles = JSON.parse(feature.affected_files || '[]') as string[];
+    const allFiles = [...new Set([...existingFiles, ...filesWritten])];
+    db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?")
+      .run(JSON.stringify(allFiles), feature.id, projectId);
+  }
+
+  return {
+    completed,
+    filesWritten: [...filesWritten],
+    totalCost,
+    totalInputTokens: totalIn,
+    totalOutputTokens: totalOut,
+    iterations: 0,
+  };
+}
+
+// ═══════════════════════════════════════
+// Message History Compression
+// ═══════════════════════════════════════
+
+async function compressMessageHistorySmart(
+  messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>,
+  settings: any,
+  signal?: AbortSignal
+): Promise<void> {
+  const keepRecent = 10;
+  if (messages.length <= keepRecent + 2) return;
+
+  const compressRange = messages.slice(1, messages.length - keepRecent);
+  if (compressRange.length < 5) return;
+
+  const compressText = compressRange.map(m => {
+    const role = m.role;
+    const content = typeof m.content === 'string' ? m.content.slice(0, 300) : JSON.stringify(m.content).slice(0, 300);
+    const toolInfo = m.tool_calls ? ` [tools: ${m.tool_calls.map((t: any) => t.function.name).join(',')}]` : '';
+    return `[${role}]${toolInfo} ${content}`;
+  }).join('\n');
+
+  try {
+    const summaryModel = resolveModel(selectModelTier({ type: 'summarize' }).tier, settings);
+    const summaryResult = await callLLM(settings, summaryModel, [
+      { role: 'system', content: '你是对话摘要助手。将以下 Agent 对话历史压缩为一段简洁摘要（200-400字），保留关键决策、已创建的文件、遇到的问题和解决方案。只输出摘要，不要其他内容。' },
+      { role: 'user', content: `请摘要以下 ${compressRange.length} 条对话:\n\n${compressText.slice(0, 4000)}` },
+    ], signal, 1024, 0);
+
+    if (summaryResult.content) {
+      const summaryMsg = {
+        role: 'user' as string,
+        content: `## 之前的对话摘要 (${compressRange.length} 条消息已压缩)\n${summaryResult.content}`,
+      };
+      messages.splice(1, compressRange.length, summaryMsg);
+      return;
+    }
+  } catch {
+    // LLM 摘要失败，fallback
+  }
+
+  compressMessageHistorySimple(messages);
+}
+
+function compressMessageHistorySimple(messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>) {
+  const keepRecent = 10;
+  const cutoff = messages.length - keepRecent;
+  for (let i = 1; i < cutoff; i++) {
+    if (messages[i].role === 'tool' && typeof messages[i].content === 'string') {
+      const content = messages[i].content as string;
+      if (content.length > 300) {
+        messages[i].content = content.slice(0, 200) + '\n... [已压缩]';
+      }
+    }
+  }
+}
