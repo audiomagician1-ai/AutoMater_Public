@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues } from './git-provider';
 import { execInSandbox, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
@@ -140,7 +141,7 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
             .filter(f => f && !f.includes('node_modules') && !f.includes('.git'))
             .slice(0, 50);
           return { success: true, output: files.length > 0 ? files.join('\n') : '无匹配文件', action: 'search' };
-        } catch {
+        } catch (err) {
           return { success: true, output: '无匹配文件', action: 'search' };
         }
       }
@@ -159,7 +160,7 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
           }
           const output = execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', maxBuffer: 512 * 1024, timeout: 15000 });
           return { success: true, output: output.trim().slice(0, 5000) || '无匹配', action: 'search' };
-        } catch {
+        } catch (err) {
           return { success: true, output: '无匹配', action: 'search' };
         }
       }

@@ -7,14 +7,21 @@
 
 import { BrowserWindow, Notification } from 'electron';
 import { getDb } from '../db';
+import { createLogger } from './logger';
 import type { StreamCallback } from './llm-client';
+
+const log = createLogger('ui-bridge');
 
 // ═══════════════════════════════════════
 // 向渲染进程推送消息
 // ═══════════════════════════════════════
 
 export function sendToUI(win: BrowserWindow | null, channel: string, data: any) {
-  try { win?.webContents.send(channel, data); } catch { /* closed */ }
+  try {
+    win?.webContents.send(channel, data);
+  } catch (err) {
+    log.debug('sendToUI failed (window likely closed)', { channel });
+  }
 }
 
 // ═══════════════════════════════════════
@@ -25,7 +32,9 @@ export function addLog(projectId: string, agentId: string, type: string, content
   try {
     const db = getDb();
     db.prepare('INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, ?, ?, ?)').run(projectId, agentId, type, content);
-  } catch { /* ignore during shutdown */ }
+  } catch (err) {
+    log.warn('Failed to write agent log to DB', { projectId, agentId, type });
+  }
 }
 
 // ═══════════════════════════════════════
@@ -37,7 +46,9 @@ export function notify(title: string, body: string) {
     if (Notification.isSupported()) {
       new Notification({ title, body, silent: false }).show();
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    log.debug('Native notification failed', { title });
+  }
 }
 
 // ═══════════════════════════════════════

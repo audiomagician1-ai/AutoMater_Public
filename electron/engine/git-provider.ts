@@ -11,6 +11,9 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { createLogger } from './logger';
+
+const log = createLogger('git-provider');
 
 export type GitMode = 'local' | 'github';
 
@@ -59,7 +62,9 @@ export function initRepo(config: GitProviderConfig): boolean {
       try {
         execSync('git config user.email "agent@agentforge.dev"', { cwd: workspacePath, stdio: 'ignore' });
         execSync('git config user.name "AgentForge"', { cwd: workspacePath, stdio: 'ignore' });
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        log.debug('Git user config failed (non-fatal)', err);
+      }
 
       execSync('git add -A', { cwd: workspacePath, stdio: 'ignore' });
       execSync('git commit -m "Initial commit by AgentForge" --allow-empty', { cwd: workspacePath, stdio: 'ignore' });
@@ -70,13 +75,15 @@ export function initRepo(config: GitProviderConfig): boolean {
       const remoteUrl = `https://${githubToken}@github.com/${githubRepo}.git`;
       try {
         execSync(`git remote remove origin`, { cwd: workspacePath, stdio: 'ignore' });
-      } catch { /* no origin yet */ }
+      } catch (err) {
+        log.debug('No existing origin remote to remove');
+      }
       execSync(`git remote add origin ${remoteUrl}`, { cwd: workspacePath, stdio: 'ignore' });
     }
 
     return true;
   } catch (err) {
-    console.error('[GitProvider] Init failed:', err);
+    log.error('Git init failed', err);
     return false;
   }
 }
@@ -94,7 +101,7 @@ export function commit(config: GitProviderConfig, message: string): GitCommitRes
     try {
       execSync('git diff --cached --quiet', { cwd: workspacePath, stdio: 'ignore' });
       return { success: false }; // no changes
-    } catch { /* has changes, continue */ }
+    } catch { /* has changes — proceed to commit */ }
 
     execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: workspacePath, stdio: 'ignore' });
 
@@ -112,7 +119,7 @@ export function commit(config: GitProviderConfig, message: string): GitCommitRes
 
     return { success: true, hash, pushed };
   } catch (err) {
-    console.error('[GitProvider] Commit failed:', err);
+    log.error('Git commit failed', err);
     return { success: false };
   }
 }
@@ -122,7 +129,10 @@ export function getLog(workspacePath: string, maxCount: number = 20): string[] {
   try {
     const output = execSync(`git log --oneline -${maxCount}`, { cwd: workspacePath, encoding: 'utf-8' });
     return output.trim().split('\n').filter(Boolean);
-  } catch { return []; }
+  } catch (err) {
+    log.debug('Git log retrieval failed');
+    return [];
+  }
 }
 
 export function getDiff(workspacePath: string, commitRange?: string): string {
@@ -130,7 +140,10 @@ export function getDiff(workspacePath: string, commitRange?: string): string {
   try {
     const cmd = commitRange ? `git diff ${commitRange}` : 'git diff HEAD';
     return execSync(cmd, { cwd: workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
-  } catch { return ''; }
+  } catch (err) {
+    log.debug('Git diff retrieval failed');
+    return '';
+  }
 }
 
 // ═══════════════════════════════════════
@@ -183,7 +196,7 @@ export async function createIssue(
       html_url: data.html_url,
     };
   } catch (err) {
-    console.error('[GitHub] Create issue failed:', err);
+    log.error('GitHub create issue failed', err);
     return null;
   }
 }
@@ -201,7 +214,10 @@ export async function closeIssue(
       { state: 'closed' }
     );
     return true;
-  } catch { return false; }
+  } catch (err) {
+    log.warn('GitHub close issue failed', { issueNumber });
+    return false;
+  }
 }
 
 export async function listIssues(
@@ -222,7 +238,10 @@ export async function listIssues(
       labels: (d.labels || []).map((l: any) => l.name),
       html_url: d.html_url,
     }));
-  } catch { return []; }
+  } catch (err) {
+    log.warn('GitHub list issues failed');
+    return [];
+  }
 }
 
 export async function addIssueComment(
@@ -239,7 +258,10 @@ export async function addIssueComment(
       { body }
     );
     return true;
-  } catch { return false; }
+  } catch (err) {
+    log.warn('GitHub add comment failed', { issueNumber });
+    return false;
+  }
 }
 
 export async function testGitHubConnection(repo: string, token: string): Promise<{ success: boolean; message: string }> {

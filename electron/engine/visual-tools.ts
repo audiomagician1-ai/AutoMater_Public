@@ -10,6 +10,9 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createLogger } from './logger';
+
+const log = createLogger('visual-tools');
 
 // ═══════════════════════════════════════
 // 类型定义
@@ -22,20 +25,39 @@ export type VisionCallback = (
   mimeType?: string,
 ) => Promise<string>;
 
-// 缓存最近的截图用于对比
-const screenshotCache = new Map<string, string>(); // label → base64
+// 缓存最近的截图用于对比 — 带 TTL 自动过期
+interface CacheEntry {
+  base64: string;
+  createdAt: number;
+}
+
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
+const CACHE_MAX_SIZE = 20;
+const screenshotCache = new Map<string, CacheEntry>();
+
+/** 清除过期条目 */
+function evictExpired(): void {
+  const now = Date.now();
+  for (const [key, entry] of screenshotCache) {
+    if (now - entry.createdAt > CACHE_TTL_MS) {
+      screenshotCache.delete(key);
+    }
+  }
+}
 
 export function cacheScreenshot(label: string, base64: string) {
-  screenshotCache.set(label, base64);
-  // 最多缓存 20 张
-  if (screenshotCache.size > 20) {
+  evictExpired();
+  screenshotCache.set(label, { base64, createdAt: Date.now() });
+  // 最多缓存 CACHE_MAX_SIZE 张
+  if (screenshotCache.size > CACHE_MAX_SIZE) {
     const firstKey = screenshotCache.keys().next().value;
     if (firstKey) screenshotCache.delete(firstKey);
   }
 }
 
 export function getCachedScreenshot(label: string): string | undefined {
-  return screenshotCache.get(label);
+  evictExpired();
+  return screenshotCache.get(label)?.base64;
 }
 
 // ═══════════════════════════════════════

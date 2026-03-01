@@ -12,6 +12,31 @@ import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { createLogger } from './logger';
+
+const log = createLogger('computer-use');
+
+// ═══════════════════════════════════════
+// PowerShell Parameter Sanitization
+// ═══════════════════════════════════════
+
+/**
+ * Sanitize a numeric parameter for PowerShell interpolation.
+ * Prevents injection by ensuring the value is a finite number within bounds.
+ */
+function sanitizeNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(max, num));
+}
+
+/**
+ * Sanitize a string for safe inclusion in PowerShell single-quoted strings.
+ * Replaces single-quotes with escaped form.
+ */
+function sanitizeForPS(str: string): string {
+  return str.replace(/'/g, "''");
+}
 
 // ═══════════════════════════════════════
 // screenshot — 截取屏幕
@@ -33,34 +58,37 @@ export interface ScreenshotResult {
  * @param scale 缩放比例 (0.5 = 缩小到50%，降低token消耗)
  */
 export function takeScreenshot(scale: number = 0.75): ScreenshotResult {
+  const safeScale = sanitizeNumber(scale, 0.1, 2.0, 0.75);
   const tmpFile = path.join(os.tmpdir(), `agentforge-screenshot-${Date.now()}.png`);
+  const safeTmpPath = tmpFile.replace(/\\/g, '\\\\');
 
   try {
     // PowerShell: 使用 System.Drawing 截屏
     const psScript = `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+$scale = ${safeScale}
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-$w = [int]($screen.Width * ${scale})
-$h = [int]($screen.Height * ${scale})
+$w = [int]($screen.Width * $scale)
+$h = [int]($screen.Height * $scale)
 $bitmap = New-Object System.Drawing.Bitmap($w, $h)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
 $srcRect = New-Object System.Drawing.Rectangle(0, 0, $screen.Width, $screen.Height)
 $dstRect = New-Object System.Drawing.Rectangle(0, 0, $w, $h)
 $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-if (${scale} -ne 1) {
+if ($scale -ne 1) {
   $scaled = New-Object System.Drawing.Bitmap($w, $h)
   $g2 = [System.Drawing.Graphics]::FromImage($scaled)
   $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
   $g2.DrawImage($bitmap, $dstRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
   $g2.Dispose()
   $bitmap.Dispose()
-  $scaled.Save('${tmpFile.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
+  $scaled.Save('${safeTmpPath}', [System.Drawing.Imaging.ImageFormat]::Png)
   $scaled.Dispose()
   Write-Output "$w,$h"
 } else {
-  $bitmap.Save('${tmpFile.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
+  $bitmap.Save('${safeTmpPath}', [System.Drawing.Imaging.ImageFormat]::Png)
   Write-Output "$w,$h"
 }
 $graphics.Dispose()
@@ -101,9 +129,11 @@ export type MouseButton = 'left' | 'right' | 'middle';
  * 移动鼠标到指定屏幕坐标
  */
 export function mouseMove(x: number, y: number): { success: boolean; error?: string } {
+  const safeX = sanitizeNumber(x, 0, 10000, 0);
+  const safeY = sanitizeNumber(y, 0, 10000, 0);
   try {
     execSync(
-      `powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${Math.round(x)}, ${Math.round(y)})"`,
+      `powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${safeX}, ${safeY})"`,
       { timeout: 5000 }
     );
     return { success: true };
@@ -119,16 +149,18 @@ export function mouseMove(x: number, y: number): { success: boolean; error?: str
 export function mouseClick(
   x: number, y: number, button: MouseButton = 'left', doubleClick: boolean = false,
 ): { success: boolean; error?: string } {
+  const safeX = sanitizeNumber(x, 0, 10000, 0);
+  const safeY = sanitizeNumber(y, 0, 10000, 0);
+  // Whitelist button values to prevent injection
+  const validButtons: Record<string, string> = {
+    left:   '0x0002, 0x0004',
+    right:  '0x0008, 0x0010',
+    middle: '0x0020, 0x0040',
+  };
+  const flags = validButtons[button] || validButtons.left;
+  const clickCount = doubleClick ? 2 : 1;
+
   try {
-    const flags = button === 'right'
-      ? '0x0008, 0x0010'   // RIGHTDOWN, RIGHTUP
-      : button === 'middle'
-      ? '0x0020, 0x0040'   // MIDDLEDOWN, MIDDLEUP
-      : '0x0002, 0x0004';  // LEFTDOWN, LEFTUP
-
-    const clickCount = doubleClick ? 2 : 1;
-
-    // 先移动再点击
     const psScript = `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -139,7 +171,7 @@ public class MouseInput {
   public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
 }
 "@
-[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${Math.round(x)}, ${Math.round(y)})
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${safeX}, ${safeY})
 Start-Sleep -Milliseconds 50
 for ($i = 0; $i -lt ${clickCount}; $i++) {
   [MouseInput]::mouse_event(${flags.split(',')[0].trim()}, 0, 0, 0, [IntPtr]::Zero)
@@ -168,6 +200,10 @@ for ($i = 0; $i -lt ${clickCount}; $i++) {
  * 使用 SendKeys 实现
  */
 export function keyboardType(text: string): { success: boolean; error?: string } {
+  // Length limit to prevent resource exhaustion
+  if (text.length > 5000) {
+    return { success: false, error: 'Text too long (max 5000 chars)' };
+  }
   try {
     // 转义 SendKeys 特殊字符
     const escaped = text
@@ -175,8 +211,10 @@ export function keyboardType(text: string): { success: boolean; error?: string }
       .replace(/\n/g, '{ENTER}')
       .replace(/\t/g, '{TAB}');
 
+    // Use single-quoted string in PS to prevent variable expansion
+    const safeEscaped = sanitizeForPS(escaped);
     execSync(
-      `powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped.replace(/'/g, "''")}')"`,
+      `powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${safeEscaped}')"`,
       { timeout: 10000 }
     );
     return { success: true };

@@ -28,7 +28,10 @@ import { runResearcher } from './sub-agent';
 import { buildCodeGraph, graphSummary } from './code-graph';
 import { readRecentDecisions, formatDecisionsForContext, appendSharedDecision } from './memory-system';
 import { emitEvent } from './event-store';
+import { createLogger } from './logger';
 import type { GitProviderConfig } from './git-provider';
+
+const log = createLogger('react-loop');
 
 // ═══════════════════════════════════════
 // Types
@@ -165,7 +168,7 @@ export async function reactDeveloperLoop(
   // ── v1.3: Dynamic Model Selection ──
   const featureComplexity = estimateFeatureComplexity(feature);
   let depCount = 0;
-  try { depCount = JSON.parse(feature.depends_on || '[]').length; } catch {}
+  try { depCount = JSON.parse(feature.depends_on || '[]').length; } catch { /* malformed JSON in depends_on */ }
   const taskComplexity: TaskComplexity = {
     type: 'development',
     featureComplexity,
@@ -256,7 +259,9 @@ export async function reactDeveloperLoop(
         projectId, agentId: workerId,
         content: `📊 ${feature.id} ${summary}`,
       });
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      log.debug('Code graph build skipped', { featureId: feature.id });
+    }
   }
 
   // 构建初始消息列表
@@ -381,7 +386,8 @@ export async function reactDeveloperLoop(
           toolArgs = typeof tc.function.arguments === 'string'
             ? JSON.parse(tc.function.arguments)
             : tc.function.arguments;
-        } catch {
+        } catch (err) {
+          log.warn('Failed to parse tool arguments as JSON, using empty object', { tool: tc.function.name });
           toolArgs = {};
         }
 
@@ -662,8 +668,8 @@ async function compressMessageHistorySmart(
       messages.splice(1, compressRange.length, summaryMsg);
       return;
     }
-  } catch {
-    // LLM 摘要失败，fallback
+  } catch (err) {
+    log.warn('LLM summarizer failed, falling back to simple truncation', err);
   }
 
   compressMessageHistorySimple(messages);

@@ -20,6 +20,9 @@ import { BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db';
+import { createLogger } from './logger';
+
+const log = createLogger('orchestrator');
 
 // ── 子模块 ──
 import { callLLM, calcCost, getSettings, sleep } from './llm-client';
@@ -943,7 +946,9 @@ async function phaseFinalize(
       if (extracted > 0) {
         sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `🌐 已将 ${extracted} 条经验提取到全局经验池` });
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      log.warn('Cross-project experience extraction failed', err);
+    }
   }
 }
 
@@ -985,7 +990,10 @@ async function extractLessons(
 function safeJsonParse(str: string | null | undefined, fallback: any): any {
   if (!str) return fallback;
   try { return JSON.parse(str); }
-  catch { return fallback; }
+  catch (err) {
+    log.debug('JSON parse failed, using fallback', { input: str?.slice(0, 50) });
+    return fallback;
+  }
 }
 
 function ensureAgentsMd(workspacePath: string, wish: string) {

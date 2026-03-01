@@ -10,6 +10,9 @@
 
 import { getDb } from '../db';
 import type { AppSettings } from './types';
+import { createLogger } from './logger';
+
+const log = createLogger('llm-client');
 
 // ═══════════════════════════════════════
 // Helpers
@@ -231,7 +234,7 @@ async function _callOpenAI(
           inputTokens = json.usage.prompt_tokens ?? inputTokens;
           outputTokens = json.usage.completion_tokens ?? outputTokens;
         }
-      } catch { /* skip malformed JSON */ }
+      } catch { /* skip malformed SSE JSON chunk (common during streaming) */ }
     }
   }
 
@@ -304,7 +307,7 @@ async function _callAnthropic(
         } else if (json.type === 'message_delta' && json.usage) {
           outputTokens = json.usage.output_tokens ?? 0;
         }
-      } catch { /* skip */ }
+      } catch { /* skip malformed Anthropic SSE chunk */ }
     }
   }
 

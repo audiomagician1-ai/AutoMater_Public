@@ -14,6 +14,9 @@ import { programmaticQACheck } from './guards';
 import { getTeamPrompt } from './agent-manager';
 import fs from 'fs';
 import path from 'path';
+import { createLogger } from './logger';
+
+const log = createLogger('qa-loop');
 
 // ═══════════════════════════════════════
 // Types
@@ -87,7 +90,9 @@ export async function runQAReview(
         testResults += `状态: ${lintResult.success ? '✅ PASS' : '❌ FAIL'}\n`;
         testResults += `\`\`\`\n${lintOutput}\n\`\`\`\n\n`;
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      log.warn('Test/lint execution failed during QA', err);
+    }
   }
 
   // 程序化检查 — 不可被 LLM 覆盖的硬规则

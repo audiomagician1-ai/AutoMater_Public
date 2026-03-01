@@ -11,6 +11,7 @@ import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactSt
 import { runChangeRequest } from '../engine/change-manager';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
+import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -508,7 +509,6 @@ export function setupProjectHandlers() {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return { requirement: null, testSpec: null };
 
-    const { readDoc } = require('../engine/doc-manager');
     return {
       requirement: readDoc(project.workspace_path, 'requirement', featureId),
       testSpec: readDoc(project.workspace_path, 'test_spec', featureId),
@@ -520,7 +520,6 @@ export function setupProjectHandlers() {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return null;
 
-    const { readDoc } = require('../engine/doc-manager');
     return readDoc(project.workspace_path, 'design');
   });
 
@@ -529,7 +528,6 @@ export function setupProjectHandlers() {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return [];
 
-    const { getChangelog } = require('../engine/doc-manager');
     return getChangelog(project.workspace_path);
   });
 
@@ -538,7 +536,6 @@ export function setupProjectHandlers() {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return { design: [], requirements: [], testSpecs: [] };
 
-    const { listDocs } = require('../engine/doc-manager');
     return {
       design: listDocs(project.workspace_path, 'design'),
       requirements: listDocs(project.workspace_path, 'requirement'),
@@ -551,8 +548,7 @@ export function setupProjectHandlers() {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return null;
 
-    const { readDoc } = require('../engine/doc-manager');
-    return readDoc(project.workspace_path, type, id);
+    return readDoc(project.workspace_path, type as any, id);
   });
 
   // ── v4.3: 提交需求变更 ──
