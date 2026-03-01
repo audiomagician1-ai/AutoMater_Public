@@ -113,6 +113,7 @@ const MAX_FILES_PER_MODULE_BATCH = 15;          // 每次 LLM 调用最多读取
 const MAX_CHARS_PER_BATCH = 15000;               // ~10K tokens
 const MAX_MODULES_PER_ARCH_CALL = 60;            // 架构合成时最多放入的模块摘要数
 const MODULE_BATCH_SIZE = 4;                      // Phase 3 文档生成批次大小
+const MAX_SCAN_FILES = 5000;                      // Phase 0 最大扫描文件数保护
 
 // 忽略的目录
 const IGNORE_DIRS = new Set([
@@ -157,12 +158,22 @@ const TECH_DETECTORS: Array<{ file: string; tech: string }> = [
 // Phase 0: 零成本静态扫描
 // ═══════════════════════════════════════
 
+/** 让出主线程（避免 Electron UI 冻结） */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 /**
  * 扫描项目目录，生成项目骨架（无 LLM 调用）
+ * v5.6: async化 + 消除重复IO + 进度回调 + 文件数上限
  */
-export function scanProjectSkeleton(workspacePath: string): ProjectSkeleton {
+export async function scanProjectSkeleton(
+  workspacePath: string,
+  onProgress?: ImportProgressCallback,
+): Promise<ProjectSkeleton> {
   const t0 = Date.now();
   log.info('Phase 0: Starting static scan', { workspacePath });
+  onProgress?.(0, '检测技术栈...', 0.05);
 
   // 1. 检测技术栈
   const techStack: string[] = [];
@@ -175,24 +186,45 @@ export function scanProjectSkeleton(workspacePath: string): ProjectSkeleton {
     }
   }
 
-  // 2. 收集代码文件 + LOC 统计
+  await yieldToEventLoop();
+  onProgress?.(0, '扫描文件结构...', 0.1);
+
+  // 2. 收集代码文件 + LOC 统计（一次读取同时收集 LOC）
   const allFiles: string[] = [];
   const locByExt: Record<string, number> = {};
+  const fileLOCMap = new Map<string, number>(); // 文件 → 行数（供 detectModules 复用）
   let totalLOC = 0;
-  collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt);
+  collectCodeFilesRecursive(workspacePath, '', allFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
   for (const v of Object.values(locByExt)) totalLOC += v;
+
+  if (allFiles.length >= MAX_SCAN_FILES) {
+    log.warn('Phase 0: File count hit limit', { limit: MAX_SCAN_FILES, truncated: true });
+  }
+
+  await yieldToEventLoop();
+  onProgress?.(0, `已扫描 ${allFiles.length} 文件 (${totalLOC} LOC)，构建目录树...`, 0.3);
 
   // 3. 目录结构概要 (depth ≤ 3)
   const dirTree = buildDirectoryTree(workspacePath, '', 0, 3);
 
+  await yieldToEventLoop();
+  onProgress?.(0, '构建代码依赖图...', 0.4);
+
   // 4. Code Graph
   const graph = buildCodeGraph(workspacePath, 2000);
+
+  await yieldToEventLoop();
+  onProgress?.(0, '推断入口文件...', 0.7);
 
   // 5. 入口文件推断
   const entryFiles = inferEntryFiles(workspacePath, allFiles);
 
-  // 6. 模块检测（按目录分组 + 依赖关系）
-  const modules = detectModules(workspacePath, allFiles, graph);
+  onProgress?.(0, '检测模块边界...', 0.8);
+
+  // 6. 模块检测（按目录分组 + 依赖关系，复用 fileLOCMap 避免重复 IO）
+  const modules = detectModules(workspacePath, allFiles, graph, fileLOCMap);
+
+  await yieldToEventLoop();
 
   const skeleton: ProjectSkeleton = {
     name: path.basename(workspacePath),
@@ -221,6 +253,7 @@ export function scanProjectSkeleton(workspacePath: string): ProjectSkeleton {
     'utf-8',
   );
 
+  onProgress?.(0, `扫描完成: ${allFiles.length} 文件, ${modules.length} 模块, ${totalLOC} LOC`, 1.0);
   log.info('Phase 0: Complete', {
     files: allFiles.length,
     loc: totalLOC,
@@ -608,10 +641,8 @@ export async function importProject(
 }> {
   log.info('=== Project Import Start ===', { workspacePath, projectId });
 
-  // Phase 0: 静态扫描
-  onProgress?.(0, '正在扫描项目结构...', 0);
-  const skeleton = scanProjectSkeleton(workspacePath);
-  onProgress?.(0, `扫描完成: ${skeleton.fileCount} 文件, ${skeleton.modules.length} 模块`, 1.0);
+  // Phase 0: 静态扫描 (async, 带进度回调)
+  const skeleton = await scanProjectSkeleton(workspacePath, onProgress);
 
   // Phase 1: 模块摘要
   const summaries = await summarizeModules(workspacePath, skeleton, signal, onProgress);
@@ -639,13 +670,16 @@ export async function importProject(
 // Internal Helpers
 // ═══════════════════════════════════════
 
-/** 递归收集代码文件并统计 LOC */
+/** 递归收集代码文件并统计 LOC（同时填充 fileLOCMap 供后续复用） */
 function collectCodeFilesRecursive(
   basePath: string,
   relative: string,
   result: string[],
   locByExt: Record<string, number>,
+  fileLOCMap: Map<string, number>,
+  maxFiles: number,
 ): void {
+  if (result.length >= maxFiles) return;
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
   try {
@@ -653,12 +687,13 @@ function collectCodeFilesRecursive(
   } catch { return; }
 
   for (const entry of entries) {
+    if (result.length >= maxFiles) return;
     if (entry.name.startsWith('.') && entry.name !== '.env') continue;
     const rel = relative ? `${relative}/${entry.name}` : entry.name;
 
     if (entry.isDirectory()) {
       if (!IGNORE_DIRS.has(entry.name)) {
-        collectCodeFilesRecursive(basePath, rel, result, locByExt);
+        collectCodeFilesRecursive(basePath, rel, result, locByExt, fileLOCMap, maxFiles);
       }
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
@@ -668,6 +703,7 @@ function collectCodeFilesRecursive(
           const content = fs.readFileSync(path.join(basePath, rel), 'utf-8');
           const lines = content.split('\n').length;
           locByExt[ext] = (locByExt[ext] || 0) + lines;
+          fileLOCMap.set(rel, lines);
         } catch { /* skip unreadable */ }
       }
     }
@@ -725,11 +761,12 @@ function inferEntryFiles(workspacePath: string, allFiles: string[]): string[] {
   return found.length > 0 ? found : allFiles.slice(0, 3);
 }
 
-/** 按目录分组检测模块 */
+/** 按目录分组检测模块（复用 fileLOCMap 避免重复 IO） */
 function detectModules(
   workspacePath: string,
   allFiles: string[],
   graph: CodeGraph,
+  fileLOCMap?: Map<string, number>,
 ): ModuleInfo[] {
   // 按一级目录 (或二级目录) 分组
   const groups = new Map<string, string[]>();
@@ -761,18 +798,25 @@ function detectModules(
   }
   if (misc.length > 0) validGroups.set('misc', misc);
 
-  // 构建模块及其依赖
+  // 构建模块及其依赖（LOC 复用 fileLOCMap，无需再读文件）
   const modules: ModuleInfo[] = [];
   const moduleByFile = new Map<string, string>(); // file → moduleId
 
   for (const [root, files] of validGroups) {
     const id = root.replace(/[\/\\]/g, '-');
     for (const f of files) moduleByFile.set(f, id);
-    const loc = files.reduce((sum, f) => {
-      try {
-        return sum + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length;
-      } catch { return sum; }
-    }, 0);
+    let loc: number;
+    if (fileLOCMap) {
+      // 复用已收集的 LOC 数据（零 IO）
+      loc = files.reduce((sum, f) => sum + (fileLOCMap.get(f) || 0), 0);
+    } else {
+      // 回退：无缓存时仍读文件（兼容增量更新等场景）
+      loc = files.reduce((sum, f) => {
+        try {
+          return sum + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length;
+        } catch { return sum; }
+      }, 0);
+    }
     modules.push({
       id,
       rootPath: root,
