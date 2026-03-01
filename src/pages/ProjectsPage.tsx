@@ -23,6 +23,13 @@ export function ProjectsPage() {
   const [githubTestResult, setGithubTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [creating, setCreating] = useState(false);
 
+  // 导入已有项目
+  const [showImport, setShowImport] = useState(false);
+  const [importPath, setImportPath] = useState('');
+  const [importName, setImportName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ phase: number; step: string; progress: number } | null>(null);
+
   const [projects, setProjects] = useState<any[]>([]);
   const [projectStats, setProjectStats] = useState<Record<string, any>>({});
   const { settingsConfigured, setGlobalPage, enterProject, addLog } = useAppStore();
@@ -110,6 +117,44 @@ export function ProjectsPage() {
     if (result.success) addLog({ projectId: id, agentId: 'system', content: `📦 已导出: ${result.path}` });
   };
 
+  const handleImportProject = async () => {
+    if (!importPath.trim() || importing) return;
+    if (!settingsConfigured) { setGlobalPage('settings'); return; }
+
+    setImporting(true);
+    setImportProgress({ phase: 0, step: '准备导入...', progress: 0 });
+    try {
+      const name = importName.trim() || importPath.split(/[\\/]/).pop() || 'Imported Project';
+      const options: any = {
+        gitMode: 'local' as const,
+        workspacePath: importPath.trim(),
+        importExisting: true,
+      };
+      const result = await window.agentforge.project.create(name, options);
+      if (result.success) {
+        // 触发项目分析（模拟进度）
+        setImportProgress({ phase: 0, step: '静态扫描项目结构...', progress: 0.3 });
+        // 实际分析由后端 IPC 异步执行
+        try {
+          await (window as any).agentforge?.project?.analyzeExisting?.(result.projectId);
+        } catch { /* IPC 可能尚未实现 */ }
+
+        addLog({ projectId: result.projectId, agentId: 'system', content: `📥 已导入项目: ${name}` });
+        setImportPath('');
+        setImportName('');
+        setShowImport(false);
+        setImportProgress(null);
+        enterProject(result.projectId, 'overview');
+      }
+    } catch (err: any) {
+      addLog({ projectId: '', agentId: 'system', content: `❌ 导入失败: ${err.message}` });
+    } finally {
+      setImporting(false);
+      setImportProgress(null);
+      loadProjects();
+    }
+  };
+
   return (
     <div className="h-full flex flex-col overflow-y-auto">
       {/* 顶部 */}
@@ -120,17 +165,132 @@ export function ProjectsPage() {
               <h1 className="text-2xl font-bold">项目</h1>
               <p className="text-slate-500 text-xs mt-1">AI Agent 团队帮你实现软件需求</p>
             </div>
-            <button
-              onClick={() => setShowCreate(!showCreate)}
-              className="px-4 py-2.5 rounded-lg font-medium text-sm transition-all bg-forge-600 hover:bg-forge-500 text-white shadow-lg shadow-forge-600/20"
-            >
-              ＋ 新建项目
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowImport(!showImport); setShowCreate(false); }}
+                className="px-4 py-2.5 rounded-lg font-medium text-sm transition-all bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+              >
+                📥 导入已有项目
+              </button>
+              <button
+                onClick={() => { setShowCreate(!showCreate); setShowImport(false); }}
+                className="px-4 py-2.5 rounded-lg font-medium text-sm transition-all bg-forge-600 hover:bg-forge-500 text-white shadow-lg shadow-forge-600/20"
+              >
+                ＋ 新建项目
+              </button>
+            </div>
           </div>
 
           {!settingsConfigured && (
             <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-amber-400 text-sm text-center mb-4">
               💡 首次使用请先 <button onClick={() => setGlobalPage('settings')} className="underline font-medium">配置 LLM</button>
+            </div>
+          )}
+
+          {/* 导入已有项目表单 */}
+          {showImport && (
+            <div className="bg-slate-900 border border-cyan-800/30 rounded-xl p-6 space-y-4 mb-4">
+              <h3 className="text-sm font-semibold text-slate-200">📥 导入已有项目</h3>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                将已有代码项目导入 AgentForge。系统会自动执行静态扫描 → 模块摘要 → 架构合成 → 文档填充，
+                生成完整的项目文档框架，让 Agent 团队理解你的项目。
+              </p>
+
+              {/* 项目路径 */}
+              <section className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">项目根目录 *</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={importPath}
+                    onChange={e => {
+                      setImportPath(e.target.value);
+                      if (!importName) {
+                        const name = e.target.value.split(/[\\/]/).pop() || '';
+                        setImportName(name);
+                      }
+                    }}
+                    placeholder="选择已有代码项目的根目录"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono text-xs"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
+                        if (result?.filePaths?.[0]) {
+                          setImportPath(result.filePaths[0]);
+                          if (!importName) setImportName(result.filePaths[0].split(/[\\/]/).pop() || '');
+                        }
+                      } catch {}
+                    }}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
+                    title="浏览文件夹"
+                  >
+                    📂
+                  </button>
+                </div>
+              </section>
+
+              {/* 项目名称 */}
+              <section className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">项目名称</label>
+                <input
+                  type="text"
+                  value={importName}
+                  onChange={e => setImportName(e.target.value)}
+                  placeholder="自动取目录名"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+              </section>
+
+              {/* 导入流程说明 */}
+              <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
+                <p className="text-[10px] text-slate-500 font-medium">导入分析流程：</p>
+                <div className="grid grid-cols-4 gap-1 text-[10px]">
+                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 0 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
+                    Phase 0<br />静态扫描
+                  </div>
+                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 1 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
+                    Phase 1<br />模块摘要
+                  </div>
+                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 2 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
+                    Phase 2<br />架构合成
+                  </div>
+                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 3 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
+                    Phase 3<br />文档填充
+                  </div>
+                </div>
+                {importProgress && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[10px] text-cyan-400 mb-1">
+                      <span>{importProgress.step}</span>
+                      <span>{Math.round(importProgress.progress * 100)}%</span>
+                    </div>
+                    <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-cyan-500 rounded-full transition-all duration-300" style={{ width: `${importProgress.progress * 100}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 操作按钮 */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleImportProject}
+                  disabled={!importPath.trim() || importing}
+                  className="flex-1 py-2.5 rounded-lg font-medium text-sm transition-all bg-cyan-700 hover:bg-cyan-600 text-white disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed"
+                >
+                  {importing ? '⏳ 分析中...' : '📥 开始导入分析'}
+                </button>
+                <button
+                  onClick={() => { setShowImport(false); setImportProgress(null); }}
+                  className="px-4 py-2.5 rounded-lg text-sm text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 transition-all"
+                >
+                  取消
+                </button>
+              </div>
             </div>
           )}
 

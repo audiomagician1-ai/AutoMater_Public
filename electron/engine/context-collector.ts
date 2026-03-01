@@ -411,7 +411,505 @@ const STOP_WORDS = new Set([
 ]);
 
 // ═══════════════════════════════════════
-// v0.8: 分层上下文压缩
+// v2.0: Hot / Warm / Cold Memory 分层
+// ═══════════════════════════════════════
+// 对标 Codified Context (arXiv 2602.20478):
+//   Hot  → 始终加载 (~3K tokens): skeleton 摘要 + ARCHITECTURE.md 摘要
+//   Warm → 始终加载 (~2K tokens): 模块摘要索引 (title + 一句话)
+//   Cold → 按需加载 (~5K/模块):   单模块详细摘要 + 源码片段
+// ═══════════════════════════════════════
+
+export interface MemoryLayer {
+  tier: 'hot' | 'warm' | 'cold';
+  content: string;
+  tokens: number;
+  moduleId?: string;
+}
+
+/**
+ * 构建 Hot Memory — 始终常驻上下文
+ * 包含: 项目骨架摘要 + 架构文档摘要 (取前 ~2000 字符)
+ */
+export function buildHotMemory(workspacePath: string): MemoryLayer {
+  const parts: string[] = [];
+
+  // 1. 从 skeleton.json 读取项目元数据
+  const skeletonPath = `${workspacePath}/.agentforge/analysis/skeleton.json`;
+  try {
+    if (fs.existsSync(skeletonPath)) {
+      const skeleton = JSON.parse(fs.readFileSync(skeletonPath, 'utf-8'));
+      parts.push([
+        `## 项目概况 (Hot Memory)`,
+        `名称: ${skeleton.name}`,
+        `技术栈: ${(skeleton.techStack || []).join(', ')}`,
+        `规模: ${skeleton.fileCount} 文件, ${skeleton.totalLOC} 行代码, ${(skeleton.modules || []).length} 模块`,
+        `入口: ${(skeleton.entryFiles || []).slice(0, 3).join(', ')}`,
+      ].join('\n'));
+    }
+  } catch { /* skeleton 不存在，跳过 */ }
+
+  // 2. 架构文档摘要（前 2000 字符）
+  const archContent = readWorkspaceFile(workspacePath, '.agentforge/docs/ARCHITECTURE.md')
+    || readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
+  if (archContent) {
+    const summary = archContent.length > 2000
+      ? archContent.slice(0, 2000) + '\n... [架构文档已截断，详细内容可按需加载]'
+      : archContent;
+    parts.push(`## 架构概要\n${summary}`);
+  }
+
+  // 3. AGENTS.md 项目规范
+  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  if (agentsMd) {
+    const maxLen = 1000;
+    const trimmed = agentsMd.length > maxLen
+      ? agentsMd.slice(0, maxLen) + '\n... [截断]'
+      : agentsMd;
+    parts.push(`## 项目规范 (AGENTS.md)\n${trimmed}`);
+  }
+
+  const content = parts.join('\n\n');
+  return {
+    tier: 'hot',
+    content,
+    tokens: estimateTokens(content),
+  };
+}
+
+/**
+ * 构建 Warm Memory — 模块摘要索引（始终加载）
+ * 每个模块只保留 ID + 一句话职责
+ */
+export function buildWarmMemory(workspacePath: string): MemoryLayer {
+  const modulesDir = `${workspacePath}/.agentforge/analysis/modules`;
+  const parts: string[] = ['## 模块索引 (Warm Memory)'];
+
+  try {
+    if (fs.existsSync(modulesDir)) {
+      const files = fs.readdirSync(modulesDir).filter(f => f.endsWith('.summary.json'));
+      for (const file of files.slice(0, 50)) {
+        try {
+          const summary = JSON.parse(fs.readFileSync(path.join(modulesDir, file), 'utf-8'));
+          parts.push(`- **${summary.moduleId}** (${summary.rootPath}): ${summary.responsibility}`);
+        } catch { /* skip corrupt */ }
+      }
+    }
+  } catch { /* no analysis */ }
+
+  if (parts.length <= 1) {
+    return { tier: 'warm', content: '', tokens: 0 };
+  }
+
+  const content = parts.join('\n');
+  return {
+    tier: 'warm',
+    content,
+    tokens: estimateTokens(content),
+  };
+}
+
+/**
+ * 加载 Cold Memory — 指定模块的详细摘要（按需）
+ */
+export function loadColdMemory(workspacePath: string, moduleId: string): MemoryLayer {
+  const cacheFile = `${workspacePath}/.agentforge/analysis/modules/${moduleId}.summary.json`;
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const summary = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+      return {
+        tier: 'cold',
+        moduleId,
+        content: summary.fullText || JSON.stringify(summary, null, 2),
+        tokens: estimateTokens(summary.fullText || ''),
+      };
+    }
+  } catch { /* */ }
+  return { tier: 'cold', moduleId, content: '', tokens: 0 };
+}
+
+/**
+ * 根据 Feature 的关键词和依赖关系，自动选择需要加载的 Cold Memory 模块
+ */
+export function selectColdModules(
+  workspacePath: string,
+  feature: any,
+  maxModules: number = 5,
+): string[] {
+  const keywords = extractKeywords(
+    (feature.title || '') + ' ' + (feature.description || ''),
+  );
+
+  const modulesDir = `${workspacePath}/.agentforge/analysis/modules`;
+  const scores = new Map<string, number>();
+
+  try {
+    if (!fs.existsSync(modulesDir)) return [];
+    const files = fs.readdirSync(modulesDir).filter(f => f.endsWith('.summary.json'));
+
+    for (const file of files) {
+      try {
+        const summary = JSON.parse(fs.readFileSync(path.join(modulesDir, file), 'utf-8'));
+        let score = 0;
+
+        // 关键词匹配
+        const text = `${summary.moduleId} ${summary.rootPath} ${summary.responsibility} ${(summary.publicAPI || []).join(' ')}`.toLowerCase();
+        for (const kw of keywords) {
+          if (text.includes(kw)) score += 2;
+        }
+
+        // 依赖文件匹配
+        try {
+          const depFiles: string[] = JSON.parse(feature.depends_on || '[]');
+          const affectedFiles: string[] = JSON.parse(feature.affected_files || '[]');
+          const allRelated = [...depFiles, ...affectedFiles];
+          if (allRelated.some(f => f.includes(summary.rootPath))) score += 5;
+        } catch { /* */ }
+
+        if (score > 0) scores.set(summary.moduleId, score);
+      } catch { /* */ }
+    }
+  } catch { /* */ }
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxModules)
+    .map(([id]) => id);
+}
+
+/**
+ * 构建三层上下文（Hot + Warm + 选中的 Cold 模块）
+ * 这是 collectDeveloperContext 的增强版本
+ */
+export function collectLayeredContext(
+  workspacePath: string,
+  projectId: string,
+  feature: any,
+  tokenBudget: number = 6000,
+  agentId?: string,
+): ContextResult {
+  const sectionList: ContextSection[] = [];
+  let totalChars = 0;
+  let filesIncluded = 0;
+  const charBudget = tokenBudget * 1.5;
+
+  function addSection(sec: Omit<ContextSection, 'chars' | 'tokens'>) {
+    const chars = sec.content.length;
+    const tokens = estimateTokens(sec.content);
+    sectionList.push({ ...sec, chars, tokens });
+    totalChars += chars;
+    filesIncluded += sec.files?.length ?? 0;
+  }
+
+  // ─── Hot Memory (始终加载, ≤15% 预算) ───
+  const hot = buildHotMemory(workspacePath);
+  if (hot.content && hot.content.length < charBudget * 0.2) {
+    addSection({
+      id: 'hot-memory', name: 'Hot Memory (项目概况+架构)', source: 'architecture',
+      content: hot.content, truncated: false,
+    });
+  }
+
+  // ─── Warm Memory (模块索引, ≤10% 预算) ───
+  const warm = buildWarmMemory(workspacePath);
+  if (warm.content && totalChars + warm.content.length < charBudget * 0.3) {
+    addSection({
+      id: 'warm-memory', name: 'Warm Memory (模块索引)', source: 'repo-map',
+      content: warm.content, truncated: false,
+    });
+  }
+
+  // ─── Cold Memory (按需加载, ≤20% 预算) ───
+  const coldModuleIds = selectColdModules(workspacePath, feature, 5);
+  if (coldModuleIds.length > 0) {
+    const coldParts: string[] = ['## 相关模块详情 (Cold Memory)'];
+    for (const modId of coldModuleIds) {
+      if (totalChars >= charBudget * 0.5) break;
+      const cold = loadColdMemory(workspacePath, modId);
+      if (cold.content) {
+        const maxModChars = Math.floor((charBudget * 0.5 - totalChars) / Math.max(1, coldModuleIds.length));
+        const trimmed = cold.content.length > maxModChars
+          ? cold.content.slice(0, maxModChars) + '\n... [模块摘要已截断]'
+          : cold.content;
+        coldParts.push(`### ${modId}\n${trimmed}`);
+        totalChars += trimmed.length;
+      }
+    }
+    if (coldParts.length > 1) {
+      const coldText = coldParts.join('\n\n');
+      sectionList.push({
+        id: 'cold-memory', name: 'Cold Memory (相关模块详情)', source: 'dependency',
+        content: coldText, chars: coldText.length, tokens: estimateTokens(coldText),
+        truncated: false,
+      });
+    }
+  }
+
+  // ─── 传统上下文补充（Repo Map、Code Graph 等）───
+  // 仅在分层记忆不足时补充
+  if (totalChars < charBudget * 0.5) {
+    // Repo Map
+    const repoMap = generateRepoMap(workspacePath, 40, 10, 80);
+    if (repoMap && totalChars + repoMap.length < charBudget * 0.6) {
+      addSection({
+        id: 'repo-map', name: 'Repository Map', source: 'repo-map',
+        content: repoMap, truncated: false,
+      });
+    }
+  }
+
+  // ─── 依赖 Feature 产出文件 ───
+  if (totalChars < charBudget * 0.75) {
+    let depFiles: string[] = [];
+    try {
+      const deps: string[] = JSON.parse(feature.depends_on || '[]');
+      if (deps.length > 0) {
+        const db = getDb();
+        for (const depId of deps) {
+          const depFeature = db.prepare(
+            "SELECT affected_files FROM features WHERE id = ? AND project_id = ? AND status = 'passed'",
+          ).get(depId, projectId) as { affected_files: string } | undefined;
+          if (depFeature) {
+            try { depFiles.push(...JSON.parse(depFeature.affected_files || '[]')); } catch { /**/ }
+          }
+        }
+      }
+    } catch { /**/ }
+
+    depFiles = [...new Set(depFiles)];
+    if (depFiles.length > 0) {
+      const depParts: string[] = ['## 依赖文件'];
+      const depFileList: string[] = [];
+      for (const f of depFiles.slice(0, 6)) {
+        if (totalChars >= charBudget * 0.9) break;
+        const content = readWorkspaceFile(workspacePath, f);
+        if (content) {
+          const maxLen = Math.floor((charBudget * 0.9 - totalChars) / Math.max(1, depFiles.length));
+          const trimmed = content.length > maxLen
+            ? content.slice(0, maxLen) + '\n... [截断]'
+            : content;
+          depParts.push(`### ${f}\n\`\`\`\n${trimmed}\n\`\`\``);
+          totalChars += trimmed.length;
+          depFileList.push(f);
+        }
+      }
+      if (depParts.length > 1) {
+        const depText = depParts.join('\n');
+        sectionList.push({
+          id: 'dep-files', name: '依赖 Feature 产出文件', source: 'dependency',
+          content: depText, chars: depText.length, tokens: estimateTokens(depText),
+          truncated: false, files: depFileList,
+        });
+        filesIncluded += depFileList.length;
+      }
+    }
+  }
+
+  // 构建快照
+  const contextText = sectionList.map(s => s.content).join('\n\n');
+  const totalTokens = estimateTokens(contextText);
+  for (const sec of sectionList) {
+    sec.budgetRatio = totalTokens > 0 ? sec.tokens / tokenBudget : 0;
+  }
+
+  const snapshot: ContextSnapshot = {
+    agentId: agentId || 'unknown',
+    featureId: feature.id || 'unknown',
+    timestamp: Date.now(),
+    sections: sectionList,
+    totalChars,
+    totalTokens,
+    tokenBudget,
+    contextText,
+    filesIncluded,
+  };
+
+  return { contextText, estimatedTokens: totalTokens, filesIncluded, snapshot };
+}
+
+// ═══════════════════════════════════════
+// v2.0: Compaction — 上下文压缩（ReAct 循环中）
+// ═══════════════════════════════════════
+// 当 ReAct 循环的对话历史接近上下文窗口限制时，
+// 智能压缩历史消息，保留关键信息，释放 token 空间。
+// 对标 Anthropic Context Engineering: "summarize → reinitiate"
+// ═══════════════════════════════════════
+
+export interface CompactionResult {
+  /** 压缩后的消息数组 */
+  messages: Array<{ role: string; content: string }>;
+  /** 压缩前的 token 数 */
+  tokensBefore: number;
+  /** 压缩后的 token 数 */
+  tokensAfter: number;
+  /** 压缩比 */
+  ratio: number;
+  /** 是否执行了 LLM 调用进行摘要 */
+  usedLLM: boolean;
+}
+
+/**
+ * 检查消息列表是否需要压缩
+ */
+export function needsCompaction(
+  messages: Array<{ role: string; content: string }>,
+  tokenBudget: number,
+  threshold: number = 0.75,
+): boolean {
+  const total = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  return total > tokenBudget * threshold;
+}
+
+/**
+ * 对 ReAct 对话历史进行智能压缩
+ *
+ * 策略：
+ * 1. 保留 system prompt（第一条消息）
+ * 2. 保留最近 N 条消息（活跃窗口）
+ * 3. 中间的消息用确定性压缩（提取关键信息）
+ * 4. 如果提供了 LLM 调用能力，可选用 LLM 生成摘要
+ *
+ * @param messages 完整消息列表
+ * @param tokenBudget 目标 token 上限
+ * @param keepRecentCount 保留最近消息数量
+ * @param llmSummarize 可选：LLM 摘要回调
+ */
+export async function compactMessages(
+  messages: Array<{ role: string; content: string }>,
+  tokenBudget: number,
+  keepRecentCount: number = 6,
+  llmSummarize?: (text: string) => Promise<string>,
+): Promise<CompactionResult> {
+  const tokensBefore = messages.reduce((s, m) => s + estimateTokens(m.content), 0);
+
+  // 如果在预算内，不压缩
+  if (tokensBefore <= tokenBudget * 0.75) {
+    return {
+      messages,
+      tokensBefore,
+      tokensAfter: tokensBefore,
+      ratio: 1.0,
+      usedLLM: false,
+    };
+  }
+
+  // 分区
+  const systemMsg = messages[0]?.role === 'system' ? messages[0] : null;
+  const nonSystem = systemMsg ? messages.slice(1) : messages;
+  const recentStart = Math.max(0, nonSystem.length - keepRecentCount);
+  const recent = nonSystem.slice(recentStart);
+  const middle = nonSystem.slice(0, recentStart);
+
+  if (middle.length === 0) {
+    // 没有可压缩的中间部分
+    return { messages, tokensBefore, tokensAfter: tokensBefore, ratio: 1.0, usedLLM: false };
+  }
+
+  // 确定性压缩中间消息
+  let summaryText: string;
+  let usedLLM = false;
+
+  const middleText = middle.map(m => {
+    const prefix = m.role === 'assistant' ? '[Agent]' : m.role === 'user' ? '[Tool Result]' : `[${m.role}]`;
+    // 提取关键行：工具调用、错误、文件操作、关键决策
+    const lines = m.content.split('\n');
+    const keyLines = lines.filter(l => {
+      const t = l.trim();
+      return (
+        t.startsWith('##') ||          // 标题
+        t.includes('Error') ||         // 错误
+        t.includes('✅') || t.includes('❌') || // 结果标记
+        t.includes('created') || t.includes('modified') || // 文件操作
+        t.startsWith('Think:') || t.startsWith('Action:') || // ReAct 步骤
+        t.startsWith('write_file') || t.startsWith('read_file') || // 工具调用
+        t.match(/^(Step|步骤)\s*\d/) // 步骤标记
+      );
+    });
+    const compressed = keyLines.length > 0
+      ? keyLines.slice(0, 10).join('\n')
+      : lines.slice(0, 3).join('\n') + (lines.length > 3 ? '\n...' : '');
+    return `${prefix}: ${compressed}`;
+  }).join('\n');
+
+  if (llmSummarize && estimateTokens(middleText) > 2000) {
+    // 用 LLM 进一步压缩
+    try {
+      summaryText = await llmSummarize(
+        `请将以下 ReAct 对话历史压缩为关键摘要（保留：已完成的操作、已创建/修改的文件、遇到的错误、关键决策）：\n\n${middleText}`,
+      );
+      usedLLM = true;
+    } catch {
+      summaryText = middleText;
+    }
+  } else {
+    summaryText = middleText;
+  }
+
+  // 构建压缩后的消息
+  const compactedSummaryMsg = {
+    role: 'user' as const,
+    content: `[Compaction Summary — 以下是之前 ${middle.length} 条消息的压缩摘要]\n\n${summaryText}\n\n[End of compacted history. Continue from here.]`,
+  };
+
+  const result: Array<{ role: string; content: string }> = [];
+  if (systemMsg) result.push(systemMsg);
+  result.push(compactedSummaryMsg);
+  result.push(...recent);
+
+  const tokensAfter = result.reduce((s, m) => s + estimateTokens(m.content), 0);
+
+  return {
+    messages: result,
+    tokensBefore,
+    tokensAfter,
+    ratio: tokensAfter / tokensBefore,
+    usedLLM,
+  };
+}
+
+/**
+ * 对单条工具返回结果进行裁剪
+ * 当工具返回大段代码/日志时，智能截取关键部分
+ */
+export function trimToolResult(content: string, maxTokens: number = 3000): string {
+  const charLimit = maxTokens * 1.5;
+  if (content.length <= charLimit) return content;
+
+  // 策略：保留头部 + 尾部 + 错误信息
+  const lines = content.split('\n');
+  const errorLines = lines.filter(l =>
+    l.includes('Error') || l.includes('error') || l.includes('FAIL') || l.includes('warning'),
+  );
+
+  const headCount = Math.floor(lines.length * 0.3);
+  const tailCount = Math.floor(lines.length * 0.15);
+
+  const head = lines.slice(0, Math.min(headCount, 50));
+  const tail = lines.slice(-Math.min(tailCount, 20));
+  const errors = errorLines.slice(0, 10);
+
+  const parts = [
+    ...head,
+    '',
+    `... [省略 ${lines.length - headCount - tailCount} 行]`,
+    '',
+  ];
+
+  if (errors.length > 0) {
+    parts.push('--- 关键错误/警告 ---');
+    parts.push(...errors);
+    parts.push('');
+  }
+
+  parts.push(...tail);
+
+  const result = parts.join('\n');
+  return result.length <= charLimit
+    ? result
+    : result.slice(0, Math.floor(charLimit)) + '\n... [结果已截断]';
+}
+
+// ═══════════════════════════════════════
+// v0.8: 分层上下文压缩 (legacy, 保持兼容)
 // ═══════════════════════════════════════
 
 /**

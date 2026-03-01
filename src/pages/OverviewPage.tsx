@@ -913,6 +913,37 @@ export function OverviewPage() {
       </div>
 
       <div className="flex-1 px-6 pb-6 space-y-6 relative z-10">
+        {/* Project Analysis Status (for imported projects) */}
+        {enriched.length === 0 && (
+          <section className="bg-gradient-to-r from-cyan-900/10 to-slate-900/30 border border-cyan-800/20 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-cyan-500/50 animate-pulse" />
+                <span className="text-xs text-cyan-400/70 uppercase tracking-wider font-medium">📥 项目导入分析</span>
+              </div>
+              <span className="text-[10px] text-slate-600">Phase 0~3 自动化</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: 'Phase 0', desc: '静态扫描', icon: '🔍', detail: '目录/LOC/依赖图' },
+                { label: 'Phase 1', desc: '模块摘要', icon: '📝', detail: 'worker模型分层摘要' },
+                { label: 'Phase 2', desc: '架构合成', icon: '🏗️', detail: 'strong模型合成' },
+                { label: 'Phase 3', desc: '文档填充', icon: '📋', detail: '设计/需求/测试规格' },
+              ].map((p, i) => (
+                <div key={i} className="bg-slate-800/30 rounded-lg p-2.5 text-center">
+                  <div className="text-lg mb-0.5">{p.icon}</div>
+                  <div className="text-[10px] text-slate-400 font-medium">{p.label}</div>
+                  <div className="text-[10px] text-slate-500">{p.desc}</div>
+                  <div className="text-[9px] text-slate-600 mt-0.5">{p.detail}</div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-600 mt-2">
+              💡 在「项目」页选择「导入已有项目」可自动分析大型代码库并生成文档框架。Hot/Warm/Cold 三层记忆确保 Token 高效利用。
+            </p>
+          </section>
+        )}
+
         {/* Skeleton placeholder modules when no features yet */}
         {enriched.length === 0 && !isActive && (
           <div className="space-y-6">
