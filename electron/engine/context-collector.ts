@@ -22,6 +22,7 @@ import { getDb } from '../db';
 import { generateRepoMap } from './repo-map';
 import { readMemoryForRole } from './memory-system';
 import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
+import { buildCrossProjectContext } from './cross-project';
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -343,6 +344,22 @@ export function collectDeveloperContext(
         filesIncluded += relFileList.length;
       }
     }
+  }
+
+  // ─── 5. 跨项目经验 (v2.0) ───
+  if (totalChars < charBudget * 0.9) {
+    try {
+      const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md') || '';
+      const wish = feature.description || '';
+      const remainingBudget = Math.max(500, Math.floor((charBudget - totalChars) / 1.5));
+      const crossCtx = buildCrossProjectContext(wish, archContent, remainingBudget);
+      if (crossCtx) {
+        addSection({
+          id: 'cross-project', name: '跨项目经验', source: 'project-config',
+          content: crossCtx, truncated: false,
+        });
+      }
+    } catch { /* non-fatal */ }
   }
 
   // 构建完整上下文文本

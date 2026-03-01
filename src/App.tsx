@@ -11,6 +11,7 @@ import { LogsPage } from './pages/LogsPage';
 import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ContextPage } from './pages/ContextPage';
+import TimelinePage from './pages/TimelinePage';
 
 export function App() {
   const {
@@ -123,6 +124,7 @@ export function App() {
       case 'output':   return <OutputPage />;
       case 'logs':     return <LogsPage />;
       case 'context':  return <ContextPage />;
+      case 'timeline': return <TimelinePage />;
       default:         return <OverviewPage />;
     }
   };

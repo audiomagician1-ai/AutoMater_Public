@@ -21,6 +21,9 @@ import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProje
 import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
 import { runResearcher } from './sub-agent';
 import { buildCodeGraph, graphSummary } from './code-graph';
+import { emitEvent, type EventType } from './event-store';
+import { createCheckpoint } from './mission';
+import { extractFromProjectMemory, buildCrossProjectContext } from './cross-project';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -720,6 +723,12 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     ensureProjectMemory(workspacePath);
   }
 
+  // v2.0: 发射项目启动事件
+  emitEvent({
+    projectId, agentId: 'system', type: 'project:start',
+    data: { wish: project.wish, name: project.name, workspace: workspacePath },
+  });
+
   // 检查是否已有 features（续跑场景）
   const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as any;
   const isResume = existingFeatures.c > 0;
@@ -806,6 +815,13 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     sendToUI(win, 'project:features-ready', { projectId, count: features.length });
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `📋 生成了 ${features.length} 个 Feature` });
 
+    // v2.0: PM 完成事件
+    emitEvent({
+      projectId, agentId: pmId, type: 'phase:pm:end',
+      data: { featureCount: features.length },
+    });
+    createCheckpoint(projectId, `PM 分析完成 (${features.length} Features)`);
+
     // ═══════════════════════════════════════
     // Phase 2: Architect Agent — 技术架构设计
     // ═══════════════════════════════════════
@@ -854,6 +870,14 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         projectId, agentId: archId,
         content: `✅ 架构设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})`,
       });
+
+      // v2.0: Architect 完成事件 + 检查点
+      emitEvent({
+        projectId, agentId: archId, type: 'phase:architect:end',
+        data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost },
+        inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost,
+      });
+      createCheckpoint(projectId, '架构设计完成');
     } catch (err: any) {
       if (signal.aborted) { runningOrchestrators.delete(projectId); return; }
       // 架构设计失败不致命，继续开发
@@ -932,6 +956,26 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   // Git commit: 最终产出
   if (workspacePath) {
     commitWorkspace(workspacePath, `AgentForge: Delivered ${stats.passed}/${stats.total} features`);
+  }
+
+  // v2.0: 项目完成事件 + 检查点 + 跨项目经验提取
+  emitEvent({
+    projectId, agentId: 'system', type: 'project:complete',
+    data: { status: finalStatus, passed: stats.passed, total: stats.total },
+  });
+  createCheckpoint(projectId, `项目${finalStatus === 'delivered' ? '已交付' : '已暂停'} (${stats.passed}/${stats.total})`);
+
+  // 跨项目经验提取
+  if (workspacePath && stats.passed > 0) {
+    try {
+      const extracted = extractFromProjectMemory(workspacePath, project.name);
+      if (extracted > 0) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: 'system',
+          content: `🌐 已将 ${extracted} 条经验提取到全局经验池 (跨项目学习)`,
+        });
+      }
+    } catch { /* non-fatal */ }
   }
 
   runningOrchestrators.delete(projectId);
@@ -1095,6 +1139,18 @@ async function workerLoop(
       .run(newStatus, newStatus, feature.id, projectId);
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
     db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(workerId, projectId);
+
+    // v2.0: Feature 完成事件 + 每 3 个 feature 创建检查点
+    emitEvent({
+      projectId, agentId: workerId, featureId: feature.id,
+      type: passed ? 'feature:passed' : 'feature:failed',
+      data: { title: feature.title, status: newStatus },
+    });
+    // 定期检查点
+    const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('passed','failed')").get(projectId) as any).c;
+    if (completedCount % 3 === 0) {
+      createCheckpoint(projectId, `${completedCount} Features 已处理`);
+    }
 
     // Git commit after each passed feature
     if (passed && workspacePath) {
@@ -1403,6 +1459,12 @@ ${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(',
           args: argsSummary,
           success: toolResult.success,
           outputPreview: toolResult.output.slice(0, 200),
+        });
+        // v2.0: 工具调用事件
+        emitEvent({
+          projectId, agentId: workerId, featureId: feature.id,
+          type: 'tool:call',
+          data: { tool: tc.function.name, args: argsSummary, success: toolResult.success },
         });
         sendToUI(win, 'agent:log', {
           projectId, agentId: workerId,

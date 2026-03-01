@@ -103,6 +103,25 @@ interface AgentForgeAPI {
     readFile(projectId: string, relativePath: string): Promise<{ success: boolean; content: string }>;
     getPath(projectId: string): Promise<string | null>;
   };
+  /** v2.0: 事件流 */
+  events: {
+    query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<any[]>;
+    getStats(projectId: string): Promise<any>;
+    getTimeline(projectId: string, featureId: string): Promise<any[]>;
+    exportNDJSON(projectId: string): Promise<string>;
+  };
+  /** v2.0: Mission */
+  mission: {
+    getStatus(projectId: string): Promise<any>;
+    getCheckpoints(projectId: string): Promise<any[]>;
+    getProgressReport(projectId: string): Promise<string>;
+    detectResumable(): Promise<any[]>;
+  };
+  /** v2.0: 跨项目经验 */
+  knowledge: {
+    getStats(): Promise<any>;
+    query(tags: string[]): Promise<any[]>;
+  };
   on(channel: string, callback: (...args: any[]) => void): () => void;
 }
 

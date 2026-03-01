@@ -4,6 +4,7 @@ import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
 import { setupSettingsHandlers } from './ipc/settings';
 import { setupWorkspaceHandlers } from './ipc/workspace';
+import { setupEventHandlers } from './ipc/events';
 import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
@@ -47,6 +48,7 @@ app.whenReady().then(async () => {
   setupLLMHandlers();
   setupProjectHandlers();
   setupWorkspaceHandlers();
+  setupEventHandlers();
 
   createWindow();
 

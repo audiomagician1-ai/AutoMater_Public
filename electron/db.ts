@@ -107,4 +107,11 @@ export async function initDatabase(): Promise<void> {
   } catch { /* 列已存在 */ }
 
   console.log('[DB] Initialized at', dbPath);
+
+  // v2.0: 确保新表存在
+  const { ensureEventTable } = require('./engine/event-store');
+  const { ensureCheckpointTable } = require('./engine/mission');
+  ensureEventTable();
+  ensureCheckpointTable();
+  console.log('[DB] v2.0 tables ensured (events, checkpoints)');
 }

@@ -45,6 +45,24 @@ contextBridge.exposeInMainWorld('agentforge', {
     getPath: (projectId: string) => ipcRenderer.invoke('workspace:get-path', projectId),
   },
 
+  // ── v2.0: 事件流 + Mission ──
+  events: {
+    query: (projectId: string, options?: any) => ipcRenderer.invoke('events:query', projectId, options),
+    getStats: (projectId: string) => ipcRenderer.invoke('events:get-stats', projectId),
+    getTimeline: (projectId: string, featureId: string) => ipcRenderer.invoke('events:get-timeline', projectId, featureId),
+    exportNDJSON: (projectId: string) => ipcRenderer.invoke('events:export-ndjson', projectId),
+  },
+  mission: {
+    getStatus: (projectId: string) => ipcRenderer.invoke('mission:get-status', projectId),
+    getCheckpoints: (projectId: string) => ipcRenderer.invoke('mission:get-checkpoints', projectId),
+    getProgressReport: (projectId: string) => ipcRenderer.invoke('mission:get-progress-report', projectId),
+    detectResumable: () => ipcRenderer.invoke('mission:detect-resumable'),
+  },
+  knowledge: {
+    getStats: () => ipcRenderer.invoke('knowledge:get-stats'),
+    query: (tags: string[]) => ipcRenderer.invoke('knowledge:query', tags),
+  },
+
   // ── 事件订阅 (主进程 → 渲染进程) ──
   on: (channel: string, callback: (...args: any[]) => void) => {
     const subscription = (_event: any, ...args: any[]) => callback(...args);
