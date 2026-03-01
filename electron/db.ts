@@ -145,6 +145,18 @@ export async function initDatabase(): Promise<void> {
     db.exec(`ALTER TABLE features ADD COLUMN sub_group TEXT`);
   } catch { /* 列已存在 */ }
 
+  // v4.2: features 表增加文档追踪 + PM 验收字段
+  const v42Migrations = [
+    `ALTER TABLE features ADD COLUMN requirement_doc_ver INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE features ADD COLUMN test_spec_doc_ver INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE features ADD COLUMN pm_verdict TEXT`,
+    `ALTER TABLE features ADD COLUMN pm_verdict_score INTEGER`,
+    `ALTER TABLE features ADD COLUMN pm_verdict_feedback TEXT`,
+  ];
+  for (const sql of v42Migrations) {
+    try { db.exec(sql); } catch { /* 列已存在 */ }
+  }
+
   console.log('[DB] Initialized at', dbPath);
 
   // v2.0: 确保新表存在

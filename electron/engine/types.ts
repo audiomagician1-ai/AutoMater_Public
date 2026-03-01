@@ -36,6 +36,7 @@ export type ProjectStatus =
   | 'developing'
   | 'paused'
   | 'delivered'
+  | 'awaiting_user_acceptance'
   | 'error';
 
 export interface ProjectRow {
@@ -56,6 +57,8 @@ export type FeatureStatus =
   | 'todo'
   | 'in_progress'
   | 'reviewing'
+  | 'qa_passed'
+  | 'pm_rejected'
   | 'passed'
   | 'failed';
 
@@ -75,6 +78,14 @@ export interface FeatureRow {
   notes: string;
   created_at: string;
   completed_at: string | null;
+  /** v4.2: 子需求文档版本 */
+  requirement_doc_ver: number;
+  /** v4.2: 测试规格文档版本 */
+  test_spec_doc_ver: number;
+  /** v4.2: PM 验收结果 */
+  pm_verdict: string | null;
+  pm_verdict_score: number | null;
+  pm_verdict_feedback: string | null;
 }
 
 export interface AgentRow {

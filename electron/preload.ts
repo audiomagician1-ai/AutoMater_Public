@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('agentforge', {
     testGitHub: (repo: string, token: string) => ipcRenderer.invoke('project:test-github', repo, token),
     getContextSnapshots: (projectId: string) => ipcRenderer.invoke('project:get-context-snapshots', projectId),
     getReactStates: (projectId: string) => ipcRenderer.invoke('project:get-react-states', projectId),
+    // v4.2: 用户验收 + 文档查询
+    userAccept: (projectId: string, accept: boolean, feedback?: string) =>
+      ipcRenderer.invoke('project:user-accept', projectId, accept, feedback),
+    getFeatureDocs: (projectId: string, featureId: string) =>
+      ipcRenderer.invoke('project:get-feature-docs', projectId, featureId),
+    getDesignDoc: (projectId: string) =>
+      ipcRenderer.invoke('project:get-design-doc', projectId),
+    getDocChangelog: (projectId: string) =>
+      ipcRenderer.invoke('project:get-doc-changelog', projectId),
   },
 
   // ── 需求队列 (v3.1) ──

@@ -470,5 +470,66 @@ export function setupProjectHandlers() {
     }
     return result;
   });
+
+  // ── v4.2: 用户验收 — 批量确认所有 awaiting 的 Feature ──
+  ipcMain.handle('project:user-accept', (_event, projectId: string, accept: boolean, feedback?: string) => {
+    const db = getDb();
+
+    if (accept) {
+      // 用户验收通过 → 所有 passed Feature 保持, 项目标记 delivered
+      db.prepare("UPDATE projects SET status = 'delivered', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      // 通知前端
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        win.webContents.send('project:status', { projectId, status: 'delivered' });
+        win.webContents.send('agent:log', { projectId, agentId: 'system', content: '🎉 用户已验收通过! 项目已交付。' });
+      }
+      return { success: true, status: 'delivered' };
+    } else {
+      // 用户拒绝 → 项目状态回到 paused, 记录反馈
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      if (feedback) {
+        // 记录用户反馈到 agent_logs
+        db.prepare("INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, 'user', 'feedback', ?)")
+          .run(projectId, feedback);
+      }
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        win.webContents.send('project:status', { projectId, status: 'paused' });
+        win.webContents.send('agent:log', { projectId, agentId: 'system', content: `⏸️ 用户拒绝验收${feedback ? ': ' + feedback.slice(0, 200) : ''}` });
+      }
+      return { success: true, status: 'paused', feedback };
+    }
+  });
+
+  // ── v4.2: 获取 Feature 文档信息 ──
+  ipcMain.handle('project:get-feature-docs', (_event, projectId: string, featureId: string) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project?.workspace_path) return { requirement: null, testSpec: null };
+
+    const { readDoc } = require('../engine/doc-manager');
+    return {
+      requirement: readDoc(project.workspace_path, 'requirement', featureId),
+      testSpec: readDoc(project.workspace_path, 'test_spec', featureId),
+    };
+  });
+
+  // ── v4.2: 获取设计文档 ──
+  ipcMain.handle('project:get-design-doc', (_event, projectId: string) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project?.workspace_path) return null;
+
+    const { readDoc } = require('../engine/doc-manager');
+    return readDoc(project.workspace_path, 'design');
+  });
+
+  // ── v4.2: 获取文档变更日志 ──
+  ipcMain.handle('project:get-doc-changelog', (_event, projectId: string) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project?.workspace_path) return [];
+
+    const { getChangelog } = require('../engine/doc-manager');
+    return getChangelog(project.workspace_path);
+  });
 }
 

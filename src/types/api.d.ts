@@ -105,6 +105,14 @@ interface AgentForgeAPI {
     testGitHub(repo: string, token: string): Promise<{ success: boolean; message: string }>;
     getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
     getReactStates(projectId: string): Promise<Record<string, AgentReactState>>;
+    /** v4.2: 用户验收 */
+    userAccept(projectId: string, accept: boolean, feedback?: string): Promise<{ success: boolean; status: string; feedback?: string }>;
+    /** v4.2: 获取 Feature 文档 (子需求 + 测试规格) */
+    getFeatureDocs(projectId: string, featureId: string): Promise<{ requirement: string | null; testSpec: string | null }>;
+    /** v4.2: 获取设计文档 */
+    getDesignDoc(projectId: string): Promise<string | null>;
+    /** v4.2: 获取文档变更日志 */
+    getDocChangelog(projectId: string): Promise<DocChangeEntry[]>;
   };
   /** v3.1: 需求队列 */
   wish: {
@@ -170,6 +178,17 @@ interface TeamMember {
   context_files: string;  // JSON array string
   max_context_tokens: number;
   created_at: string;
+}
+
+/** 文档变更记录 (v4.2) */
+interface DocChangeEntry {
+  timestamp: string;
+  type: 'design' | 'requirement' | 'test_spec';
+  id: string;
+  version: number;
+  action: 'create' | 'update';
+  summary: string;
+  agentId: string;
 }
 
 interface AppSettings {

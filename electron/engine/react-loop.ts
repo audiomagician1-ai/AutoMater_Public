@@ -288,7 +288,7 @@ export async function reactDeveloperLoop(
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 

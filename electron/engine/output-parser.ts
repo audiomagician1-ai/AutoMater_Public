@@ -423,3 +423,18 @@ export const PLAN_STEPS_SCHEMA: SchemaSpec = {
     tool:        { type: 'string', required: false },
   },
 };
+
+/** PM 验收审查结果 schema (v4.2) */
+export const PM_ACCEPTANCE_SCHEMA: SchemaSpec = {
+  topLevel: 'object',
+  fields: {
+    verdict:   { type: 'string',  required: true, enum: ['accept', 'reject', 'conditional_accept'], default: 'reject' },
+    score:     { type: 'number',  required: true, default: 0, min: 0, max: 100 },
+    summary:   { type: 'string',  required: true, default: '' },
+    feedback:  { type: 'string',  required: false, default: '' },
+    design_alignment:      { type: 'object', required: false },
+    requirement_coverage:  { type: 'object', required: false },
+    user_experience:       { type: 'object', required: false },
+    consistency:           { type: 'object', required: false },
+  },
+};
