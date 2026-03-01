@@ -1,23 +1,77 @@
 {
-  "name": "agentforge-monorepo",
+  "name": "agentforge",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Agent Swarm Desktop App — Virtual Software Development Company",
-  "type": "module",
+  "description": "AgentForge — AI Agent 集群式软件开发桌面应用",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "pnpm --filter @agentforge/desktop dev",
-    "build": "pnpm -r run build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint .",
-    "type-check": "pnpm -r run type-check",
-    "clean": "pnpm -r run clean"
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "build:vite": "vite build",
+    "electron:dev": "vite",
+    "preview": "vite preview"
   },
   "engines": {
-    "node": ">=20.0.0",
-    "pnpm": ">=9.0.0"
+    "node": ">=20.0.0"
   },
-  "packageManager": "pnpm@9.15.0",
   "author": "Tim",
-  "license": "MIT"
+  "license": "MIT",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "clsx": "^2.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.0",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "electron": "^33.3.0",
+    "electron-builder": "^25.1.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.28.0",
+    "vite-plugin-electron-renderer": "^0.14.0"
+  },
+  "build": {
+    "appId": "com.agentforge.app",
+    "productName": "AgentForge",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "win": {
+      "target": "dir"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
 }

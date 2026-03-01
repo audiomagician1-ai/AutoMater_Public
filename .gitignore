@@ -20,3 +20,8 @@ apps/desktop/src-tauri/icons/generated/
 .vscode/
 *.swp
 *.swo
+release/
+electron-debug.log
+release-test.log
+dist/
+dist-electron/
