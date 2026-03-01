@@ -123,6 +123,8 @@ interface AgentForgeAPI {
     listChanges(projectId: string): Promise<ChangeRequestItem[]>;
     /** v4.3: 获取影响分析 */
     getImpactAnalysis(changeRequestId: string): Promise<ChangeRequestDetail | null>;
+    /** v5.1: 分析已有项目（异步，进度通过 project:import-progress 事件推送） */
+    analyzeExisting(projectId: string): Promise<{ success: boolean; message?: string; error?: string }>;
   };
   /** v3.1: 需求队列 */
   wish: {

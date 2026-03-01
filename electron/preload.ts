@@ -65,6 +65,9 @@ contextBridge.exposeInMainWorld('agentforge', {
       ipcRenderer.invoke('project:list-changes', projectId),
     getImpactAnalysis: (changeRequestId: string) =>
       ipcRenderer.invoke('project:get-impact-analysis', changeRequestId),
+    // v5.1: 分析已有项目
+    analyzeExisting: (projectId: string) =>
+      ipcRenderer.invoke('project:analyze-existing', projectId),
   },
 
   // ── 需求队列 (v3.1) ──

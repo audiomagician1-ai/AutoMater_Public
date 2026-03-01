@@ -751,6 +751,7 @@ function DocCompletionBar({ features, projectId }: { features: Feature[]; projec
 
 const PROJECT_STATUS: Record<string, { text: string; color: string }> = {
   initializing: { text: '初始化', color: 'text-blue-400' },
+  analyzing:    { text: '导入分析中', color: 'text-cyan-400' },
   developing:   { text: '开发中', color: 'text-emerald-400' },
   reviewing:    { text: '审查中', color: 'text-amber-400' },
   delivered:    { text: '已交付', color: 'text-green-400' },
@@ -765,6 +766,11 @@ export function OverviewPage() {
   const [stats, setStats] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
 
+  // v5.1: 导入分析实时进度
+  const [importProgress, setImportProgress] = useState<{
+    phase: number; step: string; progress: number; done?: boolean; error?: boolean;
+  } | null>(null);
+
   const load = useCallback(async () => {
     if (!currentProjectId) return;
     const [feats, st, proj] = await Promise.all([
@@ -775,10 +781,36 @@ export function OverviewPage() {
     setFeatures(feats || []);
     setStats(st);
     setProject(proj);
+    // 如果项目进入 analyzing 状态但没有进度信息，设初始值
+    if (proj?.status === 'analyzing' && !importProgress) {
+      setImportProgress({ phase: 0, step: '分析中...', progress: 0 });
+    }
+    // 分析完成后清除进度
+    if (proj?.status !== 'analyzing' && importProgress?.done) {
+      // 保留完成消息 5 秒后清除
+      setTimeout(() => setImportProgress(null), 8000);
+    }
   }, [currentProjectId]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+
+  // 订阅后端 import-progress 事件
+  useEffect(() => {
+    const unsub = window.agentforge.on('project:import-progress', (data: any) => {
+      if (data.projectId === currentProjectId) {
+        setImportProgress({
+          phase: data.phase,
+          step: data.step,
+          progress: data.progress,
+          done: data.done,
+          error: data.error,
+        });
+        if (data.done) load(); // 刷新项目数据
+      }
+    });
+    return unsub;
+  }, [currentProjectId, load]);
 
   const handleStart = async () => {
     if (!currentProjectId) return;
@@ -817,7 +849,7 @@ export function OverviewPage() {
   });
 
   // 项目状态判断
-  const isActive = project && (project.status === 'initializing' || project.status === 'developing' || project.status === 'reviewing');
+  const isActive = project && (project.status === 'initializing' || project.status === 'analyzing' || project.status === 'developing' || project.status === 'reviewing');
   const canStart = project && !isActive && project.wish?.trim();
   const canResume = project && (project.status === 'paused' || project.status === 'error');
   const noWish = project && !isActive && !canResume && !project.wish?.trim();
@@ -913,32 +945,108 @@ export function OverviewPage() {
       </div>
 
       <div className="flex-1 px-6 pb-6 space-y-6 relative z-10">
-        {/* Project Analysis Status (for imported projects) */}
-        {enriched.length === 0 && (
+        {/* Project Import Analysis — Real-time Progress (v5.1) */}
+        {(project?.status === 'analyzing' || importProgress) && (
+          <section className="bg-gradient-to-r from-cyan-900/15 to-slate-900/30 border border-cyan-800/30 rounded-xl p-5 animate-in fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                {importProgress?.done && !importProgress?.error ? (
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                ) : importProgress?.error ? (
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                ) : (
+                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse" />
+                )}
+                <span className="text-sm font-medium text-cyan-300">
+                  📥 项目导入分析
+                  {importProgress?.done && !importProgress?.error && ' — 完成 ✅'}
+                  {importProgress?.error && ' — 失败 ❌'}
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-500 font-mono">
+                Phase {importProgress?.phase ?? 0}/3
+              </span>
+            </div>
+
+            {/* Phase 指示器 */}
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[
+                { phase: 0, label: '静态扫描', icon: '🔍', desc: '目录 / LOC / 依赖图' },
+                { phase: 1, label: '模块摘要', icon: '📝', desc: 'Worker 模型分层摘要' },
+                { phase: 2, label: '架构合成', icon: '🏗️', desc: 'Strong 模型架构文档' },
+                { phase: 3, label: '文档填充', icon: '📋', desc: '设计 / 需求 / 测试规格' },
+              ].map((p) => {
+                const current = importProgress?.phase ?? -1;
+                const isDone = current > p.phase || (current === p.phase && importProgress?.done && !importProgress?.error);
+                const isActive = current === p.phase && !importProgress?.done;
+                const isPending = current < p.phase;
+                return (
+                  <div
+                    key={p.phase}
+                    className={`rounded-lg p-3 text-center transition-all duration-500 ${
+                      isDone ? 'bg-emerald-900/30 border border-emerald-700/30' :
+                      isActive ? 'bg-cyan-900/40 border border-cyan-600/40 shadow-lg shadow-cyan-900/20' :
+                      'bg-slate-800/30 border border-slate-700/20'
+                    }`}
+                  >
+                    <div className={`text-xl mb-1 ${isActive ? 'animate-bounce' : ''}`}>{p.icon}</div>
+                    <div className={`text-[11px] font-medium ${
+                      isDone ? 'text-emerald-400' : isActive ? 'text-cyan-300' : 'text-slate-600'
+                    }`}>
+                      {isDone ? '✓ ' : ''}{p.label}
+                    </div>
+                    <div className={`text-[9px] mt-0.5 ${
+                      isDone ? 'text-emerald-500/70' : isActive ? 'text-cyan-400/70' : 'text-slate-700'
+                    }`}>
+                      {p.desc}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 当前步骤详情 + 进度条 */}
+            {importProgress && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className={`text-xs ${importProgress.error ? 'text-red-400' : importProgress.done ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                    {importProgress.step}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {Math.round(importProgress.progress * 100)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ease-out ${
+                      importProgress.error ? 'bg-red-500' : importProgress.done ? 'bg-emerald-500' : 'bg-cyan-500'
+                    }`}
+                    style={{ width: `${Math.max(2, importProgress.progress * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 完成后提示 */}
+            {importProgress?.done && !importProgress?.error && (
+              <p className="text-[11px] text-emerald-500/80 mt-3">
+                🎉 分析完成！查看「文档」页浏览自动生成的架构文档和需求文档，或在「许愿」页输入新需求开始开发。
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* Static analysis info for projects without import */}
+        {enriched.length === 0 && !importProgress && project?.status !== 'analyzing' && (
           <section className="bg-gradient-to-r from-cyan-900/10 to-slate-900/30 border border-cyan-800/20 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-cyan-500/50 animate-pulse" />
-                <span className="text-xs text-cyan-400/70 uppercase tracking-wider font-medium">📥 项目导入分析</span>
+                <div className="w-2 h-2 rounded-full bg-slate-600" />
+                <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">📥 项目导入分析</span>
               </div>
               <span className="text-[10px] text-slate-600">Phase 0~3 自动化</span>
             </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { label: 'Phase 0', desc: '静态扫描', icon: '🔍', detail: '目录/LOC/依赖图' },
-                { label: 'Phase 1', desc: '模块摘要', icon: '📝', detail: 'worker模型分层摘要' },
-                { label: 'Phase 2', desc: '架构合成', icon: '🏗️', detail: 'strong模型合成' },
-                { label: 'Phase 3', desc: '文档填充', icon: '📋', detail: '设计/需求/测试规格' },
-              ].map((p, i) => (
-                <div key={i} className="bg-slate-800/30 rounded-lg p-2.5 text-center">
-                  <div className="text-lg mb-0.5">{p.icon}</div>
-                  <div className="text-[10px] text-slate-400 font-medium">{p.label}</div>
-                  <div className="text-[10px] text-slate-500">{p.desc}</div>
-                  <div className="text-[9px] text-slate-600 mt-0.5">{p.detail}</div>
-                </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-slate-600 mt-2">
+            <p className="text-[10px] text-slate-600">
               💡 在「项目」页选择「导入已有项目」可自动分析大型代码库并生成文档框架。Hot/Warm/Cold 三层记忆确保 Token 高效利用。
             </p>
           </section>

@@ -12,6 +12,8 @@ import { runChangeRequest } from '../engine/change-manager';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
+import { importProject } from '../engine/project-importer';
+import { sendToUI, addLog } from '../engine/ui-bridge';
 
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -214,6 +216,8 @@ export function setupProjectHandlers() {
     gitMode?: string;
     githubRepo?: string;
     githubToken?: string;
+    importExisting?: boolean;
+    historyPath?: string;
   }) => {
     const db = getDb();
     const id = generateId();
@@ -221,6 +225,7 @@ export function setupProjectHandlers() {
     const gitMode = options?.gitMode || 'local';
     const githubRepo = options?.githubRepo || null;
     const githubToken = options?.githubToken || null;
+    const isImport = options?.importExisting === true;
 
     // 工作区目录: 用户指定 > 默认
     let workspacePath: string;
@@ -232,15 +237,20 @@ export function setupProjectHandlers() {
     }
     fs.mkdirSync(workspacePath, { recursive: true });
 
-    // Git init (根据模式)
-    initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
+    // 导入已有项目时不执行 git init（项目已有自己的 git）
+    if (!isImport) {
+      initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
+    }
+
+    // 导入项目用 analyzing 状态; 新项目用 initializing
+    const initialStatus = isImport ? 'analyzing' : 'initializing';
 
     db.prepare(`
       INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo, github_token)
-      VALUES (?, ?, '', 'initializing', ?, '{}', ?, ?, ?)
-    `).run(id, displayName, workspacePath, gitMode, githubRepo, githubToken);
+      VALUES (?, ?, '', ?, ?, '{}', ?, ?, ?)
+    `).run(id, displayName, initialStatus, workspacePath, gitMode, githubRepo, githubToken);
 
-    // ── 自动创建默认团队 (8人) ──
+    // ── 自动创建默认团队 ──
     try {
       const initResult = initDefaultTeam(db, id);
       console.log(`[project:create] Auto-initialized team for ${id}: ${initResult.count} members`);
@@ -687,6 +697,75 @@ export function setupProjectHandlers() {
       impactAnalysis: row.impact_analysis ? JSON.parse(row.impact_analysis) : null,
       affectedFeatures: row.affected_features ? JSON.parse(row.affected_features) : [],
     };
+  });
+
+  // ── 分析已有项目 (v5.1: Project Importer) ──
+  ipcMain.handle('project:analyze-existing', async (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project) return { success: false, error: 'Project not found' };
+
+    const workspacePath = project.workspace_path;
+    if (!workspacePath || !fs.existsSync(workspacePath)) {
+      return { success: false, error: 'Workspace path not found' };
+    }
+
+    const win = BrowserWindow.getAllWindows()[0] ?? null;
+
+    // 更新状态为 analyzing
+    db.prepare("UPDATE projects SET status = 'analyzing', updated_at = datetime('now') WHERE id = ?").run(projectId);
+    sendToUI(win, 'project:status', { projectId, status: 'analyzing' });
+
+    // 异步执行分析（不阻塞 IPC 返回）
+    (async () => {
+      try {
+        const result = await importProject(
+          workspacePath,
+          projectId,
+          undefined, // no abort signal for now
+          (phase: number, step: string, progress: number) => {
+            // 推送实时进度到前端
+            sendToUI(win, 'project:import-progress', {
+              projectId,
+              phase,
+              step,
+              progress,
+            });
+          },
+        );
+
+        // 分析完成 → 更新项目状态 + wish 描述
+        const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
+        db.prepare("UPDATE projects SET status = 'paused', wish = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, projectId);
+
+        sendToUI(win, 'project:import-progress', {
+          projectId,
+          phase: 4,
+          step: `✅ 分析完成! ${summary}`,
+          progress: 1.0,
+          done: true,
+        });
+        sendToUI(win, 'project:status', { projectId, status: 'paused' });
+
+        addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
+      } catch (err: any) {
+        console.error('[project:analyze-existing] Error:', err);
+        db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
+        sendToUI(win, 'project:import-progress', {
+          projectId,
+          phase: -1,
+          step: `❌ 分析失败: ${err.message}`,
+          progress: 0,
+          done: true,
+          error: true,
+        });
+        sendToUI(win, 'project:status', { projectId, status: 'error' });
+        addLog(projectId, 'project-importer', 'error', `❌ 分析失败: ${err.message}`);
+      }
+    })();
+
+    return { success: true, message: '分析已启动，请在 Overview 页面查看进度' };
   });
 
   // ── 文件夹选择对话框 (v5.1) ──

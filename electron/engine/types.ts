@@ -33,6 +33,7 @@ export interface AppSettings {
 
 export type ProjectStatus =
   | 'initializing'
+  | 'analyzing'
   | 'developing'
   | 'paused'
   | 'delivered'

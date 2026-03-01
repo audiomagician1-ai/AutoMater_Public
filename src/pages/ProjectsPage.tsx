@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/app-store';
 
 const STATUS_LABELS: Record<string, { text: string; color: string; icon: string }> = {
   initializing: { text: '分析中', color: 'text-blue-400',    icon: '🔵' },
+  analyzing:    { text: '导入分析中', color: 'text-cyan-400',  icon: '📥' },
   developing:   { text: '开发中', color: 'text-emerald-400', icon: '🟢' },
   reviewing:    { text: '审查中', color: 'text-amber-400',   icon: '🟡' },
   delivered:    { text: '已交付', color: 'text-green-400',   icon: '✅' },
@@ -132,18 +133,15 @@ export function ProjectsPage() {
       };
       const result = await window.agentforge.project.create(name, options);
       if (result.success) {
-        // 触发项目分析（模拟进度）
-        setImportProgress({ phase: 0, step: '静态扫描项目结构...', progress: 0.3 });
-        // 实际分析由后端 IPC 异步执行
-        try {
-          await (window as any).agentforge?.project?.analyzeExisting?.(result.projectId);
-        } catch { /* IPC 可能尚未实现 */ }
+        // 触发后端异步分析（不阻塞，进度通过事件推送到 OverviewPage）
+        window.agentforge.project.analyzeExisting(result.projectId).catch(() => {});
 
-        addLog({ projectId: result.projectId, agentId: 'system', content: `📥 已导入项目: ${name}` });
+        addLog({ projectId: result.projectId, agentId: 'system', content: `📥 项目已导入，分析中: ${name}` });
         setImportPath('');
         setImportName('');
         setShowImport(false);
         setImportProgress(null);
+        // 直接进入 Overview 页面查看实时进度
         enterProject(result.projectId, 'overview');
       }
     } catch (err: any) {
@@ -470,7 +468,7 @@ export function ProjectsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {projects.map(p => {
                 const st = STATUS_LABELS[p.status] || { text: p.status, color: 'text-slate-500', icon: '⬜' };
-                const isActive = p.status === 'initializing' || p.status === 'developing' || p.status === 'reviewing';
+                const isActive = p.status === 'initializing' || p.status === 'analyzing' || p.status === 'developing' || p.status === 'reviewing';
                 const stats = projectStats[p.id];
                 const f = stats?.features || {};
                 const a = stats?.agents || {};
