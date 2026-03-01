@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('agentforge', {
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
     delete: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
     openWorkspace: (projectId: string) => ipcRenderer.invoke('project:open-workspace', projectId),
+    export: (projectId: string) => ipcRenderer.invoke('project:export', projectId),
+    gitCommit: (projectId: string, message: string) => ipcRenderer.invoke('project:git-commit', projectId, message),
+    gitLog: (projectId: string) => ipcRenderer.invoke('project:git-log', projectId),
   },
 
   // ── 工作区文件系统 ──

@@ -2,11 +2,12 @@
  * 项目 IPC — 创建项目、启动 Agent 编排
  */
 
-import { ipcMain, BrowserWindow, app, shell } from 'electron';
+import { ipcMain, BrowserWindow, app, shell, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { runOrchestrator, stopOrchestrator } from '../engine/orchestrator';
+import { initGitRepo, commitWorkspace, getGitLog, exportWorkspaceZip } from '../engine/workspace-git';
 
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -24,6 +25,9 @@ export function setupProjectHandlers() {
     const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
     const workspacePath = path.join(workspacesRoot, id);
     fs.mkdirSync(workspacePath, { recursive: true });
+
+    // Git init
+    initGitRepo(workspacePath);
 
     db.prepare(`
       INSERT INTO projects (id, name, wish, status, workspace_path, config)
@@ -71,6 +75,7 @@ export function setupProjectHandlers() {
         COUNT(*) as total,
         SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo,
         SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing,
         SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM features WHERE project_id = ?
@@ -127,6 +132,50 @@ export function setupProjectHandlers() {
       return { success: true };
     }
     return { success: false, error: '工作区目录不存在' };
+  });
+
+  // ── 导出项目为 zip ──
+  ipcMain.handle('project:export', async (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT name, workspace_path FROM projects WHERE id = ?').get(projectId) as { name: string; workspace_path?: string } | undefined;
+    if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
+      return { success: false, error: '工作区目录不存在' };
+    }
+
+    // 先 commit 最新状态
+    commitWorkspace(project.workspace_path, 'Export snapshot');
+
+    const win = BrowserWindow.getAllWindows()[0] ?? null;
+    if (!win) return { success: false, error: '无窗口' };
+
+    const safeName = project.name.replace(/[^\w\u4e00-\u9fff-]/g, '_').slice(0, 30);
+    const result = await dialog.showSaveDialog(win, {
+      title: '导出项目',
+      defaultPath: path.join(app.getPath('desktop'), `${safeName}.zip`),
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+    });
+
+    if (result.canceled || !result.filePath) return { success: false, error: '用户取消' };
+
+    const ok = await exportWorkspaceZip(project.workspace_path, result.filePath);
+    return ok ? { success: true, path: result.filePath } : { success: false, error: '打包失败' };
+  });
+
+  // ── Git commit ──
+  ipcMain.handle('project:git-commit', (_event, projectId: string, message: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false };
+    const ok = commitWorkspace(project.workspace_path, message);
+    return { success: ok };
+  });
+
+  // ── Git log ──
+  ipcMain.handle('project:git-log', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return [];
+    return getGitLog(project.workspace_path);
   });
 }
 

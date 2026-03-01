@@ -12,6 +12,7 @@ import { getDb } from '../db';
 import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT, DEVELOPER_SYSTEM_PROMPT, QA_SYSTEM_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks, readWorkspaceFile, type WrittenFile } from './file-writer';
 import { collectDeveloperContext } from './context-collector';
+import { initGitRepo, commitWorkspace } from './workspace-git';
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -63,9 +64,43 @@ async function callLLM(
   settings: any, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
+  maxTokens: number = 16384,
+  retries: number = 2
+) {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) throw new Error('Aborted');
+    try {
+      return await _callLLMOnce(settings, model, messages, signal, maxTokens);
+    } catch (err: any) {
+      lastError = err;
+      if (signal?.aborted) throw err;
+      // 不重试 4xx 错误（除了 429 rate limit）
+      if (err.message?.includes('API 4') && !err.message?.includes('429')) throw err;
+      if (attempt < retries) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 15000);
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError || new Error('LLM call failed');
+}
+
+async function _callLLMOnce(
+  settings: any, model: string,
+  messages: Array<{ role: string; content: string }>,
+  signal?: AbortSignal,
   maxTokens: number = 16384
 ) {
-  const fetchOpts: RequestInit = { method: 'POST', signal };
+  // 超时保护: 120秒
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+  const combinedSignal = signal
+    ? anySignal([signal, controller.signal])
+    : controller.signal;
+
+  try {
+    const fetchOpts: RequestInit = { method: 'POST', signal: combinedSignal };
 
   if (settings.llmProvider === 'anthropic') {
     const systemMsg = messages.find(m => m.role === 'system');
@@ -99,6 +134,19 @@ async function callLLM(
       outputTokens: data.usage?.completion_tokens ?? 0,
     };
   }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Combine multiple AbortSignals */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const ctrl = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) { ctrl.abort(s.reason); return ctrl.signal; }
+    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true });
+  }
+  return ctrl.signal;
 }
 
 // ═══════════════════════════════════════
@@ -132,6 +180,17 @@ function updateAgentStats(agentId: string, projectId: string, inputTokens: numbe
       last_active_at = datetime('now')
     WHERE id = ? AND project_id = ?
   `).run(inputTokens, outputTokens, cost, agentId, projectId);
+}
+
+/**
+ * 预算防护 — 检查项目总成本是否超过日预算
+ */
+function checkBudget(projectId: string, settings: any): { ok: boolean; spent: number; budget: number } {
+  const db = getDb();
+  const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as any;
+  const spent = row?.total ?? 0;
+  const budget = settings.dailyBudgetUsd ?? 50;
+  return { ok: spent < budget, spent, budget };
 }
 
 // ═══════════════════════════════════════
@@ -329,6 +388,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 续跑模式 — 跳过 PM/Architect，直接进入开发阶段' });
   }
 
+  // Git commit: PM + Architect 阶段产出
+  if (workspacePath) {
+    commitWorkspace(workspacePath, 'AgentForge: PM analysis + Architecture design');
+  }
+
   // ═══════════════════════════════════════
   // Phase 3: Developer Agents — 上下文感知迭代开发 + QA 审查
   // ═══════════════════════════════════════
@@ -368,6 +432,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `🏁 项目完成! ${stats.passed}/${stats.total} features 通过` });
   db.prepare("UPDATE agents SET status = 'idle' WHERE project_id = ?").run(projectId);
 
+  // Git commit: 最终产出
+  if (workspacePath) {
+    commitWorkspace(workspacePath, `AgentForge: Delivered ${stats.passed}/${stats.total} features`);
+  }
+
   runningOrchestrators.delete(projectId);
 }
 
@@ -382,6 +451,19 @@ async function workerLoop(
   const maxRetries = 3;
 
   while (!signal.aborted) {
+    // ── 预算检查 ──
+    const budget = checkBudget(projectId, settings);
+    if (!budget.ok) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停`,
+      });
+      // 触发停止
+      const ctrl = runningOrchestrators.get(projectId);
+      if (ctrl) ctrl.abort();
+      break;
+    }
+
     const feature = lockNextFeature(projectId, workerId);
 
     if (!feature) {
@@ -526,6 +608,11 @@ async function workerLoop(
       .run(newStatus, newStatus, feature.id, projectId);
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
     db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(workerId, projectId);
+
+    // Git commit after each passed feature
+    if (passed && workspacePath) {
+      commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
+    }
 
     await sleep(500);
   }

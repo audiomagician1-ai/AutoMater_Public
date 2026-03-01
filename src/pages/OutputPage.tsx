@@ -166,6 +166,11 @@ export function OutputPage() {
     await window.agentforge.project.openWorkspace(currentProjectId);
   };
 
+  const handleExport = async () => {
+    if (!currentProjectId) return;
+    await window.agentforge.project.export(currentProjectId);
+  };
+
   if (!currentProjectId) {
     return (
       <div className="h-full flex items-center justify-center text-slate-500">
@@ -197,6 +202,12 @@ export function OutputPage() {
             className="text-xs px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-300 transition-colors"
           >
             📂 打开文件夹
+          </button>
+          <button
+            onClick={handleExport}
+            className="text-xs px-2.5 py-1.5 rounded bg-slate-800 hover:bg-forge-700/50 text-slate-400 hover:text-forge-300 transition-colors"
+          >
+            📦 导出 zip
           </button>
         </div>
       </div>

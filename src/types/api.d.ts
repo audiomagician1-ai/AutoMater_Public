@@ -32,6 +32,9 @@ interface AgentForgeAPI {
     stop(projectId: string): Promise<{ success: boolean }>;
     delete(projectId: string): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
+    export(projectId: string): Promise<{ success: boolean; path?: string; error?: string }>;
+    gitCommit(projectId: string, message: string): Promise<{ success: boolean }>;
+    gitLog(projectId: string): Promise<string[]>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;
