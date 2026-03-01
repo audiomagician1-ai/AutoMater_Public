@@ -20,6 +20,7 @@ import path from 'path';
 import { readDirectoryTree, readWorkspaceFile, type FileNode } from './file-writer';
 import { getDb } from '../db';
 import { generateRepoMap } from './repo-map';
+import { readMemoryForRole } from './memory-system';
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -152,6 +153,27 @@ export function collectDeveloperContext(
       addSection({
         id: 'agents-md', name: 'AGENTS.md 项目指令', source: 'project-config',
         content: agentsContent, truncated: false, files: ['.agentforge/AGENTS.md'],
+      });
+    }
+  }
+
+  // ─── 0.5. 3-layer Memory (v1.2) ───
+  const memory = readMemoryForRole(workspacePath, 'developer');
+  if (memory.combined) {
+    const memContent = `## Agent 记忆\n${memory.combined}`;
+    if (memContent.length < charBudget * 0.12) {
+      addSection({
+        id: 'memory', name: '3-layer Memory (全局+项目+角色)', source: 'project-config',
+        content: memContent, truncated: false,
+        files: ['.agentforge/project-memory.md', '.agentforge/memories/developer.md'],
+      });
+    } else if (memContent.length > 100) {
+      // 截断
+      const maxLen = Math.floor(charBudget * 0.1);
+      addSection({
+        id: 'memory', name: '3-layer Memory (截断)', source: 'project-config',
+        content: memContent.slice(0, maxLen) + '\n... [记忆已截断]', truncated: true,
+        files: ['.agentforge/project-memory.md', '.agentforge/memories/developer.md'],
       });
     }
   }

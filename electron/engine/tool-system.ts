@@ -11,6 +11,8 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, type GitProviderConfig } from './git-provider';
+import { execInSandbox, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
+import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 
 // ═══════════════════════════════════════
 // Tool Interface
@@ -191,6 +193,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['summary'],
     },
   },
+  // ── v1.2: Sandbox 工具 ──
+  {
+    name: 'run_test',
+    description: '在沙箱中运行项目测试 (自动检测 npm test/pytest/cargo test/go test)。超时 180 秒。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'run_lint',
+    description: '在沙箱中运行 lint 和类型检查 (自动检测 tsc/eslint/py_compile)。超时 60 秒。',
+    parameters: { type: 'object', properties: {} },
+  },
+  // ── v1.2: 记忆工具 ──
+  {
+    name: 'memory_read',
+    description: '读取 Agent 记忆 (全局 + 项目 + 角色)。用于回忆之前的经验和约定。',
+    parameters: {
+      type: 'object',
+      properties: {
+        role: { type: 'string', description: '角色 (developer/qa/architect/pm)，默认 developer', default: 'developer' },
+      },
+    },
+  },
+  {
+    name: 'memory_append',
+    description: '向项目记忆追加一条经验/约定。用于记录重要发现、踩坑记录、架构决策。',
+    parameters: {
+      type: 'object',
+      properties: {
+        entry: { type: 'string', description: '要记录的经验条目 (简短清晰)' },
+        layer: { type: 'string', enum: ['project', 'role'], description: '写入层: project(项目级) 或 role(角色级)', default: 'project' },
+        role: { type: 'string', description: '角色 (仅 layer=role 时需要)', default: 'developer' },
+      },
+      required: ['entry'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -357,25 +394,61 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         }
       }
 
-      // ── run_command (超时提升到60秒) ──
+      // ── run_command (v1.2: 通过 sandbox executor 执行) ──
       case 'run_command': {
         const command = call.arguments.command;
-        const forbidden = ['rm -rf /', 'format c:', 'del /s /q c:', 'shutdown', 'reboot'];
-        if (forbidden.some(f => command.toLowerCase().includes(f))) {
-          return { success: false, output: `命令被安全策略拦截: ${command}`, action: 'shell' };
+        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath, timeoutMs: 60_000 };
+        const result = execInSandbox(command, sandboxCfg);
+        if (result.success) {
+          return { success: true, output: (result.stdout || '(无输出)').slice(0, 8000), action: 'shell' };
+        } else if (result.timedOut) {
+          return { success: false, output: `命令超时 (${Math.round(result.duration / 1000)}s):\n${result.stderr.slice(0, 2000)}`, action: 'shell' };
+        } else {
+          return { success: false, output: `命令失败 (exit ${result.exitCode}):\n${result.stderr.slice(0, 3000)}${result.stdout ? '\n--- stdout ---\n' + result.stdout.slice(0, 2000) : ''}`, action: 'shell' };
         }
-        try {
-          const output = execSync(command, {
-            cwd: ctx.workspacePath,
-            encoding: 'utf-8',
-            maxBuffer: 1024 * 1024,
-            timeout: 60000,
-          });
-          return { success: true, output: output.slice(0, 8000) || '(无输出)', action: 'shell' };
-        } catch (err: any) {
-          const stderr = err.stderr?.toString().slice(0, 3000) || err.message;
-          const stdout = err.stdout?.toString().slice(0, 2000) || '';
-          return { success: false, output: `命令失败:\n${stderr}${stdout ? '\n--- stdout ---\n' + stdout : ''}`, action: 'shell' };
+      }
+
+      // ── run_test (v1.2) ──
+      case 'run_test': {
+        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath };
+        const result = sandboxRunTest(sandboxCfg);
+        const output = result.stdout + (result.stderr ? '\n[stderr] ' + result.stderr : '');
+        return {
+          success: result.success,
+          output: `[run_test] exit=${result.exitCode} duration=${result.duration}ms${result.timedOut ? ' TIMEOUT' : ''}\n${output.slice(0, 8000)}`,
+          action: 'shell',
+        };
+      }
+
+      // ── run_lint (v1.2) ──
+      case 'run_lint': {
+        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath };
+        const result = sandboxRunLint(sandboxCfg);
+        return {
+          success: result.success,
+          output: `[run_lint] exit=${result.exitCode}\n${result.stdout.slice(0, 8000)}`,
+          action: 'shell',
+        };
+      }
+
+      // ── memory_read (v1.2) ──
+      case 'memory_read': {
+        const role = call.arguments.role || 'developer';
+        const mem = readMemoryForRole(ctx.workspacePath, role);
+        return { success: true, output: mem.combined || '(无记忆)', action: 'read' };
+      }
+
+      // ── memory_append (v1.2) ──
+      case 'memory_append': {
+        const entry = call.arguments.entry;
+        const layer = call.arguments.layer || 'project';
+        const role = call.arguments.role || 'developer';
+        if (layer === 'role') {
+          appendRoleMemory(ctx.workspacePath, role, entry);
+          return { success: true, output: `已写入 ${role} 角色记忆: ${entry.slice(0, 100)}`, action: 'write' };
+        } else {
+          appendProjectMemory(ctx.workspacePath, entry);
+          return { success: true, output: `已写入项目记忆: ${entry.slice(0, 100)}`, action: 'write' };
         }
       }
 

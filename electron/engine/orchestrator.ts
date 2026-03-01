@@ -17,6 +17,7 @@ import { collectDeveloperContext, collectLightContext, type ContextSnapshot } fr
 import { initGitRepo, commitWorkspace } from './workspace-git';
 import { getToolsForLLM, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, advancePlan, failCurrentStep, getPlanSummary, type FeaturePlan } from './planner';
+import { ensureGlobalMemory, ensureProjectMemory, readMemoryForRole, appendProjectMemory, appendRoleMemory, recordLessonLearned, buildLessonExtractionPrompt } from './memory-system';
 import type { GitProviderConfig } from './git-provider';
 
 // ═══════════════════════════════════════
@@ -710,6 +711,12 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     fs.mkdirSync(workspacePath, { recursive: true });
   }
 
+  // v1.2: 确保记忆系统文件存在
+  ensureGlobalMemory();
+  if (workspacePath) {
+    ensureProjectMemory(workspacePath);
+  }
+
   // 检查是否已有 features（续跑场景）
   const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as any;
   const isResume = existingFeatures.c > 0;
@@ -1012,6 +1019,40 @@ async function workerLoop(
               content: `✅ ${feature.id} 完成! (QA attempt ${qaAttempt}, $${(reactResult.totalCost + qaCost).toFixed(4)})`,
             });
             notify('✅ Feature 完成', `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`);
+
+            // ═══ v1.2: Auto Lessons Learned — QA fail→fix 经验提取 ═══
+            if (qaAttempt > 1 && qaFeedback && workspacePath) {
+              try {
+                const lessonPrompt = buildLessonExtractionPrompt(
+                  feature.id, qaFeedback, reactResult.filesWritten,
+                  `QA pass on attempt ${qaAttempt}, score ${qaResult.score}`
+                );
+                const lessonResult = await callLLM(settings, settings.workerModel, [
+                  { role: 'system', content: '你是经验提取助手，只输出经验条目。' },
+                  { role: 'user', content: lessonPrompt },
+                ], signal, 1024);
+                const lessonCost = calcCost(settings.workerModel, lessonResult.inputTokens, lessonResult.outputTokens);
+                updateAgentStats(qaId, projectId, lessonResult.inputTokens, lessonResult.outputTokens, lessonCost);
+
+                // 写入 project memory
+                const lessons = lessonResult.content.trim();
+                if (lessons) {
+                  appendProjectMemory(workspacePath, `### Lessons from ${feature.id} (QA attempt ${qaAttempt})\n${lessons}`);
+                  sendToUI(win, 'agent:log', {
+                    projectId, agentId: 'system',
+                    content: `📝 经验已自动记录到 project-memory:\n${lessons.slice(0, 200)}`,
+                  });
+                  addLog(projectId, 'system', 'lesson', `[${feature.id}] ${lessons}`);
+                }
+              } catch (lessonErr: any) {
+                // 经验提取失败不影响主流程
+                sendToUI(win, 'agent:log', {
+                  projectId, agentId: 'system',
+                  content: `⚠️ 经验提取失败 (非致命): ${lessonErr.message}`,
+                });
+              }
+            }
+
             break;
           } else {
             qaFeedback = qaResult.feedbackText;
