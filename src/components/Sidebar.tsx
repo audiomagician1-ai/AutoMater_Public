@@ -10,6 +10,7 @@ const projectNavItems: { id: ProjectPageId; icon: string; label: string }[] = [
   { id: 'wish',      icon: '✨', label: '许愿' },
   { id: 'board',     icon: '📋', label: '看板' },
   { id: 'docs',      icon: '📄', label: '文档' },
+  { id: 'workflow',  icon: '🔄', label: '工作流' },
   { id: 'team',      icon: '👥', label: '团队' },
   { id: 'context',   icon: '🧠', label: '上下文' },
   { id: 'timeline',  icon: '⏳', label: '时间线' },

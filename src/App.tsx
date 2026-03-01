@@ -13,7 +13,9 @@ import { LogsPage } from './pages/LogsPage';
 import { OutputPage } from './pages/OutputPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ContextPage } from './pages/ContextPage';
+import { WorkflowPage } from './pages/WorkflowPage';
 import TimelinePage from './pages/TimelinePage';
+import { MetaAgentPanel } from './components/MetaAgentPanel';
 
 export function App() {
   const {
@@ -157,6 +159,7 @@ export function App() {
       case 'board':    return <BoardPage />;
       case 'team':     return <TeamPage />;
       case 'docs':     return <DocsPage />;
+      case 'workflow': return <WorkflowPage />;
       case 'output':   return <OutputPage />;
       case 'logs':     return <LogsPage />;
       case 'context':  return <ContextPage />;
@@ -172,6 +175,7 @@ export function App() {
         <main className="flex-1 overflow-hidden">
           {renderContent()}
         </main>
+        {insideProject && <MetaAgentPanel />}
       </div>
       {insideProject && <StatusBar stats={stats} />}
       {insideProject && <AcceptancePanel />}

@@ -831,7 +831,7 @@ export function OverviewPage() {
         </div>
       </div>
 
-      {/* ═══════ Boss Control Panel ═══════ */}
+      {/* ═══════ Compact Control Bar ═══════ */}
       <div className="flex-shrink-0 mx-6 mb-4">
         <div className={`relative overflow-hidden rounded-2xl border transition-all duration-500 ${
           isActive
@@ -840,102 +840,64 @@ export function OverviewPage() {
               ? 'border-amber-500/30 bg-gradient-to-br from-amber-950/30 via-slate-900 to-orange-950/30'
               : 'border-slate-700/50 bg-gradient-to-br from-slate-900 via-slate-900/80 to-forge-950/50'
         }`}>
-          {/* Animated background effect */}
           {isActive && (
             <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute top-0 left-1/4 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl animate-pulse" />
-              <div className="absolute bottom-0 right-1/4 w-40 h-40 bg-cyan-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+              <div className="absolute top-0 left-1/4 w-20 h-20 bg-emerald-500/5 rounded-full blur-3xl animate-pulse" />
+              <div className="absolute bottom-0 right-1/4 w-24 h-24 bg-cyan-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
             </div>
           )}
 
-          <div className="relative flex flex-col items-center py-8 px-6">
-            {/* Status indicator */}
+          <div className="relative flex items-center gap-4 py-3 px-6">
+            {/* Status indicator + Action button (inline compact) */}
             {project && (() => {
               const st = PROJECT_STATUS[project.status] || { text: project.status, color: 'text-slate-500' };
               return (
-                <div className="flex items-center gap-2 mb-4">
-                  {isActive && <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>}
-                  {canResume && <span className="w-3 h-3 rounded-full bg-amber-500" />}
-                  {!isActive && !canResume && <span className="w-3 h-3 rounded-full bg-slate-600" />}
+                <div className="flex items-center gap-2 shrink-0">
+                  {isActive && <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>}
+                  {canResume && <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />}
+                  {!isActive && !canResume && <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />}
                   <span className={`text-sm font-semibold ${st.color}`}>{st.text}</span>
                 </div>
               );
             })()}
 
-            {/* ── Main Action Button ── */}
-            {isActive ? (
-              /* Running → Pause */
-              <button
-                onClick={handleStop}
-                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
-              >
-                {/* Animated ring */}
-                <div className="absolute inset-0 rounded-full border-4 border-emerald-500/30 animate-spin" style={{ animationDuration: '8s' }}>
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-emerald-400" />
-                </div>
-                <div className="absolute inset-2 rounded-full border-2 border-emerald-500/10 animate-spin" style={{ animationDuration: '12s', animationDirection: 'reverse' }}>
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-2 h-2 rounded-full bg-cyan-400" />
-                </div>
-                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-emerald-900/80 to-cyan-900/60 group-hover:from-red-900/60 group-hover:to-orange-900/40 transition-all duration-300" />
-                <div className="relative z-10 flex flex-col items-center gap-1">
-                  <span className="text-4xl transition-all group-hover:hidden">⚡</span>
-                  <span className="text-4xl hidden group-hover:block">⏸</span>
+            {/* Action button — compact inline */}
+            <div className="flex-1 flex items-center justify-center">
+              {isActive ? (
+                <button onClick={handleStop}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-900/40 hover:bg-red-900/40 border border-emerald-500/20 hover:border-red-500/30 transition-all">
+                  <span className="text-lg group-hover:hidden">⚡</span>
+                  <span className="text-lg hidden group-hover:inline">⏸</span>
                   <span className="text-sm font-bold text-emerald-300 group-hover:text-red-300 transition-colors">运行中</span>
                   <span className="text-[10px] text-emerald-400/60 group-hover:text-red-400/80 transition-colors">点击暂停</span>
-                </div>
-              </button>
-            ) : canResume ? (
-              /* Paused → Resume */
-              <button
-                onClick={handleStart}
-                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
-              >
-                <div className="absolute inset-0 rounded-full border-4 border-amber-500/20" />
-                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-amber-900/50 to-orange-900/40 group-hover:from-emerald-900/60 group-hover:to-cyan-900/50 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/20" />
-                <div className="relative z-10 flex flex-col items-center gap-1">
-                  <span className="text-4xl group-hover:scale-110 transition-transform">▶️</span>
+                </button>
+              ) : canResume ? (
+                <button onClick={handleStart}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-amber-900/30 hover:bg-emerald-900/40 border border-amber-500/20 hover:border-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/10">
+                  <span className="text-lg">▶️</span>
                   <span className="text-sm font-bold text-amber-300 group-hover:text-emerald-300 transition-colors">已暂停</span>
                   <span className="text-[10px] text-amber-400/60 group-hover:text-emerald-400/80 transition-colors">点击继续</span>
-                </div>
-              </button>
-            ) : canStart ? (
-              /* Has wish → Launch */
-              <button
-                onClick={handleStart}
-                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95"
-              >
-                <div className="absolute inset-0 rounded-full border-4 border-forge-500/20 group-hover:border-forge-400/40 transition-colors" />
-                <div className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                  <div className="absolute inset-0 rounded-full border-4 border-forge-400/30 animate-ping" />
-                </div>
-                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-forge-800/80 to-indigo-900/60 group-hover:from-forge-700/90 group-hover:to-indigo-800/70 transition-all duration-300 group-hover:shadow-xl group-hover:shadow-forge-500/30" />
-                <div className="relative z-10 flex flex-col items-center gap-1">
-                  <span className="text-5xl group-hover:scale-110 group-hover:rotate-12 transition-all duration-300">🚀</span>
+                </button>
+              ) : canStart ? (
+                <button onClick={handleStart}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl bg-forge-800/50 hover:bg-forge-700/60 border border-forge-500/20 hover:border-forge-400/40 transition-all hover:shadow-lg hover:shadow-forge-500/20">
+                  <span className="text-lg group-hover:scale-110 group-hover:rotate-12 transition-all">🚀</span>
                   <span className="text-sm font-bold text-forge-300 group-hover:text-white transition-colors">启动开发</span>
-                  <span className="text-[10px] text-forge-400/60 group-hover:text-forge-200/80 transition-colors">开始创造</span>
-                </div>
-              </button>
-            ) : noWish ? (
-              /* No wish → Go to wish */
-              <button
-                onClick={() => setProjectPage('wish')}
-                className="group relative w-44 h-44 rounded-full flex flex-col items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95"
-              >
-                <div className="absolute inset-0 rounded-full border-4 border-dashed border-slate-700 group-hover:border-forge-500/40 transition-colors" />
-                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-slate-800/80 to-slate-900/60 group-hover:from-forge-900/30 group-hover:to-indigo-900/20 transition-all duration-300" />
-                <div className="relative z-10 flex flex-col items-center gap-1">
-                  <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
+                </button>
+              ) : noWish ? (
+                <button onClick={() => setProjectPage('wish')}
+                  className="group flex items-center gap-2 px-5 py-2 rounded-xl border border-dashed border-slate-700 hover:border-forge-500/40 transition-all">
+                  <span className="text-lg">✨</span>
                   <span className="text-sm font-bold text-slate-400 group-hover:text-forge-300 transition-colors">去许愿</span>
-                  <span className="text-[10px] text-slate-600 group-hover:text-forge-400/60 transition-colors">描述你的想法</span>
-                </div>
-              </button>
-            ) : null}
+                </button>
+              ) : null}
+            </div>
 
-            {/* Sub info */}
+            {/* Live stats (right side) */}
             {isActive && (
-              <div className="mt-4 flex items-center gap-6 text-xs text-slate-500">
-                <span>🤖 {a.total ?? 0} 位 Agent 工作中</span>
-                <span>📊 {a.total_tokens ? `${(a.total_tokens / 1000).toFixed(1)}k` : '0'} tokens</span>
+              <div className="flex items-center gap-4 text-xs text-slate-500 shrink-0">
+                <span>🤖 {a.total ?? 0}</span>
+                <span>📊 {a.total_tokens ? `${(a.total_tokens / 1000).toFixed(1)}k` : '0'}</span>
                 <span>💰 {a.total_cost ? `$${a.total_cost.toFixed(3)}` : '$0'}</span>
               </div>
             )}
@@ -944,12 +906,77 @@ export function OverviewPage() {
       </div>
 
       <div className="flex-1 px-6 pb-6 space-y-6">
-        {/* Empty state */}
+        {/* Skeleton placeholder modules when no features yet */}
         {enriched.length === 0 && !isActive && (
-          <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3">
-            <div className="text-sm text-center max-w-md text-slate-600">
-              当 PM Agent 完成需求分析并拆分为功能模块后，这里会展示系统架构图、进度看板和实时状态
-            </div>
+          <div className="space-y-6">
+            {/* Skeleton: Real-time status bar */}
+            <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <span className="text-xs text-slate-600 uppercase tracking-wider">📡 实时状态</span>
+              </div>
+              <div className="grid grid-cols-5 gap-3">
+                {['待做', '开发中', '审查中', '已完成', '失败'].map(l => (
+                  <div key={l} className="bg-slate-800/30 rounded-lg p-3 text-center">
+                    <div className="text-lg font-bold text-slate-700">—</div>
+                    <div className="text-[10px] text-slate-700">{l}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Skeleton: Pipeline */}
+            <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <span className="text-xs text-slate-600 uppercase tracking-wider">🔄 流水线进度</span>
+              </div>
+              <div className="flex items-center gap-1">
+                {PIPELINE_STAGES.map((stage, i) => (
+                  <div key={stage.key} className="flex items-center flex-1">
+                    <div className="flex flex-col items-center gap-1 flex-1">
+                      <div className="w-8 h-8 rounded-lg bg-slate-800/50 flex items-center justify-center text-sm text-slate-700">{stage.icon}</div>
+                      <span className="text-[9px] text-slate-700 text-center truncate w-full">{stage.label}</span>
+                    </div>
+                    {i < PIPELINE_STAGES.length - 1 && <div className="h-0.5 w-4 flex-shrink-0 bg-slate-800/50" />}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Skeleton: Architecture graph */}
+            <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <span className="text-xs text-slate-600 uppercase tracking-wider">🗺️ 系统架构图</span>
+              </div>
+              <div className="h-48 flex items-center justify-center">
+                <div className="text-center text-slate-700 space-y-2">
+                  <div className="flex items-center justify-center gap-4">
+                    {['模块A', '模块B', '模块C'].map(m => (
+                      <div key={m} className="w-24 h-12 rounded-lg border border-slate-800/50 bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700">{m}</div>
+                    ))}
+                  </div>
+                  <div className="text-[10px]">PM 分析后自动生成</div>
+                </div>
+              </div>
+            </section>
+
+            {/* Skeleton: Progress dashboard */}
+            <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <span className="text-xs text-slate-600 uppercase tracking-wider">📊 进度看板</span>
+              </div>
+              <div className="grid grid-cols-4 gap-3">
+                {['Agents', 'Tokens', '成本', '分类'].map(l => (
+                  <div key={l} className="bg-slate-800/30 rounded-lg p-3 text-center">
+                    <div className="text-lg font-bold text-slate-700">—</div>
+                    <div className="text-[10px] text-slate-700">{l}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
         )}
 

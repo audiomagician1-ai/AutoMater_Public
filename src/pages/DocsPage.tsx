@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
 
 // ═══════════════════════════════════════
 // Types
@@ -29,6 +30,30 @@ interface DocTreeItem {
 }
 
 type ViewMode = 'document' | 'changelog';
+
+interface DocChangeEntry {
+  type: string;
+  id: string;
+  action: string;
+  version: number;
+  summary: string;
+  timestamp: string;
+  agentId: string;
+}
+
+interface DocMeta {
+  type: string;
+  id: string;
+  version: number;
+  updatedAt: string;
+  sizeBytes: number;
+}
+
+interface DocListResult {
+  design: DocMeta[];
+  requirements: DocMeta[];
+  testSpecs: DocMeta[];
+}
 
 // ═══════════════════════════════════════
 // Constants
@@ -190,6 +215,7 @@ function DocTreeSection({
   items,
   selectedId,
   onSelect,
+  onRightClick,
 }: {
   title: string;
   icon: string;
@@ -197,6 +223,7 @@ function DocTreeSection({
   items: DocTreeItem[];
   selectedId: string | null;
   onSelect: (item: DocTreeItem) => void;
+  onRightClick?: (e: React.MouseEvent, item: DocTreeItem) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
 
@@ -219,6 +246,7 @@ function DocTreeSection({
               <button
                 key={`${item.type}:${item.id}`}
                 onClick={() => onSelect(item)}
+                onContextMenu={(e) => { e.preventDefault(); onRightClick?.(e, item); }}
                 className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors ${
                   isSelected
                     ? 'bg-forge-600/15 text-forge-300 border-l-2 border-forge-500 -ml-[1px]'
@@ -285,6 +313,8 @@ export function DocsPage() {
   const [loadingContent, setLoadingContent] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('document');
   const [changelogFilter, setChangelogFilter] = useState<string>('all');
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: DocTreeItem } | null>(null);
+  const [versionModal, setVersionModal] = useState<{ item: DocTreeItem; versions: any[] } | null>(null);
 
   // ── Load doc list + changelog ──
   const loadDocList = useCallback(async () => {
@@ -293,8 +323,8 @@ export function DocsPage() {
       window.agentforge.project.listAllDocs(currentProjectId),
       window.agentforge.project.getDocChangelog(currentProjectId),
     ]);
-    setDocList(docs);
-    setChangelog(log || []);
+    setDocList(docs as DocListResult);
+    setChangelog((log || []) as DocChangeEntry[]);
   }, [currentProjectId]);
 
   useEffect(() => { loadDocList(); }, [loadDocList]);
@@ -374,6 +404,25 @@ export function DocsPage() {
 
   const totalDocs = (docList?.design.length ?? 0) + (docList?.requirements.length ?? 0) + (docList?.testSpecs.length ?? 0);
 
+  const handleDocRightClick = (e: React.MouseEvent, item: DocTreeItem) => {
+    setCtxMenu({ x: e.clientX, y: e.clientY, item });
+  };
+
+  const handleViewDocVersions = (item: DocTreeItem) => {
+    const docId = item.type === 'design' ? 'design' : item.id;
+    const versions = changelog
+      .filter(e => e.type === item.type && e.id === docId)
+      .reverse()
+      .map(e => ({ version: e.version, action: e.action, summary: e.summary, date: e.timestamp, agent: e.agentId }));
+    setVersionModal({ item, versions: versions.length > 0 ? versions : [{ version: item.version, action: 'create', summary: '当前版本', date: new Date().toISOString(), agent: 'system' }] });
+  };
+
+  const handleRollbackDoc = (item: DocTreeItem, version: number) => {
+    // Placeholder — would call IPC to restore doc to specific version
+    console.log(`Rollback doc ${item.type}:${item.id} to v${version}`);
+    setVersionModal(null);
+  };
+
   if (!currentProjectId) {
     return <div className="h-full flex items-center justify-center text-slate-500">加载中...</div>;
   }
@@ -387,85 +436,53 @@ export function DocsPage() {
           <span className="text-[10px] text-slate-600">{totalDocs} 篇</span>
         </div>
 
-        {/* Tab: 文档树 / 变更日志 */}
-        <div className="flex border-b border-slate-800">
-          <button
-            onClick={() => setViewMode('document')}
-            className={`flex-1 py-2 text-xs font-medium transition-colors ${
-              viewMode === 'document'
-                ? 'text-forge-400 border-b-2 border-forge-500'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            📄 文档
-          </button>
-          <button
-            onClick={() => setViewMode('changelog')}
-            className={`flex-1 py-2 text-xs font-medium transition-colors ${
-              viewMode === 'changelog'
-                ? 'text-forge-400 border-b-2 border-forge-500'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            📝 变更 <span className="text-[10px] text-slate-600">({changelog.length})</span>
-          </button>
-        </div>
-
+        {/* Tab: 文档树 only (变更已移至工作流) */}
         <div className="flex-1 overflow-y-auto py-2">
-          {viewMode === 'document' ? (
-            <>
-              <DocTreeSection
-                title="设计文档"
-                icon="📐"
-                color="text-violet-400"
-                items={treeItems.design}
-                selectedId={selectedKey}
-                onSelect={handleSelectDoc}
-              />
-              <DocTreeSection
-                title="子需求文档"
-                icon="📋"
-                color="text-blue-400"
-                items={treeItems.requirements}
-                selectedId={selectedKey}
-                onSelect={handleSelectDoc}
-              />
-              <DocTreeSection
-                title="测试规格"
-                icon="🧪"
-                color="text-emerald-400"
-                items={treeItems.testSpecs}
-                selectedId={selectedKey}
-                onSelect={handleSelectDoc}
-              />
-            </>
-          ) : (
-            <div className="space-y-0">
-              {/* Changelog type filter */}
-              <div className="px-3 py-2 flex flex-wrap gap-1">
-                {['all', 'design', 'requirement', 'test_spec'].map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setChangelogFilter(f)}
-                    className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-                      changelogFilter === f
-                        ? 'bg-forge-600/20 text-forge-400'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    {f === 'all' ? '全部' : DOC_TYPE_LABELS[f]?.label || f}
-                  </button>
-                ))}
-              </div>
-              {filteredChangelog.length === 0 ? (
-                <div className="text-center py-8 text-slate-600 text-xs">暂无变更记录</div>
-              ) : (
-                filteredChangelog.slice().reverse().map((entry, i) => (
-                  <ChangelogEntry key={`${entry.timestamp}-${i}`} entry={entry} />
-                ))
-              )}
-            </div>
-          )}
+          <DocTreeSection
+            title="总览设计文档"
+            icon="📐"
+            color="text-violet-400"
+            items={treeItems.design}
+            selectedId={selectedKey}
+            onSelect={handleSelectDoc}
+            onRightClick={handleDocRightClick}
+          />
+          <DocTreeSection
+            title="系统级设计文档"
+            icon="🏗️"
+            color="text-indigo-400"
+            items={[]}
+            selectedId={selectedKey}
+            onSelect={handleSelectDoc}
+            onRightClick={handleDocRightClick}
+          />
+          <DocTreeSection
+            title="功能级设计文档"
+            icon="⚙️"
+            color="text-cyan-400"
+            items={[]}
+            selectedId={selectedKey}
+            onSelect={handleSelectDoc}
+            onRightClick={handleDocRightClick}
+          />
+          <DocTreeSection
+            title="子需求文档"
+            icon="📋"
+            color="text-blue-400"
+            items={treeItems.requirements}
+            selectedId={selectedKey}
+            onSelect={handleSelectDoc}
+            onRightClick={handleDocRightClick}
+          />
+          <DocTreeSection
+            title="测试规格"
+            icon="🧪"
+            color="text-emerald-400"
+            items={treeItems.testSpecs}
+            selectedId={selectedKey}
+            onSelect={handleSelectDoc}
+            onRightClick={handleDocRightClick}
+          />
         </div>
 
         <div className="px-4 py-2 border-t border-slate-800">
@@ -565,6 +582,65 @@ export function DocsPage() {
           </div>
         )}
       </div>
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            { label: '查看历史版本', icon: '📜', onClick: () => handleViewDocVersions(ctxMenu.item) },
+            { label: '刷新文档列表', icon: '🔄', onClick: () => loadDocList() },
+            { label: '复制文档ID', icon: '📋', onClick: () => navigator.clipboard?.writeText(`${ctxMenu.item.type}:${ctxMenu.item.id}`) },
+          ]}
+        />
+      )}
+
+      {/* Version history modal */}
+      {versionModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setVersionModal(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-[480px] max-h-[60vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-200">📜 文档版本历史</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  {versionModal.item.type === 'design' ? '总体设计文档' : versionModal.item.id}
+                </p>
+              </div>
+              <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {versionModal.versions.map((v: any, i: number) => (
+                <div key={`${v.version}-${i}`} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono shrink-0 ${
+                    i === 0 ? 'bg-forge-600/20 text-forge-400' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    v{v.version}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-slate-300">{v.summary}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {v.action === 'create' ? '📝 创建' : '✏️ 更新'} · {new Date(v.date).toLocaleString()} · {v.agent}
+                    </div>
+                  </div>
+                  {i > 0 && (
+                    <button
+                      onClick={() => handleRollbackDoc(versionModal.item, v.version)}
+                      className="text-[10px] px-2 py-1 rounded bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                    >
+                      回退到此版本
+                    </button>
+                  )}
+                </div>
+              ))}
+              {versionModal.versions.length === 0 && (
+                <div className="text-center py-8 text-slate-600 text-xs">暂无版本记录</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

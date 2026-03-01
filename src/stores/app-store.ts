@@ -6,10 +6,29 @@
 
 import { create } from 'zustand';
 
+// Types used by store
+interface ContextSnapshot {
+  agentId: string;
+  totalTokens: number;
+  tokenBudget: number;
+  sections: any[];
+  timestamp: number;
+  filesIncluded?: number;
+  featureId?: string;
+}
+
+interface AgentReactState {
+  agentId: string;
+  iteration: number;
+  phase: string;
+  toolCalls: any[];
+  lastUpdated: number;
+}
+
 /** 外层页面 (无需选中项目) */
 export type GlobalPageId = 'projects' | 'settings';
 /** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'output' | 'logs' | 'context' | 'timeline';
+export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline';
 
 interface LogEntry {
   id: number;
@@ -89,6 +108,10 @@ interface AppState {
   // v4.4: 用户验收弹窗
   showAcceptancePanel: boolean;
   setShowAcceptancePanel: (show: boolean) => void;
+
+  // v5.3: 全局右侧元Agent面板
+  metaAgentPanelOpen: boolean;
+  toggleMetaAgentPanel: () => void;
 }
 
 let logIdCounter = 0;
@@ -183,4 +206,8 @@ export const useAppStore = create<AppState>((set) => ({
   // v4.4: 用户验收弹窗
   showAcceptancePanel: false,
   setShowAcceptancePanel: (show) => set({ showAcceptancePanel: show }),
+
+  // v5.3: 全局右侧元Agent面板
+  metaAgentPanelOpen: false,
+  toggleMetaAgentPanel: () => set((s) => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
 }));

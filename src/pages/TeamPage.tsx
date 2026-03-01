@@ -548,14 +548,14 @@ export function TeamPage() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {members.map(m => {
                   const info = ROLE_INFO[m.role] || { icon: '🤖', title: m.role };
                   let caps: string[] = [];
                   try { caps = JSON.parse(m.capabilities || '[]'); } catch { caps = []; }
 
                   return (
-                    <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col min-h-[220px]">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">{info.icon}</span>
                         <div className="flex-1 min-w-0">
@@ -575,11 +575,11 @@ export function TeamPage() {
                           <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{c}</span>
                         ))}
                       </div>
-                      {/* System prompt */}
+                      {/* System prompt — show more lines */}
                       {m.system_prompt && (
-                        <p className="text-[11px] text-slate-500 line-clamp-2">{m.system_prompt}</p>
+                        <p className="text-[11px] text-slate-500 line-clamp-5 flex-1">{m.system_prompt}</p>
                       )}
-                      <div className="text-[10px] text-slate-600">
+                      <div className="text-[10px] text-slate-600 mt-auto">
                         上下文: {(m.max_context_tokens / 1000).toFixed(0)}k tokens
                       </div>
                     </div>
@@ -652,7 +652,7 @@ export function TeamPage() {
           {/* ── 编辑弹窗 ── */}
           {editingMember && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setEditingMember(null)}>
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[720px] max-h-[85vh] overflow-y-auto space-y-4" onClick={e => e.stopPropagation()}>
                 <h3 className="text-lg font-bold text-slate-200">编辑: {editingMember.name}</h3>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -687,8 +687,8 @@ export function TeamPage() {
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">系统提示词</label>
-                    <textarea value={editingMember.system_prompt || ''} onChange={e => setEditingMember({ ...editingMember, system_prompt: e.target.value })} rows={3}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 resize-y focus:outline-none focus:border-forge-500" />
+                    <textarea value={editingMember.system_prompt || ''} onChange={e => setEditingMember({ ...editingMember, system_prompt: e.target.value })} rows={10}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 resize-y focus:outline-none focus:border-forge-500 font-mono leading-relaxed" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">上下文窗口</label>

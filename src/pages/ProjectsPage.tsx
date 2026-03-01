@@ -15,6 +15,7 @@ export function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [workspacePath, setWorkspacePath] = useState('');
+  const [historyPath, setHistoryPath] = useState('');
   const [gitMode, setGitMode] = useState<'local' | 'github'>('local');
   const [githubRepo, setGithubRepo] = useState('');
   const [githubToken, setGithubToken] = useState('');
@@ -50,6 +51,7 @@ export function ProjectsPage() {
     try {
       const options: any = { gitMode };
       if (workspacePath.trim()) options.workspacePath = workspacePath.trim();
+      if (historyPath.trim()) options.historyPath = historyPath.trim();
       if (gitMode === 'github' && githubRepo && githubToken) {
         options.githubRepo = githubRepo;
         options.githubToken = githubToken;
@@ -60,6 +62,7 @@ export function ProjectsPage() {
         // 重置表单
         setProjectName('');
         setWorkspacePath('');
+        setHistoryPath('');
         setGithubRepo('');
         setGithubToken('');
         setShowCreate(false);
@@ -147,19 +150,76 @@ export function ProjectsPage() {
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
                   onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
                   autoFocus
+                  onBlur={() => {
+                    // 自动填充工作区和历史版本路径
+                    if (projectName.trim() && !workspacePath) {
+                      const safeName = projectName.trim().replace(/[\s\\/:<>"'|?*]+/g, '-').toLowerCase();
+                      const base = `D:\\AgentForge-Projects\\${safeName}`;
+                      setWorkspacePath(base);
+                      if (!historyPath) setHistoryPath(`${base}\\.versions`);
+                    }
+                  }}
                 />
               </section>
 
-              {/* 工作区路径 */}
+              {/* 工作区路径 (自动填充) */}
               <section className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400">工作区路径 <span className="text-slate-600">(留空则使用默认目录)</span></label>
-                <input
-                  type="text"
-                  value={workspacePath}
-                  onChange={e => setWorkspacePath(e.target.value)}
-                  placeholder="例: D:\projects\my-app  或留空"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors font-mono text-xs"
-                />
+                <label className="text-xs font-medium text-slate-400">
+                  工作区路径
+                  <span className="text-slate-600 ml-1">(自动生成，可手动修改)</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={workspacePath}
+                    onChange={e => setWorkspacePath(e.target.value)}
+                    placeholder="自动根据项目名填充"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
+                        if (result?.filePaths?.[0]) setWorkspacePath(result.filePaths[0]);
+                      } catch {}
+                    }}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
+                    title="浏览文件夹"
+                  >
+                    📂
+                  </button>
+                </div>
+              </section>
+
+              {/* 历史版本文件夹 (自动填充) */}
+              <section className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">
+                  历史版本文件夹
+                  <span className="text-slate-600 ml-1">(存储文档/产出的历史快照)</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={historyPath}
+                    onChange={e => setHistoryPath(e.target.value)}
+                    placeholder="自动根据工作区路径填充"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const result = await (window as any).agentforge?.dialog?.showOpenDialog?.({ properties: ['openDirectory'] });
+                        if (result?.filePaths?.[0]) setHistoryPath(result.filePaths[0]);
+                      } catch {}
+                    }}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
+                    title="浏览文件夹"
+                  >
+                    📂
+                  </button>
+                </div>
               </section>
 
               {/* 版本控制 */}

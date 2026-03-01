@@ -1,5 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
+
+// ── Types ──
+interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size?: number;
+  children?: FileNode[];
+}
 
 // ── 语言检测 ──
 function detectLanguage(filename: string): string {
@@ -29,10 +39,11 @@ function fileIcon(name: string, type: 'file' | 'dir'): string {
 
 // ── 文件树节点 ──
 function TreeNode({
-  node, depth, selectedPath, onSelect
+  node, depth, selectedPath, onSelect, onRightClick
 }: {
   node: FileNode; depth: number; selectedPath: string | null;
   onSelect: (path: string) => void;
+  onRightClick?: (e: React.MouseEvent, node: FileNode) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
   const isSelected = node.path === selectedPath;
@@ -49,8 +60,8 @@ function TreeNode({
           <span>{fileIcon(node.name, 'dir')}</span>
           <span className="truncate">{node.name}</span>
         </div>
-        {expanded && node.children?.map(child => (
-          <TreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+        {expanded && node.children?.map((child: FileNode) => (
+          <TreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} onRightClick={onRightClick} />
         ))}
       </div>
     );
@@ -61,6 +72,11 @@ function TreeNode({
       className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer rounded text-xs transition-colors ${isSelected ? 'bg-forge-600/20 text-forge-300' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-300'}`}
       style={{ paddingLeft: `${depth * 14 + 20}px` }}
       onClick={() => onSelect(node.path)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onRightClick?.(e, node);
+      }}
     >
       <span>{fileIcon(node.name, 'file')}</span>
       <span className="truncate">{node.name}</span>
@@ -126,6 +142,8 @@ export function OutputPage() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
+  const [versionModal, setVersionModal] = useState<{ filePath: string; versions: any[] } | null>(null);
 
   const loadTree = useCallback(async () => {
     if (!currentProjectId) return;
@@ -169,6 +187,30 @@ export function OutputPage() {
   const handleExport = async () => {
     if (!currentProjectId) return;
     await window.agentforge.project.export(currentProjectId);
+  };
+
+  const handleFileRightClick = (e: React.MouseEvent, node: any) => {
+    if (node.type === 'file') {
+      setCtxMenu({ x: e.clientX, y: e.clientY, filePath: node.path });
+    }
+  };
+
+  const handleViewVersions = async (filePath: string) => {
+    // Placeholder — would query git log for this file
+    setVersionModal({
+      filePath,
+      versions: [
+        { hash: 'HEAD', date: new Date().toISOString(), summary: '当前版本' },
+        { hash: 'HEAD~1', date: new Date(Date.now() - 3600000).toISOString(), summary: '上一版本' },
+      ],
+    });
+  };
+
+  const handleRollback = async (filePath: string, hash: string) => {
+    // Placeholder — would run git checkout <hash> -- <file>
+    console.log(`Rollback ${filePath} to ${hash}`);
+    setVersionModal(null);
+    loadTree();
   };
 
   if (!currentProjectId) {
@@ -223,7 +265,7 @@ export function OutputPage() {
             </div>
           ) : (
             tree.map(node => (
-              <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedFile} onSelect={handleSelectFile} />
+              <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedFile} onSelect={handleSelectFile} onRightClick={handleFileRightClick} />
             ))
           )}
         </div>
@@ -244,6 +286,58 @@ export function OutputPage() {
           )}
         </div>
       </div>
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            { label: '查看历史版本', icon: '📜', onClick: () => handleViewVersions(ctxMenu.filePath) },
+            { label: '在文件管理器中打开', icon: '📂', onClick: () => handleOpenInExplorer() },
+            { label: '复制文件路径', icon: '📋', onClick: () => navigator.clipboard?.writeText(ctxMenu.filePath) },
+          ]}
+        />
+      )}
+
+      {/* Version history modal */}
+      {versionModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setVersionModal(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-[480px] max-h-[60vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-200">📜 历史版本</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5 font-mono">{versionModal.filePath}</p>
+              </div>
+              <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {versionModal.versions.map((v: any, i: number) => (
+                <div key={v.hash} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400 font-mono shrink-0">
+                    {i === 0 ? '⭐' : `v${versionModal.versions.length - i}`}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-slate-300">{v.summary}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      <span className="font-mono">{v.hash.slice(0, 8)}</span> · {new Date(v.date).toLocaleString()}
+                    </div>
+                  </div>
+                  {i > 0 && (
+                    <button
+                      onClick={() => handleRollback(versionModal.filePath, v.hash)}
+                      className="text-[10px] px-2 py-1 rounded bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                    >
+                      回退到此版本
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
