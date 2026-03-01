@@ -23,6 +23,11 @@ import {
   browserScreenshot, browserSnapshot, browserClick, browserType,
   browserEvaluate, browserWait, browserNetwork,
 } from './browser-tools';
+import {
+  analyzeImage, compareScreenshots, visualAssert,
+  cacheScreenshot, getCachedScreenshot,
+  type VisionCallback,
+} from './visual-tools';
 
 // ═══════════════════════════════════════
 // Tool Interface
@@ -51,6 +56,8 @@ export interface ToolContext {
   workspacePath: string;
   projectId: string;
   gitConfig: GitProviderConfig;
+  /** v2.4: Vision LLM 回调 (由 orchestrator 注入，用于视觉验证工具) */
+  callVision?: VisionCallback;
 }
 
 // ═══════════════════════════════════════
@@ -518,6 +525,46 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     description: '关闭浏览器实例。在测试完成后调用以释放资源。',
     parameters: { type: 'object', properties: {} },
   },
+
+  // ═══ v2.4: 视觉验证工具 ═══
+
+  {
+    name: 'analyze_image',
+    description: '用 AI 视觉分析图像内容。配合 screenshot / browser_screenshot 使用。可用于理解 UI 状态、识别元素位置、读取屏幕文本。',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_label: { type: 'string', description: '要分析的图像标签（最近一次 screenshot 自动缓存为 "latest"）', default: 'latest' },
+        question: { type: 'string', description: '要分析的问题，如 "页面上有哪些按钮" 或 "登录表单是否存在"' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'compare_screenshots',
+    description: '对比两张截图的差异。用于 UI 回归测试、检查操作前后的变化。需要先用 screenshot/browser_screenshot 截图并记住标签。',
+    parameters: {
+      type: 'object',
+      properties: {
+        before_label: { type: 'string', description: '"之前" 截图的标签' },
+        after_label: { type: 'string', description: '"之后" 截图的标签，默认 "latest"', default: 'latest' },
+        description: { type: 'string', description: '对比的上下文描述' },
+      },
+      required: ['before_label'],
+    },
+  },
+  {
+    name: 'visual_assert',
+    description: '视觉断言：验证截图是否满足指定条件。返回 pass/fail 和置信度。示例: "页面中应该有登录按钮" 或 "表格应显示 5 行数据"',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_label: { type: 'string', description: '要验证的图像标签，默认 "latest"', default: 'latest' },
+        assertion: { type: 'string', description: '要验证的条件描述' },
+      },
+      required: ['assertion'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -829,6 +876,8 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
           return { success: false, output: `截图失败: ${result.error}`, action: 'computer' };
         }
         // 返回 base64 图像信息（实际图像需在 orchestrator 中作为 image_url 传给 LLM）
+        // v2.4: 自动缓存截图供视觉验证工具使用
+        if (result.base64) cacheScreenshot('latest', result.base64);
         return {
           success: true,
           output: `[screenshot] ${result.width}x${result.height} PNG (${Math.round(result.base64.length / 1024)}KB base64)`,
@@ -890,6 +939,13 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'browser_wait':
       case 'browser_network':
       case 'browser_close': {
+        return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
+      }
+
+      // v2.4: 视觉验证工具（异步，同步入口返回占位）
+      case 'analyze_image':
+      case 'compare_screenshots':
+      case 'visual_assert': {
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
       }
 
@@ -976,6 +1032,8 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
   if (call.name === 'browser_screenshot') {
     const result = await browserScreenshot(call.arguments.full_page);
     if (result.success) {
+      // v2.4: 自动缓存截图供视觉验证工具使用
+      cacheScreenshot('latest', result.base64);
       return {
         success: true,
         output: `[browser_screenshot] ${Math.round(result.base64.length / 1024)}KB PNG`,
@@ -1023,6 +1081,48 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
   if (call.name === 'browser_close') {
     const result = await closeBrowser();
     return { success: result.success, output: '浏览器已关闭', action: 'computer' };
+  }
+
+  // ═══ v2.4: 视觉验证工具（异步 + 需要 VisionCallback） ═══
+
+  if (call.name === 'analyze_image') {
+    if (!ctx.callVision) return { success: false, output: '视觉分析不可用：未配置 Vision LLM', action: 'computer' };
+    const label = call.arguments.image_label || 'latest';
+    const base64 = getCachedScreenshot(label);
+    if (!base64) return { success: false, output: `未找到标签为 "${label}" 的截图。请先使用 screenshot 或 browser_screenshot 截图。`, action: 'computer' };
+    const result = await analyzeImage(base64, call.arguments.question, ctx.callVision);
+    return { success: result.success, output: result.success ? result.analysis : `分析失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'compare_screenshots') {
+    if (!ctx.callVision) return { success: false, output: '视觉对比不可用：未配置 Vision LLM', action: 'computer' };
+    const beforeBase64 = getCachedScreenshot(call.arguments.before_label);
+    const afterBase64 = getCachedScreenshot(call.arguments.after_label || 'latest');
+    if (!beforeBase64) return { success: false, output: `未找到 "before" 截图: "${call.arguments.before_label}"`, action: 'computer' };
+    if (!afterBase64) return { success: false, output: `未找到 "after" 截图: "${call.arguments.after_label || 'latest'}"`, action: 'computer' };
+    const result = await compareScreenshots(beforeBase64, afterBase64, call.arguments.description || '', ctx.callVision);
+    return {
+      success: result.success,
+      output: result.success
+        ? `差异分析 (粗略差异: ${result.pixelDiffPercent}%):\n${result.analysis}`
+        : `对比失败: ${result.error}`,
+      action: 'computer',
+    };
+  }
+
+  if (call.name === 'visual_assert') {
+    if (!ctx.callVision) return { success: false, output: '视觉断言不可用：未配置 Vision LLM', action: 'computer' };
+    const label = call.arguments.image_label || 'latest';
+    const base64 = getCachedScreenshot(label);
+    if (!base64) return { success: false, output: `未找到标签为 "${label}" 的截图`, action: 'computer' };
+    const result = await visualAssert(base64, call.arguments.assertion, ctx.callVision);
+    return {
+      success: result.success,
+      output: result.success
+        ? `视觉断言 ${result.passed ? '✅ PASS' : '❌ FAIL'} (置信度: ${result.confidence}%)\n断言: ${call.arguments.assertion}\n依据: ${result.reasoning}`
+        : `断言失败: ${result.error}`,
+      action: 'computer',
+    };
   }
 
   // 其余工具走同步
@@ -1074,6 +1174,14 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search', 'fetch_url', 'http_request',
     'spawn_researcher',
     'memory_read', 'memory_append',
+    // v2.4: Computer Use — 调试 GUI/桌面应用时截图、模拟操作
+    'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
+    // v2.4: Playwright 浏览器 — 调试 Web 前端时启动浏览器验证
+    'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
+    'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
+    'browser_network', 'browser_close',
+    // v2.4: 视觉验证 — 截图分析、前后对比、视觉断言
+    'analyze_image', 'compare_screenshots', 'visual_assert',
   ],
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -1087,6 +1195,8 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
     'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
     'browser_network', 'browser_close',
+    // v2.4: 视觉验证工具
+    'analyze_image', 'compare_screenshots', 'visual_assert',
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',

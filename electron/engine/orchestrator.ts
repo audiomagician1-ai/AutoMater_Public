@@ -1228,6 +1228,21 @@ async function reactDeveloperLoop(
     workspacePath: workspacePath || '',
     projectId,
     gitConfig,
+    // v2.4: Vision LLM 回调 (用于视觉验证工具)
+    callVision: async (prompt: string, imageBase64: string, mimeType?: string) => {
+      const visionModel = resolveModel('strong', settings);
+      const messages = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${mimeType || 'image/png'};base64,${imageBase64}` } },
+          ],
+        },
+      ];
+      const result = await callLLM(settings, visionModel, messages as any, signal, 4096);
+      return result.content;
+    },
   };
 
   let totalCost = 0;
