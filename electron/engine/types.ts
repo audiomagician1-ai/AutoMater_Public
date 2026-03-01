@@ -15,9 +15,15 @@ export interface AppSettings {
   llmProvider: 'openai' | 'anthropic' | 'custom';
   apiKey: string;
   baseUrl: string;
+  /** 强模型 — PM / 架构设计 / QA 审查 */
   strongModel: string;
+  /** 工作模型 — Developer 编码 / Planner */
   workerModel: string;
+  /** 快速模型 — 摘要 / 格式化 / 子Agent (留空则用 workerModel) */
+  fastModel?: string;
+  /** 并行 Worker 数量 (0 = 不限) */
   workerCount: number;
+  /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
 }
 

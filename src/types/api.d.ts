@@ -80,14 +80,22 @@ interface AgentForgeAPI {
     listModels(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; models: string[] }>;
   };
   project: {
-    create(wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
+    create(name: string, options?: {
+      workspacePath?: string;
+      gitMode?: string;
+      githubRepo?: string;
+      githubToken?: string;
+    }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
+    /** 设置/更新项目的需求描述 */
+    setWish(projectId: string, wish: string): Promise<{ success: boolean }>;
+    /** 启动项目（开始 Agent 编排） */
+    start(projectId: string): Promise<{ success: boolean }>;
     list(): Promise<any[]>;
     get(id: string): Promise<any>;
     getFeatures(projectId: string): Promise<any[]>;
     getAgents(projectId: string): Promise<any[]>;
     getLogs(projectId: string, limit?: number): Promise<any[]>;
     getStats(projectId: string): Promise<{ features: any; agents: any }>;
-    start(projectId: string): Promise<{ success: boolean }>;
     stop(projectId: string): Promise<{ success: boolean }>;
     delete(projectId: string): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
@@ -129,9 +137,15 @@ interface AppSettings {
   llmProvider: 'openai' | 'anthropic' | 'custom';
   apiKey: string;
   baseUrl: string;
+  /** 强模型 — PM / 架构设计 / QA 审查 */
   strongModel: string;
+  /** 工作模型 — Developer 编码 / Planner */
   workerModel: string;
+  /** 快速模型 — 摘要 / 格式化 / 子任务 (可选，不填则用 workerModel) */
+  fastModel: string;
+  /** 并行 Worker 数量 (0 = 不限) */
   workerCount: number;
+  /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
 }
 

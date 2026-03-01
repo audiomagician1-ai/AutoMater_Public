@@ -11,19 +11,20 @@ const STATUS_LABELS: Record<string, { text: string; color: string; icon: string 
 };
 
 export function ProjectsPage() {
-  const [wish, setWish] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [projectStats, setProjectStats] = useState<Record<string, any>>({});
-  const { settingsConfigured, setGlobalPage, enterProject, addLog, clearLogs } = useAppStore();
-
-  // Git 模式
-  const [showGitOptions, setShowGitOptions] = useState(false);
+  // 创建表单
+  const [showCreate, setShowCreate] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [workspacePath, setWorkspacePath] = useState('');
   const [gitMode, setGitMode] = useState<'local' | 'github'>('local');
   const [githubRepo, setGithubRepo] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubTestResult, setGithubTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectStats, setProjectStats] = useState<Record<string, any>>({});
+  const { settingsConfigured, setGlobalPage, enterProject, addLog } = useAppStore();
 
   const loadProjects = async () => {
     const list = await window.agentforge.project.list();
@@ -42,27 +43,33 @@ export function ProjectsPage() {
   }, []);
 
   const handleCreate = async () => {
-    if (!wish.trim() || loading) return;
+    if (!projectName.trim() || creating) return;
     if (!settingsConfigured) { setGlobalPage('settings'); return; }
 
-    setLoading(true);
-    clearLogs();
+    setCreating(true);
     try {
-      const options = gitMode === 'github' && githubRepo && githubToken
-        ? { gitMode: 'github', githubRepo, githubToken }
-        : { gitMode: 'local' };
-      const result = await window.agentforge.project.create(wish.trim(), options);
+      const options: any = { gitMode };
+      if (workspacePath.trim()) options.workspacePath = workspacePath.trim();
+      if (gitMode === 'github' && githubRepo && githubToken) {
+        options.githubRepo = githubRepo;
+        options.githubToken = githubToken;
+      }
+      const result = await window.agentforge.project.create(projectName.trim(), options);
       if (result.success) {
-        addLog({ projectId: result.projectId, agentId: 'system', content: `🎯 新项目: ${result.name} (${gitMode === 'github' ? 'GitHub: ' + githubRepo : '本地 Git'})` });
-        await window.agentforge.project.start(result.projectId);
-        setWish('');
-        setShowGitOptions(false);
-        enterProject(result.projectId, 'logs');
+        addLog({ projectId: result.projectId, agentId: 'system', content: `📁 项目已创建: ${result.name}` });
+        // 重置表单
+        setProjectName('');
+        setWorkspacePath('');
+        setGithubRepo('');
+        setGithubToken('');
+        setShowCreate(false);
+        // 进入项目的许愿页，让用户在那里输入需求
+        enterProject(result.projectId, 'wish');
       }
     } catch (err: any) {
       addLog({ projectId: '', agentId: 'system', content: `❌ ${err.message}` });
     } finally {
-      setLoading(false);
+      setCreating(false);
       loadProjects();
     }
   };
@@ -102,58 +109,62 @@ export function ProjectsPage() {
 
   return (
     <div className="h-full flex flex-col overflow-y-auto">
-      {/* 顶部 Hero */}
+      {/* 顶部 */}
       <div className="px-8 pt-8 pb-6 border-b border-slate-800/50">
-        <div className="max-w-3xl mx-auto space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center text-lg font-bold shadow-lg shadow-forge-500/20">F</div>
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold">AgentForge</h1>
-              <p className="text-slate-500 text-xs">AI Agent 团队帮你实现软件需求</p>
+              <h1 className="text-2xl font-bold">项目</h1>
+              <p className="text-slate-500 text-xs mt-1">AI Agent 团队帮你实现软件需求</p>
             </div>
-            <button onClick={() => setGlobalPage('settings')} className="ml-auto text-slate-500 hover:text-slate-300 transition-colors p-2 rounded-lg hover:bg-slate-800" title="设置">
-              ⚙️
-            </button>
-          </div>
-
-          {/* 新项目输入区 */}
-          <div className="flex gap-2">
-            <textarea
-              value={wish}
-              onChange={e => setWish(e.target.value)}
-              placeholder="描述你的需求... (例: 一个 Todo App, 带用户认证和暗黑模式)"
-              rows={2}
-              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-600 resize-none focus:outline-none focus:border-forge-500 transition-colors text-sm"
-              onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleCreate(); }}
-            />
             <button
-              onClick={handleCreate}
-              disabled={!wish.trim() || loading}
-              className="px-5 py-2.5 rounded-lg font-medium text-sm transition-all self-end bg-forge-600 hover:bg-forge-500 text-white shadow-lg shadow-forge-600/20 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed disabled:shadow-none whitespace-nowrap"
+              onClick={() => setShowCreate(!showCreate)}
+              className="px-4 py-2.5 rounded-lg font-medium text-sm transition-all bg-forge-600 hover:bg-forge-500 text-white shadow-lg shadow-forge-600/20"
             >
-              {loading ? '⏳' : '🚀 新建项目'}
+              ＋ 新建项目
             </button>
           </div>
 
           {!settingsConfigured && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-amber-400 text-sm text-center">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-amber-400 text-sm text-center mb-4">
               💡 首次使用请先 <button onClick={() => setGlobalPage('settings')} className="underline font-medium">配置 LLM</button>
             </div>
           )}
 
-          {/* Git 模式选择 */}
-          <div className="space-y-3">
-            <button
-              onClick={() => setShowGitOptions(!showGitOptions)}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
-            >
-              <span>{showGitOptions ? '▾' : '▸'}</span>
-              <span>🔗 版本控制设置</span>
-              <span className="text-slate-600 ml-1">({gitMode === 'github' ? `GitHub: ${githubRepo}` : '本地 Git'})</span>
-            </button>
+          {/* 创建项目表单 */}
+          {showCreate && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-200">创建新项目</h3>
 
-            {showGitOptions && (
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
+              {/* 项目名称 */}
+              <section className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">项目名称 *</label>
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={e => setProjectName(e.target.value)}
+                  placeholder="例: My Todo App"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
+                  autoFocus
+                />
+              </section>
+
+              {/* 工作区路径 */}
+              <section className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">工作区路径 <span className="text-slate-600">(留空则使用默认目录)</span></label>
+                <input
+                  type="text"
+                  value={workspacePath}
+                  onChange={e => setWorkspacePath(e.target.value)}
+                  placeholder="例: D:\projects\my-app  或留空"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors font-mono text-xs"
+                />
+              </section>
+
+              {/* 版本控制 */}
+              <section className="space-y-3">
+                <label className="text-xs font-medium text-slate-400">版本控制</label>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setGitMode('local')}
@@ -165,16 +176,12 @@ export function ProjectsPage() {
                     onClick={() => setGitMode('github')}
                     className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${gitMode === 'github' ? 'bg-forge-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
                   >
-                    🐙 GitHub 仓库
+                    🐙 GitHub
                   </button>
                 </div>
 
-                {gitMode === 'local' && (
-                  <p className="text-xs text-slate-500">项目将在本地工作区管理 Git 版本历史，无需联网。</p>
-                )}
-
                 {gitMode === 'github' && (
-                  <div className="space-y-2">
+                  <div className="space-y-2 pl-1">
                     <input
                       type="text"
                       value={githubRepo}
@@ -203,14 +210,30 @@ export function ProjectsPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-600">
-                      自动推送提交到 GitHub · Issue 追踪开发问题 · 需要 repo 和 issues 权限
-                    </p>
                   </div>
                 )}
+              </section>
+
+              {/* 操作按钮 */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleCreate}
+                  disabled={!projectName.trim() || creating}
+                  className="flex-1 py-2.5 rounded-lg font-medium text-sm transition-all bg-forge-600 hover:bg-forge-500 text-white disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed"
+                >
+                  {creating ? '⏳ 创建中...' : '📁 创建项目'}
+                </button>
+                <button
+                  onClick={() => setShowCreate(false)}
+                  className="px-4 py-2.5 rounded-lg text-sm text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 transition-all"
+                >
+                  取消
+                </button>
               </div>
-            )}
-          </div>
+
+              <p className="text-[10px] text-slate-600">创建后进入项目的「许愿」页面输入具体需求</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -221,7 +244,7 @@ export function ProjectsPage() {
             <div className="text-center py-20 text-slate-600">
               <p className="text-4xl mb-3">🏗️</p>
               <p className="text-lg">还没有项目</p>
-              <p className="text-sm mt-1">在上方输入你的需求，AI 团队立即开始工作</p>
+              <p className="text-sm mt-1">点击「新建项目」开始</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -242,22 +265,26 @@ export function ProjectsPage() {
                     onClick={() => enterProject(p.id)}
                     className="bg-slate-900 border border-slate-800 rounded-xl p-5 cursor-pointer transition-all hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 group"
                   >
-                    {/* 状态徽章 */}
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 ${st.color}`}>
-                          {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1 animate-pulse" />}
-                          {st.text}
-                        </span>
-                        {p.git_mode === 'github' && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">🐙 {p.github_repo}</span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-slate-600">{new Date(p.created_at).toLocaleDateString()}</span>
+                    {/* 项目名 + 状态 */}
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-slate-200 truncate">{p.name}</h3>
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 ${st.color} flex-shrink-0 ml-2`}>
+                        {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1 animate-pulse" />}
+                        {st.text}
+                      </span>
                     </div>
 
                     {/* 需求描述 */}
-                    <p className="text-sm text-slate-200 leading-snug line-clamp-3 mb-3 min-h-[3em]">{p.wish}</p>
+                    {p.wish && <p className="text-xs text-slate-400 leading-snug line-clamp-2 mb-3">{p.wish}</p>}
+                    {!p.wish && <p className="text-xs text-slate-600 italic mb-3">尚未设置需求</p>}
+
+                    {/* 标签行 */}
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
+                      {p.git_mode === 'github' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">🐙 {p.github_repo}</span>
+                      )}
+                      <span className="text-[10px] text-slate-600">{new Date(p.created_at).toLocaleDateString()}</span>
+                    </div>
 
                     {/* 进度条 */}
                     {total > 0 && (

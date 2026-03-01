@@ -19,7 +19,13 @@ contextBridge.exposeInMainWorld('agentforge', {
 
   // ── 项目 ──
   project: {
-    create: (wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }) => ipcRenderer.invoke('project:create', wish, options),
+    create: (name: string, options?: {
+      workspacePath?: string;
+      gitMode?: string;
+      githubRepo?: string;
+      githubToken?: string;
+    }) => ipcRenderer.invoke('project:create', name, options),
+    setWish: (projectId: string, wish: string) => ipcRenderer.invoke('project:set-wish', projectId, wish),
     list: () => ipcRenderer.invoke('project:list'),
     get: (id: string) => ipcRenderer.invoke('project:get', id),
     getFeatures: (projectId: string) => ipcRenderer.invoke('project:get-features', projectId),

@@ -1,58 +1,50 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
 
-const PROVIDER_PRESETS: Record<string, { baseUrl: string; models: string[] }> = {
-  openai: {
-    baseUrl: 'https://api.openai.com',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  },
-  anthropic: {
-    baseUrl: 'https://api.anthropic.com',
-    models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-7-sonnet-20250219', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
-  },
-  custom: {
-    baseUrl: 'http://localhost:11434',
-    models: [],
-  },
-};
-
 export function SettingsPage() {
   const { setSettingsConfigured } = useAppStore();
   const [settings, setSettings] = useState<AppSettings>({
     llmProvider: 'openai',
     apiKey: '',
     baseUrl: 'https://api.openai.com',
-    strongModel: 'gpt-4o',
-    workerModel: 'gpt-4o-mini',
-    workerCount: 3,
-    dailyBudgetUsd: 50,
+    strongModel: '',
+    workerModel: '',
+    fastModel: '',
+    workerCount: 0,
+    dailyBudgetUsd: 0,
   });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
 
   // 加载已保存的设置
   useEffect(() => {
     window.agentforge.settings.get().then((s: AppSettings) => {
-      setSettings(s);
-      if (s.llmProvider && PROVIDER_PRESETS[s.llmProvider]) {
-        setModels(PROVIDER_PRESETS[s.llmProvider].models);
-      }
+      setSettings({
+        ...s,
+        fastModel: s.fastModel ?? '',
+        workerCount: s.workerCount ?? 0,
+        dailyBudgetUsd: s.dailyBudgetUsd ?? 0,
+      });
     });
   }, []);
 
   const handleProviderChange = (provider: 'openai' | 'anthropic' | 'custom') => {
-    const preset = PROVIDER_PRESETS[provider];
+    const presets: Record<string, { baseUrl: string; strong: string; worker: string; fast: string }> = {
+      openai:    { baseUrl: 'https://api.openai.com',    strong: 'gpt-4o',                      worker: 'gpt-4o-mini',                fast: 'gpt-4o-mini' },
+      anthropic: { baseUrl: 'https://api.anthropic.com', strong: 'claude-sonnet-4-20250514', worker: 'claude-3-5-haiku-20241022', fast: 'claude-3-5-haiku-20241022' },
+      custom:    { baseUrl: 'http://localhost:11434',     strong: '',                             worker: '',                            fast: '' },
+    };
+    const p = presets[provider];
     setSettings(prev => ({
       ...prev,
       llmProvider: provider,
-      baseUrl: preset.baseUrl,
-      strongModel: preset.models[0] || '',
-      workerModel: preset.models[1] || preset.models[0] || '',
+      baseUrl: p.baseUrl,
+      strongModel: p.strong,
+      workerModel: p.worker,
+      fastModel: p.fast,
     }));
-    setModels(preset.models);
     setTestResult(null);
   };
 
@@ -66,18 +58,6 @@ export function SettingsPage() {
     });
     setTestResult(result);
     setTesting(false);
-
-    // 如果连通，尝试拉模型列表
-    if (result.success && settings.llmProvider !== 'anthropic') {
-      const modelsResult = await window.agentforge.llm.listModels({
-        type: settings.llmProvider,
-        baseUrl: settings.baseUrl,
-        apiKey: settings.apiKey,
-      });
-      if (modelsResult.success && modelsResult.models.length > 0) {
-        setModels(modelsResult.models);
-      }
-    }
   };
 
   const handleSave = async () => {
@@ -90,12 +70,23 @@ export function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
+  /** 处理数字输入，支持空值(=0=无限) */
+  const parseNumberInput = (value: string): number => {
+    if (!value.trim() || value.trim() === '∞') return 0;
+    const n = parseInt(value, 10);
+    return Number.isNaN(n) || n < 0 ? 0 : n;
+  };
+
+  const formatNumberDisplay = (value: number): string => {
+    return value === 0 ? '' : String(value);
+  };
+
   return (
     <div className="h-full overflow-y-auto p-8">
       <div className="max-w-xl mx-auto space-y-8">
         <h2 className="text-2xl font-bold">设置</h2>
 
-        {/* Provider */}
+        {/* ── Provider ── */}
         <section className="space-y-3">
           <label className="text-sm font-medium text-slate-300">LLM 服务商</label>
           <div className="flex gap-2">
@@ -115,7 +106,7 @@ export function SettingsPage() {
           </div>
         </section>
 
-        {/* API Key */}
+        {/* ── API Key ── */}
         <section className="space-y-2">
           <label className="text-sm font-medium text-slate-300">API Key</label>
           <input
@@ -127,7 +118,7 @@ export function SettingsPage() {
           />
         </section>
 
-        {/* Base URL */}
+        {/* ── Base URL ── */}
         <section className="space-y-2">
           <label className="text-sm font-medium text-slate-300">API Base URL</label>
           <input
@@ -138,7 +129,7 @@ export function SettingsPage() {
           />
         </section>
 
-        {/* Test Connection */}
+        {/* ── Test Connection ── */}
         <div className="flex items-center gap-3">
           <button
             onClick={handleTest}
@@ -154,80 +145,94 @@ export function SettingsPage() {
           )}
         </div>
 
-        {/* Models */}
-        <div className="grid grid-cols-2 gap-4">
-          <section className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">强模型 (PM/架构师)</label>
-            <select
-              value={settings.strongModel}
-              onChange={e => setSettings(prev => ({ ...prev, strongModel: e.target.value }))}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:border-forge-500"
-            >
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
-              {!models.includes(settings.strongModel) && settings.strongModel && (
-                <option value={settings.strongModel}>{settings.strongModel}</option>
-              )}
-            </select>
-          </section>
+        {/* ── Models ── */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">模型配置</h3>
+          <p className="text-[10px] text-slate-500">直接输入模型名称，支持任何兼容 OpenAI / Anthropic API 的模型</p>
 
-          <section className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">工作模型 (开发/QA)</label>
-            <select
-              value={settings.workerModel}
-              onChange={e => setSettings(prev => ({ ...prev, workerModel: e.target.value }))}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:border-forge-500"
-            >
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
-              {!models.includes(settings.workerModel) && settings.workerModel && (
-                <option value={settings.workerModel}>{settings.workerModel}</option>
-              )}
-            </select>
-          </section>
-        </div>
+          <div className="space-y-3">
+            {/* 强模型 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">
+                强模型 <span className="text-slate-600">— PM 需求分析 / 架构设计 / QA 审查</span>
+              </label>
+              <input
+                type="text"
+                value={settings.strongModel}
+                onChange={e => setSettings(prev => ({ ...prev, strongModel: e.target.value }))}
+                placeholder="例: gpt-4o, claude-sonnet-4-20250514, deepseek-chat"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 font-mono"
+              />
+            </div>
 
-        {/* Worker Count */}
-        <section className="space-y-2">
-          <label className="text-sm font-medium text-slate-300">
-            并行 Worker 数量: <span className="text-forge-400">{settings.workerCount}</span>
-          </label>
-          <input
-            type="range"
-            min={1}
-            max={8}
-            value={settings.workerCount}
-            onChange={e => setSettings(prev => ({ ...prev, workerCount: parseInt(e.target.value) }))}
-            className="w-full accent-forge-500"
-          />
-          <div className="flex justify-between text-xs text-slate-600">
-            <span>1 (省钱)</span>
-            <span>8 (快速)</span>
+            {/* 工作模型 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">
+                工作模型 <span className="text-slate-600">— Developer 编码 / 计划制定</span>
+              </label>
+              <input
+                type="text"
+                value={settings.workerModel}
+                onChange={e => setSettings(prev => ({ ...prev, workerModel: e.target.value }))}
+                placeholder="例: gpt-4o-mini, claude-3-5-haiku-20241022, deepseek-chat"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 font-mono"
+              />
+            </div>
+
+            {/* 快速模型 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">
+                快速模型 <span className="text-slate-600">— 摘要 / 格式化 / 子Agent (留空则用工作模型)</span>
+              </label>
+              <input
+                type="text"
+                value={settings.fastModel}
+                onChange={e => setSettings(prev => ({ ...prev, fastModel: e.target.value }))}
+                placeholder="例: gpt-4o-mini, claude-3-5-haiku-20241022 (可留空)"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 font-mono"
+              />
+            </div>
           </div>
         </section>
 
-        {/* Daily Budget */}
-        <section className="space-y-2">
-          <label className="text-sm font-medium text-slate-300">
-            每日预算上限: <span className="text-amber-400">${settings.dailyBudgetUsd}</span>
-          </label>
-          <input
-            type="range"
-            min={1}
-            max={200}
-            step={1}
-            value={settings.dailyBudgetUsd}
-            onChange={e => setSettings(prev => ({ ...prev, dailyBudgetUsd: parseInt(e.target.value) }))}
-            className="w-full accent-amber-500"
-          />
-          <div className="flex justify-between text-xs text-slate-600">
-            <span>$1 (测试)</span>
-            <span>$200 (正式项目)</span>
+        {/* ── Limits ── */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">限制</h3>
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* Worker Count */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">最大并行 Agent 数</label>
+              <input
+                type="text"
+                value={formatNumberDisplay(settings.workerCount)}
+                onChange={e => setSettings(prev => ({ ...prev, workerCount: parseNumberInput(e.target.value) }))}
+                placeholder="留空 = 无上限"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 font-mono"
+              />
+              <p className="text-[10px] text-slate-600">
+                {settings.workerCount === 0 ? '♾️ 无上限' : `最多 ${settings.workerCount} 个`}
+              </p>
+            </div>
+
+            {/* Daily Budget */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">每日预算上限 (USD)</label>
+              <input
+                type="text"
+                value={formatNumberDisplay(settings.dailyBudgetUsd)}
+                onChange={e => setSettings(prev => ({ ...prev, dailyBudgetUsd: parseNumberInput(e.target.value) }))}
+                placeholder="留空 = 无上限"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 font-mono"
+              />
+              <p className="text-[10px] text-slate-600">
+                {settings.dailyBudgetUsd === 0 ? '♾️ 无上限' : `超过 $${settings.dailyBudgetUsd} 自动暂停`}
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-slate-600 mt-1">
-            超过预算后自动暂停所有 Agent 并发送通知
-          </p>
         </section>
 
-        {/* Save */}
+        {/* ── Save ── */}
         <button
           onClick={handleSave}
           className="w-full py-3 bg-forge-600 hover:bg-forge-500 rounded-lg font-medium transition-all shadow-lg shadow-forge-600/20"

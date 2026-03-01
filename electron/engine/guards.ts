@@ -366,16 +366,16 @@ export function checkReactTermination(
     return { shouldContinue: false, reason: 'max_iterations', message: `Reached ${config.maxIterations} iterations` };
   }
 
-  if (state.totalTokens >= config.maxTotalTokens) {
+  if (config.maxTotalTokens > 0 && state.totalTokens >= config.maxTotalTokens) {
     return { shouldContinue: false, reason: 'max_tokens', message: `Token limit ${config.maxTotalTokens} exceeded` };
   }
 
-  if (state.totalCost >= config.maxCostUsd) {
+  if (config.maxCostUsd > 0 && state.totalCost >= config.maxCostUsd) {
     return { shouldContinue: false, reason: 'max_cost', message: `Cost limit $${config.maxCostUsd} exceeded` };
   }
 
   const elapsed = Date.now() - state.startTimeMs;
-  if (elapsed >= config.maxWallTimeMs) {
+  if (config.maxWallTimeMs > 0 && elapsed >= config.maxWallTimeMs) {
     return { shouldContinue: false, reason: 'max_time', message: `Wall time ${Math.round(elapsed / 1000)}s exceeded ${config.maxWallTimeMs / 1000}s limit` };
   }
 
@@ -663,6 +663,7 @@ export interface BudgetStatus {
 
 /**
  * 多维度预算检查 — 任一维度超限即拦截
+ * 注: limit=0 表示该维度不限制
  */
 export function checkBudgetMulti(
   dailySpent: number,
@@ -671,17 +672,17 @@ export function checkBudgetMulti(
   featureStartTime: number,
   limits: BudgetLimits,
 ): BudgetStatus {
-  if (dailySpent >= limits.dailyBudgetUsd) {
+  if (limits.dailyBudgetUsd > 0 && dailySpent >= limits.dailyBudgetUsd) {
     return { ok: false, blockedBy: 'daily_cost', spent: dailySpent, limit: limits.dailyBudgetUsd };
   }
-  if (featureSpent >= limits.perFeatureMaxUsd) {
+  if (limits.perFeatureMaxUsd > 0 && featureSpent >= limits.perFeatureMaxUsd) {
     return { ok: false, blockedBy: 'feature_cost', spent: featureSpent, limit: limits.perFeatureMaxUsd };
   }
-  if (featureTokens >= limits.perFeatureMaxTokens) {
+  if (limits.perFeatureMaxTokens > 0 && featureTokens >= limits.perFeatureMaxTokens) {
     return { ok: false, blockedBy: 'feature_tokens', spent: featureTokens, limit: limits.perFeatureMaxTokens };
   }
   const elapsed = Date.now() - featureStartTime;
-  if (elapsed >= limits.perFeatureMaxTimeMs) {
+  if (limits.perFeatureMaxTimeMs > 0 && elapsed >= limits.perFeatureMaxTimeMs) {
     return { ok: false, blockedBy: 'feature_time', spent: elapsed, limit: limits.perFeatureMaxTimeMs };
   }
   return { ok: true, spent: featureSpent, limit: limits.perFeatureMaxUsd };

@@ -221,7 +221,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   sendToUI(win, 'project:status', { projectId, status: 'developing' });
 
   const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult).c;
-  const workerCount = Math.min(settings.workerCount || 2, featureCount, 6);
+  // workerCount=0 means unlimited; cap at featureCount to avoid idle workers
+  const maxWorkers = settings.workerCount > 0 ? settings.workerCount : featureCount;
+  const workerCount = Math.min(maxWorkers, featureCount);
 
   const qaId = `qa-${Date.now().toString(36)}`;
   spawnAgent(projectId, qaId, 'qa', win);

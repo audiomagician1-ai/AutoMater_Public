@@ -132,7 +132,7 @@ function computeDevComplexity(task: TaskComplexity): number {
  */
 export function resolveModel(
   tier: ModelTier,
-  settings: { strongModel: string; workerModel: string },
+  settings: { strongModel: string; workerModel: string; fastModel?: string },
 ): string {
   switch (tier) {
     case 'strong':
@@ -140,8 +140,8 @@ export function resolveModel(
     case 'worker':
       return settings.workerModel;
     case 'mini':
-      // mini = worker 模型 (如果以后用户配置了 mini 模型就用那个)
-      return settings.workerModel;
+      // fastModel > workerModel (向下兼容)
+      return settings.fastModel?.trim() || settings.workerModel;
   }
 }
 

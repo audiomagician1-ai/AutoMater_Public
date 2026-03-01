@@ -27,17 +27,27 @@ function getGitConfig(project: any): GitProviderConfig {
 export function setupProjectHandlers() {
 
   // ── 创建项目 ──
-  ipcMain.handle('project:create', async (_event, wish: string, options?: { gitMode?: string; githubRepo?: string; githubToken?: string }) => {
+  ipcMain.handle('project:create', async (_event, name: string, options?: {
+    workspacePath?: string;
+    gitMode?: string;
+    githubRepo?: string;
+    githubToken?: string;
+  }) => {
     const db = getDb();
     const id = generateId();
-    const name = wish.length > 30 ? wish.slice(0, 30) + '...' : wish;
+    const displayName = name.length > 50 ? name.slice(0, 50) + '...' : name;
     const gitMode = options?.gitMode || 'local';
     const githubRepo = options?.githubRepo || null;
     const githubToken = options?.githubToken || null;
 
-    // 创建工作区目录
-    const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
-    const workspacePath = path.join(workspacesRoot, id);
+    // 工作区目录: 用户指定 > 默认
+    let workspacePath: string;
+    if (options?.workspacePath?.trim()) {
+      workspacePath = options.workspacePath.trim();
+    } else {
+      const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
+      workspacePath = path.join(workspacesRoot, id);
+    }
     fs.mkdirSync(workspacePath, { recursive: true });
 
     // Git init (根据模式)
@@ -45,10 +55,17 @@ export function setupProjectHandlers() {
 
     db.prepare(`
       INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo, github_token)
-      VALUES (?, ?, ?, 'initializing', ?, '{}', ?, ?, ?)
-    `).run(id, name, wish, workspacePath, gitMode, githubRepo, githubToken);
+      VALUES (?, ?, '', 'initializing', ?, '{}', ?, ?, ?)
+    `).run(id, displayName, workspacePath, gitMode, githubRepo, githubToken);
 
-    return { success: true, projectId: id, name, workspacePath };
+    return { success: true, projectId: id, name: displayName, workspacePath };
+  });
+
+  // ── 设置/更新项目需求 ──
+  ipcMain.handle('project:set-wish', async (_event, projectId: string, wish: string) => {
+    const db = getDb();
+    db.prepare(`UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?`).run(wish, projectId);
+    return { success: true };
   });
 
   // ── 列出项目 ──
