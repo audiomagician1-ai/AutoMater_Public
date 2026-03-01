@@ -775,6 +775,13 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
+  // Phase 2.5: 自动生成 .agentforge/AGENTS.md (v1.0)
+  // ═══════════════════════════════════════
+  if (workspacePath) {
+    ensureAgentsMd(workspacePath, project.wish);
+  }
+
+  // ═══════════════════════════════════════
   // Phase 3: Developer Agents — 上下文感知迭代开发 + QA 审查
   // ═══════════════════════════════════════
   if (signal.aborted) { runningOrchestrators.delete(projectId); return; }
@@ -1163,6 +1170,8 @@ async function reactDeveloperLoop(
         // 推送工具调用日志
         const argsSummary = tc.function.name === 'write_file'
           ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')} bytes`
+          : tc.function.name === 'edit_file'
+          ? `path=${toolArgs.path}, replace ${(toolArgs.old_string || '').length}→${(toolArgs.new_string || '').length} chars`
           : JSON.stringify(toolArgs).slice(0, 150);
         sendToUI(win, 'agent:tool-call', {
           projectId, agentId: workerId,
@@ -1176,8 +1185,8 @@ async function reactDeveloperLoop(
           content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
         });
 
-        // 记录写入的文件
-        if (tc.function.name === 'write_file' && toolResult.success) {
+        // 记录写入/编辑的文件
+        if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
           filesWritten.add(toolArgs.path);
           sendToUI(win, 'workspace:changed', { projectId });
         }
@@ -1313,6 +1322,67 @@ async function runQAReview(
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   };
+}
+
+// ═══════════════════════════════════════
+// AGENTS.md — 项目级 Agent 指令文件 (v1.0)
+// ═══════════════════════════════════════
+
+/**
+ * 确保 .agentforge/AGENTS.md 存在。
+ * 如果不存在，从 ARCHITECTURE.md 和 wish 自动生成初始版本。
+ * Agent 可以通过 edit_file 自行更新此文件。
+ */
+function ensureAgentsMd(workspacePath: string, wish: string) {
+  const fs = require('fs');
+  const p = require('path');
+  const agentsDir = p.join(workspacePath, '.agentforge');
+  const agentsPath = p.join(agentsDir, 'AGENTS.md');
+
+  if (fs.existsSync(agentsPath)) return; // 已存在，不覆盖
+
+  fs.mkdirSync(agentsDir, { recursive: true });
+
+  // 从 ARCHITECTURE.md 提取技术栈信息
+  let techInfo = '';
+  const archPath = p.join(workspacePath, 'ARCHITECTURE.md');
+  if (fs.existsSync(archPath)) {
+    const archContent = fs.readFileSync(archPath, 'utf-8');
+    // 提取前 30 行作为概要
+    techInfo = archContent.split('\n').slice(0, 30).join('\n');
+  }
+
+  const content = `# AGENTS.md — 项目规范
+> 此文件由 AgentForge 自动生成，Agent 和用户均可编辑。
+> 所有 Agent 在每次操作前会自动读取此文件。
+
+## 项目概述
+${wish.slice(0, 500)}
+
+## 技术栈概要
+${techInfo || '(待 Architect 生成 ARCHITECTURE.md 后自动补充)'}
+
+## 编码规范
+- 使用项目已有的代码风格和命名规范
+- 文件组织遵循 ARCHITECTURE.md 中的目录结构
+- 所有新文件必须包含必要的 import 和 export
+- 错误处理: 不要忽略异常，必须有适当的 catch/error handling
+
+## 常用命令
+- 安装依赖: (根据项目类型，如 npm install / pip install -r requirements.txt)
+- 编译检查: (如 npx tsc --noEmit / python -m py_compile)
+- 运行测试: (如 npm test / pytest)
+
+## 注意事项
+- 修改已有文件时使用 edit_file (str_replace)，不要 write_file 重写整个文件
+- 创建新文件前先 list_files 确认不会覆盖已有文件
+- 每个 Feature 完成后务必调用 task_complete
+
+## 项目经验记录
+> Agent 在开发过程中发现的重要经验会自动追加到这里
+`;
+
+  fs.writeFileSync(agentsPath, content, 'utf-8');
 }
 
 function sleep(ms: number) {

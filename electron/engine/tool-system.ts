@@ -1,13 +1,9 @@
 /**
  * Tool System — Agent 工具注册表与执行器
  * 
- * 参考 OpenClaw 的 JSON Schema tool + handler 模式
- * 参考 EchoAgent 的 skill_index + 多工具并行调用模式
- * 
- * 工具定义为 JSON Schema，handler 为纯函数。
- * Agent 通过 LLM function-calling 或结构化输出选择工具。
- * 
  * v0.8: 初始工具集 (file/search/shell/git/github)
+ * v1.0: edit_file (str_replace), read_file 带行号+分页, search_files 带上下文,
+ *       glob_files, 改进 ACI 设计 (参考 Claude Code / SWE-agent)
  */
 
 import fs from 'fs';
@@ -35,7 +31,7 @@ export interface ToolResult {
   success: boolean;
   output: string;
   /** 操作类型 (用于 UI 展示) */
-  action?: 'read' | 'write' | 'search' | 'shell' | 'git' | 'github';
+  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github';
 }
 
 /** 工具执行上下文 */
@@ -47,23 +43,26 @@ export interface ToolContext {
 
 // ═══════════════════════════════════════
 // Tool Definitions (给 LLM 看的 schema)
+// v1.0: 16 个工具 (新增 edit_file, glob_files; 增强 read_file, search_files)
 // ═══════════════════════════════════════
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'read_file',
-    description: '读取工作区中指定文件的内容。用于理解已有代码、配置文件等。',
+    description: '读取工作区中指定文件的内容，返回带行号的文本。支持分页读取大文件。',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: '相对于工作区的文件路径' },
+        offset: { type: 'number', description: '起始行号 (从1开始)，默认1' },
+        limit: { type: 'number', description: '读取行数，默认300，最大1000' },
       },
       required: ['path'],
     },
   },
   {
     name: 'write_file',
-    description: '创建或覆盖工作区中的文件。自动创建目录。用于写代码、配置文件等。',
+    description: '创建新文件或完全覆盖已有文件。自动创建目录。仅用于创建新文件，修改已有文件请用 edit_file。',
     parameters: {
       type: 'object',
       properties: {
@@ -71,6 +70,19 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         content: { type: 'string', description: '完整的文件内容' },
       },
       required: ['path', 'content'],
+    },
+  },
+  {
+    name: 'edit_file',
+    description: '对已有文件进行精确的文本替换编辑。使用 old_string/new_string 模式，只修改需要改的部分，无需重写整个文件。如果 old_string 为空则追加到文件末尾。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '相对于工作区的文件路径' },
+        old_string: { type: 'string', description: '要被替换的原始文本（必须精确匹配，包含缩进）。为空则追加到文件末尾。' },
+        new_string: { type: 'string', description: '替换后的新文本' },
+      },
+      required: ['path', 'old_string', 'new_string'],
     },
   },
   {
@@ -85,8 +97,19 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'glob_files',
+    description: '按 glob 模式查找文件路径。例如 "**/*.ts" 查找所有 TypeScript 文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Glob 模式，如 "src/**/*.ts", "*.json", "**/*test*"' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
     name: 'search_files',
-    description: '在工作区文件中搜索文本模式（grep）。用于查找引用、依赖、import 等。',
+    description: '在工作区文件中搜索文本模式。返回匹配行及前后各2行上下文。',
     parameters: {
       type: 'object',
       properties: {
@@ -98,7 +121,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'run_command',
-    description: '在工作区中执行 shell 命令。用于安装依赖(npm install)、运行测试、编译检查等。超时30秒。',
+    description: '在工作区中执行 shell 命令。用于安装依赖(npm install)、运行测试、编译检查等。超时60秒。',
     parameters: {
       type: 'object',
       properties: {
@@ -121,10 +144,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'git_diff',
     description: '查看当前未提交的变更（git diff）',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
+    parameters: { type: 'object', properties: {} },
   },
   {
     name: 'git_log',
@@ -181,13 +201,28 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
     switch (call.name) {
 
+      // ── read_file: 带行号 + 分页 ──
       case 'read_file': {
         const filePath = call.arguments.path;
         const content = readWorkspaceFile(ctx.workspacePath, filePath);
         if (content === null) return { success: false, output: `文件不存在: ${filePath}`, action: 'read' };
-        return { success: true, output: content, action: 'read' };
+
+        const lines = content.split('\n');
+        const offset = Math.max(1, call.arguments.offset ?? 1);
+        const limit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
+        const start = offset - 1;
+        const end = Math.min(start + limit, lines.length);
+
+        const numbered = lines.slice(start, end)
+          .map((line, i) => `${String(start + i + 1).padStart(4)}| ${line}`)
+          .join('\n');
+
+        const header = `[${filePath}] ${lines.length} 行, 显示 ${offset}-${end}`;
+        const hasMore = end < lines.length ? `\n... 还有 ${lines.length - end} 行 (用 offset=${end + 1} 继续)` : '';
+        return { success: true, output: `${header}\n${numbered}${hasMore}`, action: 'read' };
       }
 
+      // ── write_file: 创建/覆盖 ──
       case 'write_file': {
         const filePath = call.arguments.path;
         const content = call.arguments.content;
@@ -202,6 +237,57 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: `已写入 ${normalized} (${size} bytes)`, action: 'write' };
       }
 
+      // ── edit_file: str_replace 精确编辑 (v1.0 核心新增) ──
+      case 'edit_file': {
+        const filePath = call.arguments.path;
+        const oldStr = call.arguments.old_string;
+        const newStr = call.arguments.new_string;
+        const normalized = path.normalize(filePath);
+        if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+          return { success: false, output: `路径不安全: ${filePath}`, action: 'edit' };
+        }
+        const absPath = path.join(ctx.workspacePath, normalized);
+        if (!fs.existsSync(absPath)) {
+          return { success: false, output: `文件不存在: ${filePath}`, action: 'edit' };
+        }
+        let content = fs.readFileSync(absPath, 'utf-8');
+
+        if (!oldStr && oldStr !== '') {
+          return { success: false, output: 'old_string 参数缺失', action: 'edit' };
+        }
+
+        if (oldStr === '') {
+          // 追加模式
+          content = content + newStr;
+          fs.writeFileSync(absPath, content, 'utf-8');
+          return { success: true, output: `已追加到 ${normalized} (${Buffer.byteLength(newStr, 'utf-8')} bytes added)`, action: 'edit' };
+        }
+
+        // 精确匹配替换
+        const occurrences = content.split(oldStr).length - 1;
+        if (occurrences === 0) {
+          // 尝试忽略行尾空白匹配
+          const trimmedOld = oldStr.split('\n').map((l: string) => l.trimEnd()).join('\n');
+          const trimmedContent = content.split('\n').map((l: string) => l.trimEnd()).join('\n');
+          const trimOccurrences = trimmedContent.split(trimmedOld).length - 1;
+          if (trimOccurrences === 0) {
+            return { success: false, output: `未找到匹配的文本 (0 occurrences)。请确保 old_string 精确匹配文件内容（包含缩进和空白）。`, action: 'edit' };
+          }
+          // 用 trimmed 版本替换
+          const newTrimmedContent = trimmedContent.replace(trimmedOld, newStr);
+          fs.writeFileSync(absPath, newTrimmedContent, 'utf-8');
+          return { success: true, output: `已编辑 ${normalized} (1 处替换, trimmed match)`, action: 'edit' };
+        }
+        if (occurrences > 1) {
+          return { success: false, output: `old_string 匹配了 ${occurrences} 处，需要更精确的上下文使其唯一。`, action: 'edit' };
+        }
+
+        content = content.replace(oldStr, newStr);
+        fs.writeFileSync(absPath, content, 'utf-8');
+        return { success: true, output: `已编辑 ${normalized} (1 处替换)`, action: 'edit' };
+      }
+
+      // ── list_files ──
       case 'list_files': {
         const dir = call.arguments.directory || '';
         const maxDepth = call.arguments.max_depth ?? 3;
@@ -217,31 +303,64 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: formatTree(tree) || '(空目录)', action: 'read' };
       }
 
+      // ── glob_files: 按模式查找文件 (v1.0 新增) ──
+      case 'glob_files': {
+        const pattern = call.arguments.pattern;
+        try {
+          // 使用 PowerShell/bash 实现简单 glob
+          let cmd: string;
+          if (process.platform === 'win32') {
+            // PowerShell: Get-ChildItem -Recurse with filter
+            const psPattern = pattern.replace(/\*\*\//g, '').replace(/\*/g, '*');
+            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File -Filter '${psPattern}' | ForEach-Object { $_.FullName.Substring((Get-Location).Path.Length + 1).Replace('\\\\', '/') }"`;
+          } else {
+            cmd = `find . -type f -name "${pattern.replace(/\*\*\//g, '')}" | head -50`;
+          }
+          const output = execSync(cmd, {
+            cwd: ctx.workspacePath,
+            encoding: 'utf-8',
+            maxBuffer: 256 * 1024,
+            timeout: 10000,
+          });
+          const files = output.trim().split('\n')
+            .filter(f => f && !f.includes('node_modules') && !f.includes('.git'))
+            .slice(0, 50);
+          return { success: true, output: files.length > 0 ? files.join('\n') : '无匹配文件', action: 'search' };
+        } catch {
+          return { success: true, output: '无匹配文件', action: 'search' };
+        }
+      }
+
+      // ── search_files: 带上下文行 ──
       case 'search_files': {
         const pattern = call.arguments.pattern;
         const include = call.arguments.include || '*';
         try {
-          // 使用 grep -rn (跨平台足够)
-          const cmd = process.platform === 'win32'
-            ? `findstr /S /N /C:"${pattern.replace(/"/g, '')}" ${include}`
-            : `grep -rn "${pattern.replace(/"/g, '\\"')}" --include="${include}" .`;
+          let cmd: string;
+          if (process.platform === 'win32') {
+            // PowerShell Select-String with context
+            const escapedPattern = pattern.replace(/'/g, "''");
+            const includeFilter = include === '*' ? '' : ` -Include '${include}'`;
+            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist' } | Select-String -Pattern '${escapedPattern}' -Context 2,2 | Select-Object -First 25 | Out-String -Width 200"`;
+          } else {
+            cmd = `grep -rn --include="${include}" -C 2 "${pattern.replace(/"/g, '\\"')}" . | head -80`;
+          }
           const output = execSync(cmd, {
             cwd: ctx.workspacePath,
             encoding: 'utf-8',
             maxBuffer: 512 * 1024,
-            timeout: 10000,
+            timeout: 15000,
           });
-          const lines = output.trim().split('\n').slice(0, 30);
-          return { success: true, output: lines.join('\n') || '无匹配', action: 'search' };
+          return { success: true, output: output.trim().slice(0, 5000) || '无匹配', action: 'search' };
         } catch {
           return { success: true, output: '无匹配', action: 'search' };
         }
       }
 
+      // ── run_command (超时提升到60秒) ──
       case 'run_command': {
         const command = call.arguments.command;
-        // 安全检查: 禁止危险命令
-        const forbidden = ['rm -rf /', 'format ', 'del /s', 'shutdown', 'reboot'];
+        const forbidden = ['rm -rf /', 'format c:', 'del /s /q c:', 'shutdown', 'reboot'];
         if (forbidden.some(f => command.toLowerCase().includes(f))) {
           return { success: false, output: `命令被安全策略拦截: ${command}`, action: 'shell' };
         }
@@ -249,13 +368,14 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
           const output = execSync(command, {
             cwd: ctx.workspacePath,
             encoding: 'utf-8',
-            maxBuffer: 512 * 1024,
-            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+            timeout: 60000,
           });
-          return { success: true, output: output.slice(0, 5000) || '(无输出)', action: 'shell' };
+          return { success: true, output: output.slice(0, 8000) || '(无输出)', action: 'shell' };
         } catch (err: any) {
-          const stderr = err.stderr?.toString().slice(0, 2000) || err.message;
-          return { success: false, output: `命令失败: ${stderr}`, action: 'shell' };
+          const stderr = err.stderr?.toString().slice(0, 3000) || err.message;
+          const stdout = err.stdout?.toString().slice(0, 2000) || '';
+          return { success: false, output: `命令失败:\n${stderr}${stdout ? '\n--- stdout ---\n' + stdout : ''}`, action: 'shell' };
         }
       }
 
@@ -269,7 +389,7 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
 
       case 'git_diff': {
         const diff = getDiff(ctx.workspacePath);
-        return { success: true, output: diff.slice(0, 5000) || '无未提交变更', action: 'git' };
+        return { success: true, output: diff.slice(0, 8000) || '无未提交变更', action: 'git' };
       }
 
       case 'git_log': {
@@ -279,7 +399,6 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'github_create_issue': {
-        // 异步操作，包装为同步返回 (告知已提交)
         return { success: true, output: `[async] 正在创建 Issue: ${call.arguments.title}`, action: 'github' };
       }
 
@@ -329,7 +448,6 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
 export function getToolsForLLM(gitMode: string = 'local'): any[] {
   return TOOL_DEFINITIONS
     .filter(t => {
-      // 非 GitHub 模式过滤掉 github 工具
       if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
       return true;
     })

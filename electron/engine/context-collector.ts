@@ -2,20 +2,23 @@
  * Context Collector — 为 Developer Agent 收集项目上下文
  *
  * 在每个 Feature 开发前，自动收集：
- * 1. ARCHITECTURE.md（架构文档）
- * 2. 已有文件目录树摘要
- * 3. 当前 Feature 依赖的已完成 Feature 产出的文件内容
- * 4. 与当前 Feature 可能相关的文件（按关键词匹配）
- * 5. 计划进度摘要 (v0.8)
+ * 1. AGENTS.md（项目级 agent 指令）(v1.0)
+ * 2. Repository Map（代码结构索引）(v1.0)
+ * 3. ARCHITECTURE.md（架构文档）
+ * 4. 已有文件目录树摘要
+ * 5. 当前 Feature 依赖的已完成 Feature 产出的文件内容
+ * 6. 与当前 Feature 可能相关的文件（按关键词匹配）
  *
  * 控制总上下文大小不超过指定 token 预算（粗略按字符数估算）
- * v0.8: 新增分层压缩 — 超预算时自动对大文件生成摘要
+ * v0.8: 新增分层压缩
+ * v1.0: 新增 repo-map + AGENTS.md 集成
  */
 
 import fs from 'fs';
 import path from 'path';
 import { readDirectoryTree, readWorkspaceFile, type FileNode } from './file-writer';
 import { getDb } from '../db';
+import { generateRepoMap } from './repo-map';
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -80,6 +83,17 @@ export function collectDeveloperContext(
   let filesIncluded = 0;
   const charBudget = tokenBudget * 1.5; // 粗略转换
 
+  // ─── 0. AGENTS.md 项目指令 (v1.0, 最高优先) ───
+  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  if (agentsMd) {
+    const agentsSection = `## 项目规范 (AGENTS.md)\n${agentsMd}`;
+    if (agentsSection.length < charBudget * 0.15) {
+      sections.push(agentsSection);
+      totalChars += agentsSection.length;
+      filesIncluded++;
+    }
+  }
+
   // ─── 1. 架构文档 (最高优先) ───
   const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
   if (archContent) {
@@ -104,6 +118,22 @@ export function collectDeveloperContext(
     if (totalChars + treeText.length < charBudget) {
       sections.push(treeText);
       totalChars += treeText.length;
+    }
+  }
+
+  // ─── 2.5. Repository Map — 代码结构索引 (v1.0) ───
+  if (totalChars < charBudget * 0.5) {
+    const repoMap = generateRepoMap(workspacePath, 60, 15, 120);
+    if (repoMap) {
+      if (totalChars + repoMap.length < charBudget * 0.55) {
+        sections.push(repoMap);
+        totalChars += repoMap.length;
+      } else {
+        // 截断 repo map
+        const maxLen = Math.floor(charBudget * 0.15);
+        sections.push(repoMap.slice(0, maxLen) + '\n... [repo-map 已截断]');
+        totalChars += maxLen;
+      }
     }
   }
 
@@ -286,6 +316,14 @@ export function collectLightContext(
   if (planSummary) {
     sections.push(planSummary);
     totalChars += planSummary.length;
+  }
+
+  // 1.5. AGENTS.md (v1.0)
+  const agentsMd = readWorkspaceFile(workspacePath, '.agentforge/AGENTS.md');
+  if (agentsMd && totalChars + agentsMd.length < charBudget * 0.2) {
+    sections.push(`## 项目规范\n${agentsMd}`);
+    totalChars += agentsMd.length;
+    filesIncluded++;
   }
 
   // 2. 架构文档 (压缩版)
