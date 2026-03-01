@@ -170,6 +170,50 @@ function ContextSectionCard({ section, tokenBudget, isActive, onSelect }: {
 }
 
 // ═══════════════════════════════════════
+// ContentPreviewPanel — 右侧内容预览面板
+// ═══════════════════════════════════════
+function ContentPreviewPanel({ section }: { section: ContextSection }) {
+  const color = getColor(section.source);
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* 标题栏 */}
+      <div className={`px-4 py-3 border-b border-slate-800 shrink-0 ${color.bg}`}>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-sm ${color.bar}`} />
+          <span className={`text-sm font-medium ${color.text}`}>{section.name}</span>
+        </div>
+        <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
+          <span>{section.source}</span>
+          <span>{formatTokens(section.tokens)} tokens</span>
+          <span>{formatBytes(section.chars)}</span>
+          {section.truncated && <span className="text-amber-400">⚠ 截断</span>}
+        </div>
+      </div>
+
+      {/* 文件列表（如有） */}
+      {section.files && section.files.length > 0 && (
+        <div className="px-4 py-2 border-b border-slate-800/50 shrink-0">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">包含文件 ({section.files.length})</div>
+          <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+            {section.files.map(f => (
+              <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{f}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 内容预览 */}
+      <div className="flex-1 overflow-y-auto p-4">
+        <pre className="text-[11px] text-slate-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
+          {section.content || '(无内容)'}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
 // MemberContextCard — 单个团队成员的上下文面板
 // ═══════════════════════════════════════
 function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect }: {
@@ -269,12 +313,14 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
   const [baseline, setBaseline] = useState<ContextSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ContextSection | null>(null);
 
   // 加载基线上下文
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
     setError(null);
+    setPreview(null);
     const budget = member.max_context_tokens ?? 128000;
     (window as any).agentforge.context.previewBaseline(projectId, member.role, budget)
       .then((res: any) => {
@@ -294,103 +340,126 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
   const usedRatio = budget > 0 ? used / budget : 0;
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-      {/* 成员信息头 */}
-      <div className="flex items-center gap-4">
-        <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-3xl border border-slate-700/30`}>
-          {meta.icon}
+    <div className="flex-1 flex overflow-hidden">
+      {/* 模块列表列 */}
+      <div className={`${preview ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}>
+        {/* 成员信息头 */}
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-2xl border border-slate-700/30`}>
+            {meta.icon}
+          </div>
+          <div>
+            <h2 className={`text-base font-bold ${meta.color}`}>{member.name}</h2>
+            <p className="text-[10px] text-slate-500">{member.role.toUpperCase()} · 待机中 · 基线上下文预览</p>
+          </div>
         </div>
-        <div>
-          <h2 className={`text-lg font-bold ${meta.color}`}>{member.name}</h2>
-          <p className="text-xs text-slate-500">{member.role.toUpperCase()} · 待机中 · 基线上下文预览</p>
-        </div>
-      </div>
 
-      {/* 容量概览 */}
-      <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 space-y-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-400">
-            基线占用: <span className="text-slate-200 font-mono">{formatTokens(used)}</span>
-            {' / '}
-            <span className="font-mono">{formatTokens(budget)}</span>
-          </span>
-          <span className={`font-mono ${usedRatio > 0.5 ? 'text-amber-400' : 'text-emerald-400'}`}>
-            剩余 {formatTokens(remaining)} ({((1 - usedRatio) * 100).toFixed(0)}%)
-          </span>
-        </div>
-        <div className="relative h-5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-          <div className="absolute inset-0 flex">
-            {baseline?.sections.map(sec => {
-              const width = (sec.tokens / budget) * 100;
-              if (width < 0.3) return null;
-              const color = getColor(sec.source);
-              return (
-                <div
-                  key={sec.id}
-                  className={`${color.bar} h-full relative group`}
-                  style={{ width: `${Math.min(width, 100)}%` }}
-                  title={`${sec.name}: ${formatTokens(sec.tokens)} tokens`}
-                >
-                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
-                    <div className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] whitespace-nowrap shadow-xl">
-                      <span className="font-medium">{sec.name}</span><br/>
-                      {formatTokens(sec.tokens)} tokens · {width.toFixed(1)}%
+        {/* 容量概览 */}
+        <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">
+              基线占用: <span className="text-slate-200 font-mono">{formatTokens(used)}</span>
+              {' / '}
+              <span className="font-mono">{formatTokens(budget)}</span>
+            </span>
+            <span className={`font-mono ${usedRatio > 0.5 ? 'text-amber-400' : 'text-emerald-400'}`}>
+              剩余 {formatTokens(remaining)} ({((1 - usedRatio) * 100).toFixed(0)}%)
+            </span>
+          </div>
+          <div className="relative h-5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+            <div className="absolute inset-0 flex">
+              {baseline?.sections.map(sec => {
+                const width = (sec.tokens / budget) * 100;
+                if (width < 0.3) return null;
+                const color = getColor(sec.source);
+                return (
+                  <div
+                    key={sec.id}
+                    className={`${color.bar} h-full relative group`}
+                    style={{ width: `${Math.min(width, 100)}%` }}
+                    title={`${sec.name}: ${formatTokens(sec.tokens)} tokens`}
+                  >
+                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
+                      <div className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] whitespace-nowrap shadow-xl">
+                        <span className="font-medium">{sec.name}</span><br/>
+                        {formatTokens(sec.tokens)} tokens · {width.toFixed(1)}%
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {baseline?.sections.map(sec => {
+              const color = getColor(sec.source);
+              return (
+                <div key={sec.id} className="flex items-center gap-1 text-[10px]">
+                  <div className={`w-2 h-2 rounded-sm ${color.bar}`} />
+                  <span className="text-slate-400">{sec.name}</span>
+                  <span className={`${color.text} font-mono`}>{formatTokens(sec.tokens)}</span>
                 </div>
               );
             })}
+            <div className="flex items-center gap-1 text-[10px]">
+              <div className="w-2 h-2 rounded-sm bg-slate-700" />
+              <span className="text-slate-500">可用空间</span>
+              <span className="text-slate-400 font-mono">{formatTokens(remaining)}</span>
+            </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {baseline?.sections.map(sec => {
-            const color = getColor(sec.source);
-            return (
-              <div key={sec.id} className="flex items-center gap-1 text-[10px]">
-                <div className={`w-2 h-2 rounded-sm ${color.bar}`} />
-                <span className="text-slate-400">{sec.name}</span>
-                <span className={`${color.text} font-mono`}>{formatTokens(sec.tokens)}</span>
-              </div>
-            );
-          })}
-          <div className="flex items-center gap-1 text-[10px]">
-            <div className="w-2 h-2 rounded-sm bg-slate-700" />
-            <span className="text-slate-500">可用空间</span>
-            <span className="text-slate-400 font-mono">{formatTokens(remaining)}</span>
+
+        {/* 加载中/错误 */}
+        {loading && (
+          <div className="text-center text-sm text-slate-500 py-4">
+            <div className="inline-block w-4 h-4 border-2 border-slate-600 border-t-cyan-400 rounded-full animate-spin mr-2" />
+            正在计算基线上下文...
           </div>
-        </div>
+        )}
+        {error && (
+          <div className="text-center text-sm text-red-400 py-4">❌ {error}</div>
+        )}
+
+        {/* 基线上下文模块列表 */}
+        {baseline && baseline.sections.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-medium text-slate-300">
+                固定加载模块 ({baseline.sections.length})
+              </h3>
+              <span className="text-[10px] text-slate-500">任务分配前已固定占用 · 点击查看内容</span>
+            </div>
+            {baseline.sections.map((sec: ContextSection) => (
+              <ContextSectionCard
+                key={sec.id}
+                section={sec}
+                tokenBudget={budget}
+                isActive={preview?.id === sec.id}
+                onSelect={() => setPreview(preview?.id === sec.id ? null : sec)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* 空项目提示 */}
+        {baseline && baseline.sections.length === 0 && !loading && (
+          <div className="text-center text-sm text-slate-600 py-8">
+            📭 项目工作区暂无上下文资源（未检测到架构文档、代码文件等）
+          </div>
+        )}
       </div>
 
-      {/* 加载中/错误 */}
-      {loading && (
-        <div className="text-center text-sm text-slate-500 py-4">
-          <div className="inline-block w-4 h-4 border-2 border-slate-600 border-t-cyan-400 rounded-full animate-spin mr-2" />
-          正在计算基线上下文...
-        </div>
-      )}
-      {error && (
-        <div className="text-center text-sm text-red-400 py-4">❌ {error}</div>
-      )}
-
-      {/* 基线上下文模块列表（可展开） */}
-      {baseline && baseline.sections.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-slate-300">
-              固定加载模块 ({baseline.sections.length})
-            </h3>
-            <span className="text-[10px] text-slate-500">任务分配前已固定占用 · 点击展开查看内容</span>
+      {/* 右侧: 内容预览面板 */}
+      {preview && (
+        <div className="w-1/2 overflow-hidden flex flex-col bg-slate-950/50">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 shrink-0">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">内容预览</span>
+            <button
+              onClick={() => setPreview(null)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800"
+            >✕</button>
           </div>
-          {baseline.sections.map((sec: ContextSection) => (
-            <ContextSectionCard key={sec.id} section={sec} tokenBudget={budget} />
-          ))}
-        </div>
-      )}
-
-      {/* 空项目提示 */}
-      {baseline && baseline.sections.length === 0 && !loading && (
-        <div className="text-center text-sm text-slate-600 py-8">
-          📭 项目工作区暂无上下文资源（未检测到架构文档、代码文件等）
+          <ContentPreviewPanel section={preview} />
         </div>
       )}
     </div>
@@ -425,6 +494,7 @@ export function ContextPage() {
   const { currentProjectId, contextSnapshots, agentStatuses } = useAppStore();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [previewSection, setPreviewSection] = useState<ContextSection | null>(null);
   const [loading, setLoading] = useState(false);
 
   // 加载团队成员
@@ -570,54 +640,75 @@ export function ContextPage() {
                 snapshot={snap}
                 agentStatus={findAgentStatusForMember(member, agentStatuses)}
                 isSelected={selected?.id === member.id}
-                onSelect={() => setSelectedMemberId(member.id)}
+                onSelect={() => { setSelectedMemberId(member.id); setPreviewSection(null); }}
               />
             );
           })}
         </div>
 
-        {/* 右侧: 选中成员的详情 */}
+        {/* 右侧: 选中成员的详情 — 分为模块列表 + 内容预览两栏 */}
         {selected && selectedSnapshot ? (
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-            {/* Token 预算条 */}
-            <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
-              <TokenBudgetBar snapshot={selectedSnapshot} />
-            </div>
+          <div className="flex-1 flex overflow-hidden">
+            {/* 中间列: 模块列表 */}
+            <div className={`${previewSection ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}>
+              {/* Token 预算条 */}
+              <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
+                <TokenBudgetBar snapshot={selectedSnapshot} />
+              </div>
 
-            {/* Feature 信息 + 压缩按钮 */}
-            <div className="bg-slate-900/30 rounded-lg border border-slate-800 px-4 py-3 flex items-center justify-between">
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase tracking-wider">当前任务</div>
-                <div className="text-sm text-slate-300 mt-1">
-                  <span className="font-mono text-forge-400">{selectedSnapshot.featureId}</span>
-                  <span className="mx-2 text-slate-600">·</span>
-                  Agent: <span className="font-mono text-emerald-400">{selectedSnapshot.agentId}</span>
+              {/* Feature 信息 + 压缩按钮 */}
+              <div className="bg-slate-900/30 rounded-lg border border-slate-800 px-3 py-2.5 flex items-center justify-between">
+                <div className="min-w-0">
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wider">当前任务</div>
+                  <div className="text-xs text-slate-300 mt-0.5 truncate">
+                    <span className="font-mono text-forge-400">{selectedSnapshot.featureId}</span>
+                    <span className="mx-1.5 text-slate-600">·</span>
+                    <span className="font-mono text-emerald-400">{selectedSnapshot.agentId}</span>
+                  </div>
                 </div>
+                {selectedSnapshot.totalTokens > selectedSnapshot.tokenBudget * 0.7 && (
+                  <button
+                    className="px-2 py-1 text-[10px] rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                    title="压缩上下文"
+                    onClick={() => alert('上下文压缩将在下次 Agent 执行时自动触发')}
+                  >
+                    🗜️ 压缩
+                  </button>
+                )}
               </div>
-              {selectedSnapshot.totalTokens > selectedSnapshot.tokenBudget * 0.7 && (
-                <button
-                  className="px-3 py-1.5 text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
-                  title="压缩上下文：清理历史消息，释放 token 空间"
-                  onClick={() => {
-                    // 触发压缩（目前是 UI 占位，后续接入后端 compactMessages）
-                    alert('上下文压缩将在下次 Agent 执行时自动触发（当前使用率 > 70%）');
-                  }}
-                >
-                  🗜️ 压缩上下文
-                </button>
-              )}
+
+              {/* 模块卡片列表 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xs font-medium text-slate-300">上下文模块 ({selectedSnapshot.sections.length})</h2>
+                  <span className="text-[10px] text-slate-500">点击预览内容</span>
+                </div>
+                {selectedSnapshot.sections.map((sec: ContextSection) => (
+                  <ContextSectionCard
+                    key={sec.id}
+                    section={sec}
+                    tokenBudget={selectedSnapshot.tokenBudget}
+                    isActive={previewSection?.id === sec.id}
+                    onSelect={() => setPreviewSection(previewSection?.id === sec.id ? null : sec)}
+                  />
+                ))}
+              </div>
             </div>
 
-            {/* 模块卡片列表 */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-slate-300">上下文模块 ({selectedSnapshot.sections.length})</h2>
-                <span className="text-[10px] text-slate-500">按注入顺序排列 · 点击展开查看内容</span>
+            {/* 右侧列: 内容预览面板 */}
+            {previewSection && (
+              <div className="w-1/2 overflow-hidden flex flex-col bg-slate-950/50">
+                {/* 关闭按钮 */}
+                <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 shrink-0">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider">内容预览</span>
+                  <button
+                    onClick={() => setPreviewSection(null)}
+                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800"
+                  >✕</button>
+                </div>
+                <ContentPreviewPanel section={previewSection} />
               </div>
-              {selectedSnapshot.sections.map((sec: ContextSection) => (
-                <ContextSectionCard key={sec.id} section={sec} tokenBudget={selectedSnapshot.tokenBudget} />
-              ))}
-            </div>
+            )}
           </div>
         ) : selected ? (
           <BaselinePanel member={selected} projectId={currentProjectId!} />
