@@ -10,8 +10,9 @@
  * 6. 支持 PowerShell / bash
  */
 
-import { execSync, spawn, ChildProcess } from 'child_process';
+import { execSync, spawn, type ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 
 // ═══════════════════════════════════════
 // 配置
@@ -155,8 +156,6 @@ export function execInSandbox(command: string, config: SandboxConfig): SandboxRe
 
 /** 运行 npm/pnpm/yarn 测试 */
 export function runTest(config: SandboxConfig): SandboxResult {
-  // 自动检测包管理器
-  const fs = require('fs');
   let cmd = 'npm test';
   if (fs.existsSync(path.join(config.workspacePath, 'pnpm-lock.yaml'))) cmd = 'pnpm test';
   else if (fs.existsSync(path.join(config.workspacePath, 'yarn.lock'))) cmd = 'yarn test';
@@ -169,7 +168,6 @@ export function runTest(config: SandboxConfig): SandboxResult {
 
 /** 运行 lint / type-check */
 export function runLint(config: SandboxConfig): SandboxResult {
-  const fs = require('fs');
   const commands: string[] = [];
 
   // TypeScript type-check
@@ -214,7 +212,6 @@ export function runLint(config: SandboxConfig): SandboxResult {
 
 /** 安装依赖 */
 export function installDeps(config: SandboxConfig): SandboxResult {
-  const fs = require('fs');
   let cmd = 'npm install';
   if (fs.existsSync(path.join(config.workspacePath, 'pnpm-lock.yaml'))) cmd = 'pnpm install';
   else if (fs.existsSync(path.join(config.workspacePath, 'yarn.lock'))) cmd = 'yarn install';

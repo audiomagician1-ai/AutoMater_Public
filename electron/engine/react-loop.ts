@@ -18,6 +18,11 @@ import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type 
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
 import { DEVELOPER_REACT_PROMPT, PLANNER_FEATURE_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
+import { parseStructuredOutput, PLAN_STEPS_SCHEMA } from './output-parser';
+import {
+  guardToolCall, checkReactTermination, toolCallSignature, hasToolSideEffect,
+  DEFAULT_REACT_CONFIG, type ReactState as GuardReactState, type TerminationReason,
+} from './guards';
 import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
 import { runResearcher } from './sub-agent';
 import { buildCodeGraph, graphSummary } from './code-graph';
@@ -143,6 +148,19 @@ export async function reactDeveloperLoop(
 ): Promise<ReactResult> {
   const db = getDb();
   const MAX_ITERATIONS = 25;
+
+  // v3.0: 程序化终止控制器 (替代依赖 LLM 调用 task_complete)
+  const guardState: GuardReactState = {
+    iteration: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    startTimeMs: Date.now(),
+    consecutiveIdleCount: 0,
+    consecutiveErrorCount: 0,
+    recentCallSignatures: [],
+    taskCompleted: false,
+    filesWritten: new Set<string>(),
+  };
 
   // ── v1.3: Dynamic Model Selection ──
   const featureComplexity = estimateFeatureComplexity(feature);
@@ -283,6 +301,20 @@ export async function reactDeveloperLoop(
   };
 
   for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
+    // v3.0: 程序化终止检查 (每轮迭代前)
+    guardState.iteration = iter;
+    const termCheck = checkReactTermination(guardState, DEFAULT_REACT_CONFIG, signal.aborted);
+    if (!termCheck.shouldContinue) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: workerId,
+        content: `🛑 ${feature.id} 程序化终止: ${termCheck.reason} — ${termCheck.message}`,
+      });
+      if (termCheck.reason !== 'task_complete') {
+        addLog(projectId, workerId, 'warning', `[${feature.id}] Terminated: ${termCheck.reason} — ${termCheck.message}`);
+      }
+      break;
+    }
+
     const budget = checkBudget(projectId, settings);
     if (!budget.ok) break;
 
@@ -293,6 +325,10 @@ export async function reactDeveloperLoop(
       totalIn += result.inputTokens;
       totalOut += result.outputTokens;
       updateAgentStats(workerId, projectId, result.inputTokens, result.outputTokens, cost);
+
+      // v3.0: 更新 guard 状态
+      guardState.totalTokens = totalIn + totalOut;
+      guardState.totalCost = totalCost;
 
       const msg = result.message;
 
@@ -347,6 +383,33 @@ export async function reactDeveloperLoop(
 
         const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
 
+        // v3.0: 程序化参数校验 + 速率限制
+        const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
+        if (!guard.allowed) {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `🚫 ${tc.function.name} 被 Guard 拦截: ${guard.reason}`,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: `工具调用被拦截: ${guard.reason}。请修正参数后重试。`,
+          });
+          guardState.consecutiveErrorCount++;
+          continue;
+        }
+        // 使用修复后的参数
+        if (guard.repairedArgs) {
+          toolCall.arguments = guard.repairedArgs;
+          toolArgs = guard.repairedArgs;
+        }
+
+        // v3.0: 记录调用签名 (用于重复检测)
+        guardState.recentCallSignatures.push(toolCallSignature(tc.function.name, toolArgs));
+        if (guardState.recentCallSignatures.length > 10) {
+          guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
+        }
+
         if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') {
           toolArgs._agentId = workerId;
         }
@@ -354,6 +417,7 @@ export async function reactDeveloperLoop(
         // ── task_complete ──
         if (tc.function.name === 'task_complete') {
           completed = true;
+          guardState.taskCompleted = true;
           const summary = toolArgs.summary || '完成';
           const changedFiles = toolArgs.files_changed || [...filesWritten];
 
@@ -477,6 +541,17 @@ export async function reactDeveloperLoop(
 
       // ═══ 推送 Agent ReAct 迭代状态 ═══
       const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+
+      // v3.0: 更新 guard 的 idle/error 追踪
+      if (hasToolSideEffect(toolCallsThisIter)) {
+        guardState.consecutiveIdleCount = 0;
+      } else {
+        guardState.consecutiveIdleCount++;
+      }
+      // 成功执行了工具 → 重置连续错误计数
+      guardState.consecutiveErrorCount = 0;
+      for (const f of filesWritten) guardState.filesWritten.add(f);
+
       const { breakdown, total: contextTokens } = computeMessageBreakdown(messages);
       const iterState: ReactIterationState = {
         iteration: iter,
@@ -518,6 +593,7 @@ export async function reactDeveloperLoop(
 
     } catch (err: any) {
       if (signal.aborted) break;
+      guardState.consecutiveErrorCount++;
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
         content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${err.message}`,
@@ -541,7 +617,7 @@ export async function reactDeveloperLoop(
     totalCost,
     totalInputTokens: totalIn,
     totalOutputTokens: totalOut,
-    iterations: 0,
+    iterations: reactState.iterations.length,
   };
 }
 

@@ -349,10 +349,10 @@ export function collectDeveloperContext(
   // ─── 5. 跨项目经验 (v2.0) ───
   if (totalChars < charBudget * 0.9) {
     try {
-      const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md') || '';
+      const archForCross = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md') || '';
       const wish = feature.description || '';
       const remainingBudget = Math.max(500, Math.floor((charBudget - totalChars) / 1.5));
-      const crossCtx = buildCrossProjectContext(wish, archContent, remainingBudget);
+      const crossCtx = buildCrossProjectContext(wish, archForCross, remainingBudget);
       if (crossCtx) {
         addSection({
           id: 'cross-project', name: '跨项目经验', source: 'project-config',

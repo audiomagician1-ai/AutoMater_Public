@@ -11,6 +11,8 @@
  */
 
 import { BrowserWindow } from 'electron';
+import fs from 'fs';
+import path from 'path';
 import { getDb } from '../db';
 
 // ── 子模块 ──
@@ -21,8 +23,11 @@ import { reactDeveloperLoop, getAgentReactStates as _getAgentReactStates, getCon
 import { runQAReview } from './qa-loop';
 
 // ── 引擎依赖 ──
+import type { AppSettings, ProjectRow, FeatureRow, CountResult } from './types';
 import { PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
+import { parseStructuredOutput, PM_FEATURE_SCHEMA } from './output-parser';
+import { gatePMToArchitect, gateArchitectToDeveloper } from './guards';
 import { commitWorkspace } from './workspace-git';
 import { ensureGlobalMemory, ensureProjectMemory, appendProjectMemory, buildLessonExtractionPrompt } from './memory-system';
 import { selectModelTier, resolveModel } from './model-selector';
@@ -56,7 +61,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     return;
   }
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
   if (!project) {
     sendToUI(win, 'agent:error', { projectId, error: '项目不存在' });
     return;
@@ -64,7 +69,6 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   const workspacePath = project.workspace_path;
   if (workspacePath) {
-    const fs = require('fs');
     fs.mkdirSync(workspacePath, { recursive: true });
   }
 
@@ -76,7 +80,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     data: { wish: project.wish, name: project.name, workspace: workspacePath },
   });
 
-  const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as any;
+  const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult;
   const isResume = existingFeatures.c > 0;
 
   if (!isResume) {
@@ -102,8 +106,19 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       const pmCost = calcCost(settings.strongModel, pmResult.inputTokens, pmResult.outputTokens);
       addLog(projectId, pmId, 'output', pmResult.content);
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ PM 分析完成 (${pmResult.inputTokens + pmResult.outputTokens} tokens, $${pmCost.toFixed(4)})` });
-      const jsonMatch = pmResult.content.trim().match(/\[[\s\S]*\]/);
-      if (jsonMatch) features = JSON.parse(jsonMatch[0]);
+
+      // v3.0: 结构化解析替代 regex
+      const parseResult = parseStructuredOutput(pmResult.content, PM_FEATURE_SCHEMA);
+      if (parseResult.ok) {
+        features = parseResult.data;
+        if (parseResult.warnings.length > 0) {
+          sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ PM 输出修复: ${parseResult.warnings.slice(0, 3).join('; ')}` });
+        }
+        addLog(projectId, pmId, 'log', `Parsed via strategy: ${parseResult.strategy}`);
+      } else {
+        sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 输出解析失败: ${parseResult.error}\n原始输出: ${parseResult.rawPreview}` });
+        addLog(projectId, pmId, 'error', `Parse failed: ${parseResult.error}`);
+      }
       db.prepare("UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ?")
         .run(pmResult.inputTokens, pmResult.outputTokens, pmCost, pmId);
     } catch (err: any) {
@@ -119,6 +134,16 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     if (features.length === 0) {
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ PM 未能生成有效的 Feature 清单' });
+      db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      unregisterOrchestrator(projectId);
+      return;
+    }
+
+    // v3.0: PM→Architect 程序化门控
+    const pmGate = gatePMToArchitect(features);
+    if (!pmGate.passed) {
+      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `🚫 PM→Architect 门控未通过: ${pmGate.reason}` });
+      addLog(projectId, pmId, 'error', `Pipeline gate blocked: ${pmGate.reason}`);
       db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
       unregisterOrchestrator(projectId);
       return;
@@ -161,7 +186,6 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         writeFileBlocks(workspacePath, archBlocks);
         sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区' });
       } else if (workspacePath) {
-        const fs = require('fs'); const path = require('path');
         fs.writeFileSync(path.join(workspacePath, 'ARCHITECTURE.md'), archResult.content, 'utf-8');
         sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '📐 ARCHITECTURE.md 已写入工作区 (直接输出)' });
       }
@@ -183,12 +207,20 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (workspacePath) commitWorkspace(workspacePath, 'AgentForge: PM analysis + Architecture design');
   if (workspacePath) ensureAgentsMd(workspacePath, project.wish);
 
+  // v3.0: Architect→Developer 程序化门控
+  if (!isResume) {
+    const archGate = gateArchitectToDeveloper(workspacePath);
+    if (!archGate.passed) {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `⚠️ Architect→Developer 门控: ${archGate.reason} (继续但可能影响质量)` });
+    }
+  }
+
   // ═══ Phase 3: Developer Agents + QA ═══
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   db.prepare("UPDATE projects SET status = 'developing', updated_at = datetime('now') WHERE id = ?").run(projectId);
   sendToUI(win, 'project:status', { projectId, status: 'developing' });
 
-  const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as any).c;
+  const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult).c;
   const workerCount = Math.min(settings.workerCount || 2, featureCount, 6);
 
   const qaId = `qa-${Date.now().toString(36)}`;
@@ -196,7 +228,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: '🧪 QA 工程师就绪' });
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(qaId, projectId);
 
-  const project2 = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project2 = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow;
   const gitConfig: GitProviderConfig = { mode: project2.git_mode || 'local', workspacePath: workspacePath || '', githubRepo: project2.github_repo, githubToken: project2.github_token };
 
   const workerPromises: Promise<void>[] = [];
@@ -210,7 +242,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   // ═══ Phase 4: 完成 ═══
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-  const stats = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed FROM features WHERE project_id = ?").get(projectId) as any;
+  const stats = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed FROM features WHERE project_id = ?").get(projectId) as { total: number; passed: number };
   const finalStatus = stats.passed === stats.total ? 'delivered' : 'paused';
   db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(finalStatus, projectId);
   sendToUI(win, 'project:status', { projectId, status: finalStatus });
@@ -253,7 +285,7 @@ async function workerLoop(
 
     const feature = lockNextFeature(projectId, workerId);
     if (!feature) {
-      const inProgress = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").get(projectId) as any;
+      const inProgress = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").get(projectId) as CountResult;
       if (inProgress.c > 0) { await sleep(3000); continue; }
       sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: '✅ 没有更多任务，下班了' });
       db.prepare("UPDATE agents SET status = 'idle', current_task = NULL, last_active_at = datetime('now') WHERE id = ? AND project_id = ?").run(workerId, projectId);
@@ -337,7 +369,7 @@ async function workerLoop(
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
     db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(workerId, projectId);
     emitEvent({ projectId, agentId: workerId, featureId: feature.id, type: passed ? 'feature:passed' : 'feature:failed', data: { title: feature.title, status: newStatus } });
-    const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('passed','failed')").get(projectId) as any).c;
+    const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('passed','failed')").get(projectId) as CountResult).c;
     if (completedCount % 3 === 0) createCheckpoint(projectId, `${completedCount} Features 已处理`);
     if (passed && workspacePath) commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
     await sleep(500);
@@ -349,13 +381,12 @@ async function workerLoop(
 // ═══════════════════════════════════════
 
 function ensureAgentsMd(workspacePath: string, wish: string) {
-  const fs = require('fs'); const p = require('path');
-  const agentsDir = p.join(workspacePath, '.agentforge');
-  const agentsPath = p.join(agentsDir, 'AGENTS.md');
+  const agentsDir = path.join(workspacePath, '.agentforge');
+  const agentsPath = path.join(agentsDir, 'AGENTS.md');
   if (fs.existsSync(agentsPath)) return;
   fs.mkdirSync(agentsDir, { recursive: true });
   let techInfo = '';
-  const archPath = p.join(workspacePath, 'ARCHITECTURE.md');
+  const archPath = path.join(workspacePath, 'ARCHITECTURE.md');
   if (fs.existsSync(archPath)) techInfo = fs.readFileSync(archPath, 'utf-8').split('\n').slice(0, 30).join('\n');
   const content = `# AGENTS.md — 项目规范\n> 此文件由 AgentForge 自动生成，Agent 和用户均可编辑。\n\n## 项目概述\n${wish.slice(0, 500)}\n\n## 技术栈概要\n${techInfo || '(待补充)'}\n\n## 编码规范\n- 使用项目已有的代码风格\n- 文件组织遵循 ARCHITECTURE.md\n- 所有新文件必须包含必要的 import/export\n- 不要忽略异常\n\n## 常用命令\n- 安装依赖: npm install / pip install -r requirements.txt\n- 编译检查: npx tsc --noEmit\n- 运行测试: npm test / pytest\n\n## 注意事项\n- 修改已有文件用 edit_file，不要 write_file 重写\n- 每个 Feature 完成后调用 task_complete\n`;
   fs.writeFileSync(agentsPath, content, 'utf-8');

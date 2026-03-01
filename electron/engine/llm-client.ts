@@ -9,6 +9,7 @@
  */
 
 import { getDb } from '../db';
+import type { AppSettings } from './types';
 
 // ═══════════════════════════════════════
 // Types
@@ -70,10 +71,10 @@ export function calcCost(model: string, inputTokens: number, outputTokens: numbe
 // Settings
 // ═══════════════════════════════════════
 
-export function getSettings(): any {
+export function getSettings(): AppSettings | null {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  return row ? JSON.parse(row.value) : null;
+  return row ? JSON.parse(row.value) as AppSettings : null;
 }
 
 // ═══════════════════════════════════════
@@ -114,7 +115,13 @@ export async function callLLM(
     } catch (err: any) {
       lastError = err;
       if (signal?.aborted) throw err;
-      if (err.message?.includes('API 4') && !err.message?.includes('429')) throw err;
+      // Don't retry on client errors (4xx) except rate limiting (429)
+      const msg = err.message ?? '';
+      const statusMatch = msg.match(/API (\d{3})/);
+      if (statusMatch) {
+        const status = parseInt(statusMatch[1], 10);
+        if (status >= 400 && status < 500 && status !== 429) throw err;
+      }
       if (attempt < retries) {
         const delay = Math.min(2000 * Math.pow(2, attempt), 15000);
         await sleep(delay);

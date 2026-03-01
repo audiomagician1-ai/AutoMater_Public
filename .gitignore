@@ -25,3 +25,4 @@ electron-debug.log
 release-test.log
 dist/
 dist-electron/
+.bak

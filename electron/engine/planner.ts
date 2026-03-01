@@ -7,7 +7,10 @@
  * - 动态重规划: 失败后根据错误信息调整计划
  * 
  * v0.8: 初始实现
+ * v3.0: 使用 output-parser 替代 regex，Schema 校验步骤结构
  */
+
+import { parseStructuredOutput, PLAN_STEPS_SCHEMA } from './output-parser';
 
 export interface PlanStep {
   id: string;
@@ -34,23 +37,24 @@ export interface FeaturePlan {
 export function parsePlanFromLLM(rawOutput: string, featureId: string, goal: string): FeaturePlan {
   const steps: PlanStep[] = [];
   
-  try {
-    // 尝试解析 JSON 数组
-    const jsonMatch = rawOutput.match(/\[[\s\S]*?\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      for (let i = 0; i < parsed.length; i++) {
-        const s = parsed[i];
-        steps.push({
-          id: `${featureId}-S${String(i + 1).padStart(2, '0')}`,
-          description: s.description || s.step || s.task || String(s),
-          tool: s.tool || undefined,
-          status: 'pending',
-          retries: 0,
-        });
-      }
+  // v3.0: 使用结构化解析器替代 regex
+  const parseResult = parseStructuredOutput<Array<{ description: string; tool?: string }>>(
+    rawOutput,
+    PLAN_STEPS_SCHEMA,
+  );
+
+  if (parseResult.ok) {
+    for (let i = 0; i < parseResult.data.length; i++) {
+      const s = parseResult.data[i];
+      steps.push({
+        id: `${featureId}-S${String(i + 1).padStart(2, '0')}`,
+        description: s.description || String(s),
+        tool: s.tool || undefined,
+        status: 'pending',
+        retries: 0,
+      });
     }
-  } catch { /* fallback below */ }
+  }
 
   // 如果解析失败，生成一个简单的默认计划
   if (steps.length === 0) {
