@@ -1428,7 +1428,7 @@ async function reactDeveloperLoop(
 
         // 执行工具
         let toolResult: ToolResult;
-        const isAsync = tc.function.name.startsWith('github_');
+        const isAsync = tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_') || ['web_search', 'fetch_url', 'http_request'].includes(tc.function.name);
 
         // ── v1.3: spawn_researcher 子 Agent ──
         if (tc.function.name === 'spawn_researcher') {
@@ -1514,8 +1514,8 @@ ${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(',
         }
 
         // 将工具结果加入消息历史
-        // v2.2: screenshot 返回图像时，使用 multimodal content (image_url)
-        if (tc.function.name === 'screenshot' && (toolResult as any)._imageBase64) {
+        // v2.2+: screenshot / browser_screenshot 返回图像时，使用 multimodal content
+        if ((tc.function.name === 'screenshot' || tc.function.name === 'browser_screenshot') && (toolResult as any)._imageBase64) {
           const base64 = (toolResult as any)._imageBase64;
           messages.push({
             role: 'tool',

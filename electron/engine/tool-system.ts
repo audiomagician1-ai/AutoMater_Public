@@ -18,6 +18,11 @@ import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memo
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
 import { takeScreenshot, mouseMove, mouseClick, keyboardType, keyboardHotkey } from './computer-use';
+import {
+  launchBrowser, closeBrowser, navigate as browserNavigateFn,
+  browserScreenshot, browserSnapshot, browserClick, browserType,
+  browserEvaluate, browserWait, browserNetwork,
+} from './browser-tools';
 
 // ═══════════════════════════════════════
 // Tool Interface
@@ -411,6 +416,108 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['combo'],
     },
   },
+
+  // ═══ v2.3: Playwright 浏览器自动化 ═══
+
+  {
+    name: 'browser_launch',
+    description: '启动浏览器实例（使用系统已安装的 Edge/Chrome）。必须在使用其他 browser_* 工具前调用。如果已有实例会复用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        headless: { type: 'boolean', description: '是否无头模式，默认 false (可见窗口)', default: false },
+      },
+    },
+  },
+  {
+    name: 'browser_navigate',
+    description: '浏览器导航到指定 URL。返回页面标题和实际 URL。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要访问的 URL' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_screenshot',
+    description: '截取当前浏览器页面的截图。返回 base64 PNG。用于视觉验证 UI 状态。',
+    parameters: {
+      type: 'object',
+      properties: {
+        full_page: { type: 'boolean', description: '是否截取整页（含滚动区域），默认 false', default: false },
+      },
+    },
+  },
+  {
+    name: 'browser_snapshot',
+    description: '获取页面可访问性快照（文本 DOM 树）。比截图更省 token，适合了解页面结构和元素。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_click',
+    description: '点击页面元素。使用 CSS 选择器或文本内容定位。示例: "button.submit", "text=登录", "#login-btn"',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS 选择器或 Playwright 选择器 (如 "text=点击我")' },
+        button: { type: 'string', enum: ['left', 'right', 'middle'], description: '鼠标按键', default: 'left' },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'browser_type',
+    description: '在页面输入框中输入文本。先用 selector 定位输入框，再输入文本。',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: '输入框的 CSS 选择器' },
+        text: { type: 'string', description: '要输入的文本' },
+        clear: { type: 'boolean', description: '是否先清空再输入，默认 false', default: false },
+      },
+      required: ['selector', 'text'],
+    },
+  },
+  {
+    name: 'browser_evaluate',
+    description: '在页面中执行 JavaScript 代码。可用于获取 DOM 数据、检查状态、触发事件等。',
+    parameters: {
+      type: 'object',
+      properties: {
+        expression: { type: 'string', description: 'JavaScript 表达式或代码块' },
+      },
+      required: ['expression'],
+    },
+  },
+  {
+    name: 'browser_wait',
+    description: '等待页面条件满足（元素出现、文本出现、或等待指定时间）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: '等待的元素 CSS 选择器' },
+        text: { type: 'string', description: '等待页面中出现的文本' },
+        timeout: { type: 'number', description: '超时毫秒数，默认 10000', default: 10000 },
+      },
+    },
+  },
+  {
+    name: 'browser_network',
+    description: '查看浏览器网络请求（最近 3 秒）。用于验证 API 调用是否正确、检查请求状态码。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_pattern: { type: 'string', description: '过滤 URL 包含的字符串，如 "/api/"' },
+      },
+    },
+  },
+  {
+    name: 'browser_close',
+    description: '关闭浏览器实例。在测试完成后调用以释放资源。',
+    parameters: { type: 'object', properties: {} },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -771,6 +878,21 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
         };
       }
 
+      // ═══ v2.3: Playwright 浏览器工具（全部异步，同步入口返回占位） ═══
+
+      case 'browser_launch':
+      case 'browser_navigate':
+      case 'browser_screenshot':
+      case 'browser_snapshot':
+      case 'browser_click':
+      case 'browser_type':
+      case 'browser_evaluate':
+      case 'browser_wait':
+      case 'browser_network':
+      case 'browser_close': {
+        return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
+      }
+
       default:
         return { success: false, output: `未知工具: ${call.name}` };
     }
@@ -835,6 +957,74 @@ export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promis
     return { success: result.success, output: output.slice(0, 8000), action: 'web' };
   }
 
+  // ═══ v2.3: Playwright 浏览器工具（异步执行） ═══
+
+  if (call.name === 'browser_launch') {
+    const result = await launchBrowser({ headless: call.arguments.headless });
+    return { success: result.success, output: result.success ? '浏览器已启动' : `启动失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_navigate') {
+    const result = await browserNavigateFn(call.arguments.url);
+    return {
+      success: result.success,
+      output: result.success ? `已导航到: ${result.title}\nURL: ${result.url}` : `导航失败: ${result.error}`,
+      action: 'computer',
+    };
+  }
+
+  if (call.name === 'browser_screenshot') {
+    const result = await browserScreenshot(call.arguments.full_page);
+    if (result.success) {
+      return {
+        success: true,
+        output: `[browser_screenshot] ${Math.round(result.base64.length / 1024)}KB PNG`,
+        action: 'computer',
+        _imageBase64: result.base64,
+      } as any;
+    }
+    return { success: false, output: `截图失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_snapshot') {
+    const result = await browserSnapshot();
+    return { success: result.success, output: result.success ? result.content : `快照失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_click') {
+    const result = await browserClick(call.arguments.selector, { button: call.arguments.button });
+    return { success: result.success, output: result.success ? `已点击: ${call.arguments.selector}` : `点击失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_type') {
+    const result = await browserType(call.arguments.selector, call.arguments.text, { clear: call.arguments.clear });
+    return { success: result.success, output: result.success ? `已输入 ${call.arguments.text.length} 字符到 ${call.arguments.selector}` : `输入失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_evaluate') {
+    const result = await browserEvaluate(call.arguments.expression);
+    return { success: result.success, output: result.success ? result.result : `执行失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_wait') {
+    const result = await browserWait({
+      selector: call.arguments.selector,
+      text: call.arguments.text,
+      timeout: call.arguments.timeout,
+    });
+    return { success: result.success, output: result.success ? '等待条件已满足' : `等待超时: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_network') {
+    const result = await browserNetwork({ urlPattern: call.arguments.url_pattern });
+    return { success: result.success, output: result.success ? result.requests : `网络监听失败: ${result.error}`, action: 'computer' };
+  }
+
+  if (call.name === 'browser_close') {
+    const result = await closeBrowser();
+    return { success: result.success, output: '浏览器已关闭', action: 'computer' };
+  }
+
   // 其余工具走同步
   return executeTool(call, ctx);
 }
@@ -893,7 +1083,10 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'memory_read', 'memory_append',
     // v2.2: Computer Use 工具
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
-    // v2.3+: browser_launch, browser_navigate, etc.
+    // v2.3: Playwright 浏览器工具
+    'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
+    'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
+    'browser_network', 'browser_close',
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',
