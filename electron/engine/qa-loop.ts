@@ -12,7 +12,7 @@ import { readWorkspaceFile } from './file-writer';
 import { runTest as sbRunTest, runLint as sbRunLint, type SandboxConfig } from './sandbox-executor';
 import { parseStructuredOutput, QA_VERDICT_SCHEMA } from './output-parser';
 import { programmaticQACheck } from './guards';
-import { getTeamPrompt } from './agent-manager';
+import { getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
@@ -185,7 +185,10 @@ export async function runQAReview(
     ? `\n## 自动化测试/Lint 执行结果\n${testResults}\n重要: 如果测试或lint未通过, verdict 必须为 fail。`
     : '\n注意: 该项目未检测到自动化测试框架, 请特别注意代码逻辑正确性。';
 
-  const result = await callLLM(settings, settings.strongModel, [
+  // v11.0: 成员级模型
+  const qaModel = projectId ? getTeamMemberLLMConfig(projectId, 'qa', 0, settings).model : settings.strongModel;
+
+  const result = await callLLM(settings, qaModel, [
     { role: 'system', content: qaPrompt },
     {
       role: 'user',
@@ -333,7 +336,7 @@ ${testSpec ? `## 测试规格\n${testSpec}\n` : ''}
 
 直接输出 JSON, 不要用 markdown 代码块包裹。`;
 
-  const result = await callLLM(settings, settings.strongModel, [
+  const result = await callLLM(settings, projectId ? getTeamMemberLLMConfig(projectId, 'qa', 0, settings).model : settings.strongModel, [
     { role: 'system', content: qaPrompt },
     { role: 'user', content: prompt },
   ], signal, 8192);

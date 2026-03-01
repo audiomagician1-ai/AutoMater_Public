@@ -15,6 +15,7 @@ import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 import { importProject } from '../engine/project-importer';
 import { collectBaselineContext } from '../engine/context-collector';
 import { sendToUI, addLog } from '../engine/ui-bridge';
+import { getSettings } from '../engine/llm-client';
 
 // 导入进程的 AbortController 映射（用于取消正在运行的导入）
 const importAbortControllers = new Map<string, AbortController>();
@@ -374,11 +375,14 @@ export function setupProjectHandlers() {
     return { success: true, memberId: id };
   });
 
-  /** 更新成员 */
+  /** 更新成员 — v11.0: +llm_config/mcp_servers/skills */
   ipcMain.handle('team:update', (_event, memberId: string, fields: {
     role?: string; name?: string; model?: string;
     capabilities?: string[]; system_prompt?: string; context_files?: string[];
     max_context_tokens?: number;
+    llm_config?: string | null;      // v11.0: JSON string or null
+    mcp_servers?: string | null;     // v11.0: JSON string or null
+    skills?: string | null;          // v11.0: JSON string or null
   }) => {
     const db = getDb();
     const sets: string[] = [];
@@ -390,10 +394,74 @@ export function setupProjectHandlers() {
     if (fields.system_prompt !== undefined) { sets.push('system_prompt = ?'); vals.push(fields.system_prompt); }
     if (fields.context_files !== undefined) { sets.push('context_files = ?'); vals.push(JSON.stringify(fields.context_files)); }
     if (fields.max_context_tokens !== undefined) { sets.push('max_context_tokens = ?'); vals.push(fields.max_context_tokens); }
+    // v11.0: 成员级独立配置
+    if (fields.llm_config !== undefined) { sets.push('llm_config = ?'); vals.push(fields.llm_config); }
+    if (fields.mcp_servers !== undefined) { sets.push('mcp_servers = ?'); vals.push(fields.mcp_servers); }
+    if (fields.skills !== undefined) { sets.push('skills = ?'); vals.push(fields.skills); }
     if (sets.length === 0) return { success: false };
     vals.push(memberId);
     db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
     return { success: true };
+  });
+
+  /** v11.0: 测试成员级 LLM 连通性 */
+  ipcMain.handle('team:test-member-model', async (_event, _memberId: string, config: {
+    provider?: string; apiKey?: string; baseUrl?: string; model?: string;
+  }) => {
+    // 合并: 成员配置 > 全局配置
+    const globalSettings = getSettings() || { llmProvider: 'openai' as const, apiKey: '', baseUrl: 'https://api.openai.com', strongModel: '', workerModel: '', workerCount: 0, dailyBudgetUsd: 0 };
+    const provider = config.provider || globalSettings.llmProvider;
+    const apiKey = config.apiKey || globalSettings.apiKey;
+    const baseUrl = (config.baseUrl || globalSettings.baseUrl).trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+    const model = config.model || (provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : globalSettings.strongModel || 'gpt-4o-mini');
+
+    if (!apiKey) {
+      return { success: false, message: '未配置 API Key (成员级或全局)', model };
+    }
+
+    try {
+      if (provider === 'anthropic') {
+        const res = await fetch(`${baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 10,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+        if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+        const text = await res.text();
+        return { success: false, message: `❌ ${res.status}: ${text.slice(0, 200)}`, model };
+      } else {
+        // OpenAI 兼容: 用指定模型发一条轻量 chat
+        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 5,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+        if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+        const text = await res.text();
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, message: `❌ 认证失败 (${res.status}): ${text.slice(0, 200)}`, model };
+        }
+        // 404 model not found 等 — 认证OK但模型有问题
+        return { success: false, message: `⚠️ 连接OK但模型响应异常 (${res.status}): ${text.slice(0, 200)}`, model };
+      }
+    } catch (err: any) {
+      return { success: false, message: `❌ 网络错误: ${err.message}`, model };
+    }
   });
 
   /** 删除成员 */

@@ -79,13 +79,15 @@ contextBridge.exposeInMainWorld('agentforge', {
     delete: (wishId: string) => ipcRenderer.invoke('wish:delete', wishId),
   },
 
-  // ── 团队管理 (v3.1) ──
+  // ── 团队管理 (v3.1 → v11.0) ──
   team: {
     list: (projectId: string) => ipcRenderer.invoke('team:list', projectId),
     add: (projectId: string, member: any) => ipcRenderer.invoke('team:add', projectId, member),
     update: (memberId: string, fields: any) => ipcRenderer.invoke('team:update', memberId, fields),
     delete: (memberId: string) => ipcRenderer.invoke('team:delete', memberId),
     initDefaults: (projectId: string) => ipcRenderer.invoke('team:init-defaults', projectId),
+    /** v11.0: 测试成员级 LLM 连通性 */
+    testMemberModel: (memberId: string, config: any) => ipcRenderer.invoke('team:test-member-model', memberId, config),
   },
 
   // ── 工作区文件系统 ──
@@ -192,7 +194,7 @@ contextBridge.exposeInMainWorld('agentforge', {
       ipcRenderer.invoke('context:preview-baseline', projectId, role, tokenBudget),
   },
 
-  // ── Session / Backup 管理 (v8.0) ──
+  // ── Session / Backup 管理 (v8.0) + Feature-Session 关联 (v8.1) ──
   session: {
     create: (projectId: string | null, agentId: string, agentRole: string) =>
       ipcRenderer.invoke('session:create', projectId, agentId, agentRole),
@@ -210,6 +212,32 @@ contextBridge.exposeInMainWorld('agentforge', {
       ipcRenderer.invoke('session:backup-stats'),
     cleanup: (keepDays?: number) =>
       ipcRenderer.invoke('session:cleanup', keepDays),
+    // v8.1: Feature-Session 关联查询
+    /** 获取某个 Feature 关联的所有 Sessions */
+    featureSessions: (projectId: string, featureId: string) =>
+      ipcRenderer.invoke('session:feature-sessions', projectId, featureId),
+    /** 获取某个 Session 关联的所有 Features */
+    sessionFeatures: (sessionId: string) =>
+      ipcRenderer.invoke('session:session-features', sessionId),
+    /** 获取项目所有 Feature-Session 关联 */
+    featureSessionLinks: (projectId: string, limit?: number) =>
+      ipcRenderer.invoke('session:feature-session-links', projectId, limit),
+    /** 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
+    batchFeatureSummaries: (projectId: string) =>
+      ipcRenderer.invoke('session:batch-feature-summaries', projectId),
+  },
+
+  // ── 工作流预设管理 (v12.0) ──
+  workflow: {
+    list: (projectId: string) => ipcRenderer.invoke('workflow:list', projectId),
+    getActive: (projectId: string) => ipcRenderer.invoke('workflow:get-active', projectId),
+    get: (presetId: string) => ipcRenderer.invoke('workflow:get', presetId),
+    activate: (projectId: string, presetId: string) => ipcRenderer.invoke('workflow:activate', projectId, presetId),
+    create: (projectId: string, data: any) => ipcRenderer.invoke('workflow:create', projectId, data),
+    update: (presetId: string, updates: any) => ipcRenderer.invoke('workflow:update', presetId, updates),
+    delete: (presetId: string) => ipcRenderer.invoke('workflow:delete', presetId),
+    duplicate: (presetId: string) => ipcRenderer.invoke('workflow:duplicate', presetId),
+    availableStages: () => ipcRenderer.invoke('workflow:available-stages'),
   },
 
   // ── 缩放控制 (v5.2) ──
@@ -221,6 +249,17 @@ contextBridge.exposeInMainWorld('agentforge', {
       const clamped = Math.min(3.0, Math.max(0.5, factor));
       webFrame.setZoomFactor(clamped);
     },
+  },
+
+  // ── 系统监控 + 活动时序 (v6.0) ──
+  monitor: {
+    /** 获取系统性能快照 (CPU/GPU/内存/硬盘/网络) */
+    getSystemMetrics: () => ipcRenderer.invoke('monitor:system-metrics'),
+    /** 获取项目活动时序数据 (每分钟 token/cost/代码行) */
+    getActivityTimeseries: (projectId: string, minutes?: number) =>
+      ipcRenderer.invoke('monitor:activity-timeseries', projectId, minutes),
+    /** 获取内置模型价格表 */
+    getBuiltinPricing: () => ipcRenderer.invoke('monitor:builtin-pricing'),
   },
 });
 

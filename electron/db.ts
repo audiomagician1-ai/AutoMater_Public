@@ -223,6 +223,16 @@ export async function initDatabase(): Promise<void> {
     );
   `);
 
+  // v11.0: team_members 表增加 成员级独立配置 (LLM / MCP / Skill)
+  const v110Migrations = [
+    `ALTER TABLE team_members ADD COLUMN llm_config TEXT`,      // JSON: { provider, apiKey, baseUrl, model }
+    `ALTER TABLE team_members ADD COLUMN mcp_servers TEXT`,     // JSON: McpServerConfig[]
+    `ALTER TABLE team_members ADD COLUMN skills TEXT`,          // JSON: string[] (skill 名称列表)
+  ];
+  for (const sql of v110Migrations) {
+    try { db.exec(sql); } catch { /* 列已存在 */ }
+  }
+
   // v7.0: 元Agent 管理配置表 — 管家的名字/提示词/上下文设定等
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta_agent_config (
@@ -250,6 +260,24 @@ export async function initDatabase(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_meta_memories_category ON meta_agent_memories(category);
     CREATE INDEX IF NOT EXISTS idx_meta_memories_importance ON meta_agent_memories(importance DESC);
+  `);
+
+  // v12.0: 工作流预设表 — 可配置的阶段序列, 驱动 orchestrator 实际执行
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workflow_presets (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      icon TEXT NOT NULL DEFAULT '🔄',
+      stages TEXT NOT NULL DEFAULT '[]',
+      is_active INTEGER NOT NULL DEFAULT 0,
+      is_builtin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_presets_project ON workflow_presets(project_id);
   `);
 
   console.log('[DB] Initialized at', dbPath);

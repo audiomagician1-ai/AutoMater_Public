@@ -31,6 +31,7 @@ import {
   stopOrchestrator as _stopOrchestrator, registerOrchestrator, unregisterOrchestrator,
   isOrchestratorRunning,
   spawnAgent, updateAgentStats, checkBudget, lockNextFeature, getTeamPrompt,
+  getTeamMemberLLMConfig,
 } from './agent-manager';
 import { reactDeveloperLoop, reactAgentLoop, getAgentReactStates as _getAgentReactStates, getContextSnapshots as _getContextSnapshots } from './react-loop';
 import type { GenericReactResult } from './react-loop';
@@ -55,8 +56,37 @@ import { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkCon
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import { claimFiles, releaseFiles, getClaimsSummary, predictAffectedFiles, cleanupDecisionLog } from './decision-log';
 import { incrementalUpdate, scanProjectSkeleton, type ProjectSkeleton } from './project-importer';
-import { backupConversation } from './conversation-backup';
+import { backupConversation, linkFeatureSession, completeFeatureSessionLink, getOrCreateSession, type WorkType } from './conversation-backup';
 import type { GitProviderConfig } from './git-provider';
+import type { WorkflowPresetRow, WorkflowStage, WorkflowStageId } from './types';
+
+// ═══════════════════════════════════════
+// Workflow Preset Resolver
+// ═══════════════════════════════════════
+
+/** 获取项目当前激活的工作流阶段列表。没有选择时回退到完整开发流程。 */
+function getActiveWorkflowStages(projectId: string): WorkflowStageId[] {
+  const db = getDb();
+  const row = db.prepare('SELECT stages FROM workflow_presets WHERE project_id = ? AND is_active = 1')
+    .get(projectId) as { stages: string } | undefined;
+
+  if (!row) {
+    // 默认: 完整开发流程
+    return ['pm_analysis', 'architect', 'docs_gen', 'dev_implement', 'qa_review', 'pm_acceptance', 'devops_build', 'incremental_doc_sync', 'finalize'];
+  }
+
+  try {
+    const stages: WorkflowStage[] = JSON.parse(row.stages);
+    return stages.map(s => s.id as WorkflowStageId);
+  } catch {
+    return ['pm_analysis', 'architect', 'docs_gen', 'dev_implement', 'qa_review', 'finalize'];
+  }
+}
+
+/** 检查工作流是否包含指定阶段 */
+function hasStage(stages: WorkflowStageId[], stageId: WorkflowStageId): boolean {
+  return stages.includes(stageId);
+}
 
 // ═══════════════════════════════════════
 // Re-exports (保持向后兼容的 public API)
@@ -237,6 +267,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (workspacePath) ensureProjectMemory(workspacePath);
   if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
 
+  // v11.0: 成员级模型解析器 — 按角色返回该成员实际使用的 LLM 模型名
+  const memberModel = (role: string, agentIndex: number = 0): string => {
+    return getTeamMemberLLMConfig(projectId, role, agentIndex, settings).model;
+  };
+
   emitEvent({
     projectId, agentId: 'system', type: 'project:start',
     data: { wish: project.wish, name: project.name, workspace: workspacePath },
@@ -245,21 +280,35 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult;
   const isResume = existingFeatures.c > 0;
 
+  // v12.0: 解析项目激活的工作流预设 — 决定执行哪些阶段
+  const workflowStages = getActiveWorkflowStages(projectId);
+  sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📐 工作流阶段: ${workflowStages.join(' → ')}` });
+
   if (!isResume) {
     // ═══════════════════════════════════════
-    // 首次运行: 完整的 5 阶段流水线 (v5.0)
+    // 首次运行: 按工作流配置执行阶段 (v12.0)
     // ═══════════════════════════════════════
-    const features = await phasePMAnalysis(projectId, project, settings, win, signal);
-    if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
-    // v5.0: Phase 2 设计文档已合并到 Phase 3 架构设计, 不再独立调用
+    // PM 分析 (pm_analysis or pm_triage)
+    if (hasStage(workflowStages, 'pm_analysis')) {
+      const features = await phasePMAnalysis(projectId, project, settings, win, signal);
+      if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
-    await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
-    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      // 架构设计 (architect)
+      if (hasStage(workflowStages, 'architect')) {
+        await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
+        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      }
 
-    if (workspacePath) {
-      await phaseReqsAndTestSpecs(projectId, features, settings, win, signal, workspacePath);
-      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      // 文档生成 (docs_gen)
+      if (hasStage(workflowStages, 'docs_gen') && workspacePath) {
+        await phaseReqsAndTestSpecs(projectId, features, settings, win, signal, workspacePath);
+        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      }
+    } else if (hasStage(workflowStages, 'pm_triage')) {
+      // 快速迭代模式: 只做分诊, 跳过架构和文档
+      const features = await phasePMAnalysis(projectId, project, settings, win, signal);
+      if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
     }
   } else {
     // ═══════════════════════════════════════
@@ -461,33 +510,35 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
 
   // ═══════════════════════════════════════
-  // Phase 4b: PM 批量验收审查 (v5.0: 原 Phase 6, 批量化)
+  // Phase 4b: PM 批量验收审查 (v12.0: 按工作流控制)
   // ═══════════════════════════════════════
-  if (workspacePath) {
+  if (workspacePath && hasStage(workflowStages, 'pm_acceptance')) {
     await phasePMAcceptance(projectId, settings, win, signal, workspacePath);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   }
 
   // ═══════════════════════════════════════
-  // Phase 4c: 增量文档同步 (G6 — 代码变更后自动更新模块摘要和文档)
+  // Phase 4c: 增量文档同步 (v12.0: 按工作流控制)
   // ═══════════════════════════════════════
-  if (workspacePath) {
+  if (workspacePath && hasStage(workflowStages, 'incremental_doc_sync')) {
     await phaseIncrementalDocSync(projectId, win, signal, workspacePath);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   }
 
   // ═══════════════════════════════════════
-  // Phase 4d: DevOps 自动构建验证 (G8)
+  // Phase 4d: DevOps 自动构建验证 (v12.0: 按工作流控制)
   // ═══════════════════════════════════════
-  if (workspacePath) {
+  if (workspacePath && hasStage(workflowStages, 'devops_build')) {
     await phaseDevOpsBuild(projectId, settings, win, signal, workspacePath);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   }
 
   // ═══════════════════════════════════════
-  // Phase 5: 汇总 + 用户验收等待 (v5.0: 原 Phase 7)
+  // Phase 5: 汇总 + 用户验收等待
   // ═══════════════════════════════════════
-  await phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
+  if (hasStage(workflowStages, 'finalize')) {
+    await phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
+  }
 
   unregisterOrchestrator(projectId);
 }
@@ -526,7 +577,7 @@ async function phasePMAnalysis(
       gitConfig,
       win, signal,
       maxIterations: 15,
-      model: settings.strongModel,
+      model: getTeamMemberLLMConfig(projectId, 'pm', 0, settings).model,
     });
 
     // 检查阻塞
@@ -652,7 +703,8 @@ async function phaseIncrementalPM(
 
   try {
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
-    const result = await callLLM(settings, settings.strongModel, [
+    const pmModel = memberModel('pm');
+    const result = await callLLM(settings, pmModel, [
       { role: 'system', content: pmPrompt },
       {
         role: 'user',
@@ -671,7 +723,7 @@ async function phaseIncrementalPM(
       },
     ], signal, 16384);
 
-    const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
+    const cost = calcCost(pmModel, result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
 
     // v8.0: 备份增量 PM 分析对话
@@ -759,13 +811,13 @@ async function phasePMDesignDoc(
     sendToUI(win, 'agent:stream-start', { projectId, agentId: pmId, label: 'PM 设计文档' });
 
     const designPrompt = getTeamPrompt(projectId, 'pm') ? null : PM_DESIGN_DOC_PROMPT;
-    const result = await callLLM(settings, settings.strongModel, [
+    const result = await callLLM(settings, memberModel('pm'), [
       { role: 'system', content: designPrompt ?? PM_DESIGN_DOC_PROMPT },
       { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单 (${features.length} 个):\n${featureSummary}\n\n请编写产品设计文档。` },
     ], signal, 16384, 2, onChunk);
     sendToUI(win, 'agent:stream-end', { projectId, agentId: pmId });
 
-    const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
+    const cost = calcCost(memberModel('pm'), result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
 
     // v8.0: 备份 PM 设计文档对话
@@ -827,13 +879,13 @@ async function phaseArchitect(
     const [onChunk] = createStreamCallback(win, projectId, archId);
     sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构 + 产品设计' });
     const archPrompt = getTeamPrompt(projectId, 'architect') ?? ARCHITECT_SYSTEM_PROMPT;
-    const archResult = await callLLM(settings, settings.strongModel, [
+    const archResult = await callLLM(settings, memberModel('architect'), [
       { role: 'system', content: archPrompt },
       { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单 (${features.length} 个):\n${featureSummary}\n\n请完成以下两份文档:\n\n1. **产品设计文档** — 产品愿景、功能全景、用户流程、数据模型概要、非功能性需求\n2. **技术架构文档 (ARCHITECTURE.md)** — 技术选型、目录结构、核心数据模型、模块设计、API 接口、编码规范\n\n两份文档合并为一份完整输出, 先产品设计后技术架构。` },
     ], signal, 16384, 2, onChunk);
     sendToUI(win, 'agent:stream-end', { projectId, agentId: archId });
 
-    const archCost = calcCost(settings.strongModel, archResult.inputTokens, archResult.outputTokens);
+    const archCost = calcCost(memberModel('architect'), archResult.inputTokens, archResult.outputTokens);
     addLog(projectId, archId, 'output', archResult.content.slice(0, 3000));
 
     // v5.0: 同时写入设计文档和架构文档
@@ -918,7 +970,7 @@ async function phaseReqsAndTestSpecs(
         return `### Feature ${fid}\n标题: ${f.title || f.description}\n描述: ${f.description}\n验收标准: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(f.dependsOn || f.depends_on || [])}\n备注: ${f.notes || '无'}`;
       }).join('\n\n');
 
-      const reqResult = await callLLM(settings, settings.strongModel, [
+      const reqResult = await callLLM(settings, memberModel('pm'), [
         { role: 'system', content: PM_SPLIT_REQS_PROMPT },
         {
           role: 'user',
@@ -926,7 +978,7 @@ async function phaseReqsAndTestSpecs(
         },
       ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
-      const reqCost = calcCost(settings.strongModel, reqResult.inputTokens, reqResult.outputTokens);
+      const reqCost = calcCost(memberModel('pm'), reqResult.inputTokens, reqResult.outputTokens);
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 批次 ${bi + 1}/${batches.length} 子需求生成完成 ($${reqCost.toFixed(4)})` });
 
       // 解析批量输出, 按 Feature 分割
@@ -951,7 +1003,7 @@ async function phaseReqsAndTestSpecs(
       }).filter(Boolean).join('\n\n---\n\n');
 
       if (batchReqDocs) {
-        const specResult = await callLLM(settings, settings.strongModel, [
+        const specResult = await callLLM(settings, memberModel('pm'), [
           { role: 'system', content: QA_TEST_SPEC_PROMPT },
           {
             role: 'user',
@@ -959,7 +1011,7 @@ async function phaseReqsAndTestSpecs(
           },
         ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
-        const specCost = calcCost(settings.strongModel, specResult.inputTokens, specResult.outputTokens);
+        const specCost = calcCost(memberModel('pm'), specResult.inputTokens, specResult.outputTokens);
         sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 批次 ${bi + 1}/${batches.length} 测试规格生成完成 ($${specCost.toFixed(4)})` });
 
         const specSections = splitBatchOutput(specResult.content, batchIds);
@@ -1092,6 +1144,15 @@ async function workerLoop(
       try {
         sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `📝 TDD: 为 ${feature.id} 生成测试骨架...` });
         sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'working', currentTask: feature.id, featureTitle: `TDD: ${feature.title || ''}` });
+
+        // v8.1: TDD session 关联
+        const tddSession = getOrCreateSession(projectId, qaId, 'qa');
+        const tddLinkId = linkFeatureSession({
+          featureId: feature.id, sessionId: tddSession.id, projectId,
+          agentId: qaId, agentRole: 'qa', workType: 'qa-tdd',
+          expectedOutput: `为 ${feature.id} 生成 TDD 测试骨架`,
+        });
+
         const tddResult = await generateTestSkeleton(settings, signal, feature, workspacePath, projectId);
         if (tddResult.files.length > 0) {
           const tddFiles = tddResult.files.map(f => f.path).join(', ');
@@ -1099,6 +1160,9 @@ async function workerLoop(
           // 将测试骨架信息注入到 feature 上下文，让 developer 知道要通过这些测试
           feature._tddTests = tddResult.files.map(f => f.path);
           feature._tddContext = `[TDD 模式] 以下测试文件已预先生成，你的目标是让这些测试全部通过:\n${tddFiles}\n请先阅读测试文件了解验收标准，然后编写实现代码。`;
+          completeFeatureSessionLink(tddLinkId, `TDD 测试骨架: ${tddFiles}`, true);
+        } else {
+          completeFeatureSessionLink(tddLinkId, '未生成测试文件', false);
         }
         db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
         sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'idle' });
@@ -1109,13 +1173,27 @@ async function workerLoop(
     let lastErrorMsg = '';  // v5.6: 记录最后一个错误，用于 circuit-breaker
 
     for (let qaAttempt = 1; qaAttempt <= maxQARetries && !signal.aborted; qaAttempt++) {
+      // v8.1: 为本轮开发创建 Feature-Session 关联
+      const devSession = getOrCreateSession(projectId, workerId, 'developer');
+      const devWorkType: WorkType = qaAttempt === 1 ? 'dev-implement' : 'dev-rework';
+      const devLinkId = linkFeatureSession({
+        featureId: feature.id, sessionId: devSession.id, projectId,
+        agentId: workerId, agentRole: 'developer', workType: devWorkType,
+        expectedOutput: qaAttempt === 1
+          ? `实现 ${feature.id}: ${(feature.title || feature.description || '').slice(0, 80)}`
+          : `重做 ${feature.id} (第${qaAttempt}次, QA反馈: ${(qaFeedback || '').slice(0, 60)})`,
+      });
+
       try {
         const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback);
         if (!reactResult.completed) {
           sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ ${feature.id} ReAct 未完成 (${qaAttempt}/${maxQARetries})` });
+          completeFeatureSessionLink(devLinkId, `ReAct 未完成 (iter=${reactResult.iterations})`, false);
           if (qaAttempt >= maxQARetries) break;
           continue;
         }
+
+        completeFeatureSessionLink(devLinkId, `完成: ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代, $${reactResult.totalCost.toFixed(4)}`, true);
 
         if (reactResult.filesWritten.length > 0 && workspacePath) {
           sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'reviewing', agentId: qaId });
@@ -1124,13 +1202,22 @@ async function workerLoop(
           sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'working', currentTask: feature.id, featureTitle: feature.title || feature.description });
           sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `🔍 审查 ${feature.id}...` });
 
+          // v8.1: QA 审查 Session 关联
+          const qaSession = getOrCreateSession(projectId, qaId, 'qa');
+          const qaLinkId = linkFeatureSession({
+            featureId: feature.id, sessionId: qaSession.id, projectId,
+            agentId: qaId, agentRole: 'qa', workType: 'qa-review',
+            expectedOutput: `审查 ${feature.id} 的 ${reactResult.filesWritten.length} 个文件`,
+          });
+
           const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath, projectId);
-          const qaCost = calcCost(settings.strongModel, qaResult.inputTokens, qaResult.outputTokens);
+          const qaCost = calcCost(resolveModel('qa'), qaResult.inputTokens, qaResult.outputTokens);
           updateAgentStats(qaId, projectId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
           db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
 
           if (qaResult.verdict === 'pass') {
             passed = true;
+            completeFeatureSessionLink(qaLinkId, `QA 通过 (分数: ${qaResult.score})`, true);
             sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `✅ ${feature.id} QA 通过! (分数: ${qaResult.score}, $${qaCost.toFixed(4)})` });
             notify('✅ Feature 完成', `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`);
 
@@ -1140,6 +1227,7 @@ async function workerLoop(
             break;
           } else {
             qaFeedback = qaResult.feedbackText;
+            completeFeatureSessionLink(qaLinkId, `QA 未通过 (分数: ${qaResult.score}): ${(qaResult.summary || '').slice(0, 100)}`, false);
             sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `❌ ${feature.id} QA 未通过 (${qaResult.score}): ${qaResult.summary}` });
             sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔄 ${feature.id} 重做 (${qaAttempt}/${maxQARetries})` });
             db.prepare("UPDATE features SET status = 'in_progress' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
@@ -1152,6 +1240,7 @@ async function workerLoop(
       } catch (err: any) {
         if (signal.aborted) break;
         lastErrorMsg = err.message || 'Unknown error';
+        completeFeatureSessionLink(devLinkId, `错误: ${lastErrorMsg.slice(0, 150)}`, false);
         // v5.6: 不可重试错误 → 直接终止 QA 重试循环
         if (err instanceof NonRetryableError) {
           lastErrorMsg = `[NonRetryable:${err.statusCode}] ${err.message}`;
@@ -1248,7 +1337,7 @@ async function phasePMAcceptance(
         ].filter(Boolean).join('\n');
       }).join('\n\n---\n\n');
 
-      const acceptResult = await callLLM(settings, settings.strongModel, [
+      const acceptResult = await callLLM(settings, memberModel('pm'), [
         { role: 'system', content: PM_ACCEPTANCE_PROMPT },
         {
           role: 'user',
@@ -1256,7 +1345,7 @@ async function phasePMAcceptance(
         },
       ], signal, 8192);
 
-      const accCost = calcCost(settings.strongModel, acceptResult.inputTokens, acceptResult.outputTokens);
+      const accCost = calcCost(memberModel('pm'), acceptResult.inputTokens, acceptResult.outputTokens);
       updateAgentStats(pmAccId, projectId, acceptResult.inputTokens, acceptResult.outputTokens, accCost);
 
       // 尝试解析为数组
@@ -1276,6 +1365,7 @@ async function phasePMAcceptance(
       }
 
       // 应用结果到每个 Feature
+      const pmAccSession = getOrCreateSession(projectId, pmAccId, 'pm');
       for (const feature of batch) {
         const v = verdicts.find(v => v.feature_id === feature.id) || verdicts[batch.indexOf(feature)];
         const verdict = v?.verdict || 'conditional_accept';
@@ -1283,9 +1373,18 @@ async function phasePMAcceptance(
         const feedback = v?.feedback || '';
         const summary = v?.summary || '';
 
+        // v8.1: PM 验收 Session 关联
+        const accLinkId = linkFeatureSession({
+          featureId: feature.id, sessionId: pmAccSession.id, projectId,
+          agentId: pmAccId, agentRole: 'pm', workType: 'pm-acceptance',
+          expectedOutput: `验收 ${feature.id}: ${(feature.title || '').slice(0, 60)}`,
+        });
+
         const finalStatus = verdict === 'accept' || verdict === 'conditional_accept' ? 'passed' : 'pm_rejected';
         db.prepare("UPDATE features SET status = ?, pm_verdict = ?, pm_verdict_score = ?, pm_verdict_feedback = ?, completed_at = CASE WHEN ? IN ('passed') THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
           .run(finalStatus, verdict, score, feedback, finalStatus, feature.id, projectId);
+
+        completeFeatureSessionLink(accLinkId, `PM 验收: ${verdict} (${score}/100) ${summary.slice(0, 80)}`, finalStatus === 'passed');
 
         const icon = verdict === 'accept' ? '✅' : verdict === 'conditional_accept' ? '⚠️' : '❌';
         sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `${icon} ${feature.id} PM 验收: ${verdict} (${score}/100) — ${summary}` });

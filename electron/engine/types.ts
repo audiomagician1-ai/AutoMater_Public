@@ -11,6 +11,12 @@
 // Application Settings
 // ═══════════════════════════════════════
 
+/** 单个模型的定价信息 (USD per 1K tokens) */
+export interface ModelPricing {
+  input: number;
+  output: number;
+}
+
 export interface AppSettings {
   llmProvider: 'openai' | 'anthropic' | 'custom';
   apiKey: string;
@@ -27,6 +33,10 @@ export interface AppSettings {
   dailyBudgetUsd: number;
   /** TDD 模式: QA 先生成测试骨架, Developer 围绕测试编码 (G14) */
   tddMode?: boolean;
+  /** 用户自定义模型定价 (优先于内置价格表)。key = 模型名, value = $/1K tokens */
+  modelPricing?: Record<string, ModelPricing>;
+  /** 界面缩放因子 */
+  zoomFactor?: number;
 }
 
 // ═══════════════════════════════════════
@@ -144,6 +154,39 @@ export const WORKSPACE_IGNORE_DIRS = new Set([
   'coverage', '.cache', 'target', 'vendor', '.agentforge', '.venv', 'venv',
 ]);
 
+// ═══════════════════════════════════════
+// Team Member — Per-member LLM / MCP / Skill Config (v11.0)
+// ═══════════════════════════════════════
+
+/** 成员级 LLM 配置 — 覆盖全局设置 (每个字段可选, 缺省 fallback 到全局) */
+export interface MemberLLMConfig {
+  provider?: 'openai' | 'anthropic' | 'custom';
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+/** 成员级 MCP 服务器定义 (与全局 McpServerConfig 结构一致) */
+export interface MemberMcpServer {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled: boolean;
+}
+
+/** 成员级 Skill 引用 */
+export interface MemberSkillRef {
+  name: string;
+  /** 可选: 自定义该 Skill 的参数 / 覆盖 */
+  override?: Record<string, unknown>;
+}
+
 /** Code file extensions for analysis */
 export const CODE_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
@@ -151,3 +194,64 @@ export const CODE_EXTENSIONS = new Set([
   '.c', '.cpp', '.h', '.hpp', '.swift', '.kt',
   '.vue', '.svelte',
 ]);
+
+// ═══════════════════════════════════════
+// Workflow Presets (v12.0)
+// ═══════════════════════════════════════
+
+/** 工作流阶段标识 — 与 orchestrator 的实际 phase 函数一一对应 */
+export type WorkflowStageId =
+  | 'pm_analysis'
+  | 'pm_triage'
+  | 'architect'
+  | 'docs_gen'
+  | 'dev_implement'
+  | 'qa_review'
+  | 'pm_acceptance'
+  | 'devops_build'
+  | 'incremental_doc_sync'
+  | 'static_analysis'
+  | 'security_audit'
+  | 'perf_benchmark'
+  | 'finalize';
+
+/** 工作流中每个阶段的配置 */
+export interface WorkflowStage {
+  id: WorkflowStageId;
+  label: string;
+  icon: string;
+  color: string;
+  /** 阶段级参数覆盖 (如 maxIterations, model tier 等) */
+  config?: Record<string, unknown>;
+  /** 是否可跳过 (用户可在运行前 toggle) */
+  skippable?: boolean;
+}
+
+/** 工作流预设记录 (DB row) */
+export interface WorkflowPresetRow {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  icon: string;
+  /** JSON: WorkflowStage[] */
+  stages: string;
+  is_active: number;
+  is_builtin: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 解析后的工作流预设 */
+export interface WorkflowPreset {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  icon: string;
+  stages: WorkflowStage[];
+  isActive: boolean;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

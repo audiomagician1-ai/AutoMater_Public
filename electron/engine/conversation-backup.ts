@@ -558,3 +558,168 @@ export function cleanupOldBackups(keepDays: number = 30): number {
 
   return deleted;
 }
+
+// ═══════════════════════════════════════
+// Feature-Session Link Management (v8.1)
+// ═══════════════════════════════════════
+
+/**
+ * 创建 Feature-Session 关联记录 — 在 Agent 开始处理某个 Feature 时调用
+ *
+ * @returns link id
+ */
+export function linkFeatureSession(opts: {
+  featureId: string;
+  sessionId: string;
+  projectId: string;
+  agentId: string;
+  agentRole: string;
+  workType: WorkType;
+  expectedOutput: string;
+}): string {
+  const db = getDb();
+  const id = `fsl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO feature_sessions (id, feature_id, session_id, project_id, agent_id, agent_role, work_type, expected_output, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+  `).run(id, opts.featureId, opts.sessionId, opts.projectId, opts.agentId, opts.agentRole, opts.workType, opts.expectedOutput, now);
+
+  log.info('Feature-Session linked', { id, featureId: opts.featureId, sessionId: opts.sessionId, workType: opts.workType });
+  return id;
+}
+
+/**
+ * 完成 Feature-Session 关联 — session 结束时更新实际产出和状态
+ */
+export function completeFeatureSessionLink(
+  linkId: string,
+  actualOutput: string,
+  success: boolean,
+): void {
+  const db = getDb();
+  const status = success ? 'completed' : 'failed';
+  db.prepare(`
+    UPDATE feature_sessions SET
+      actual_output = ?,
+      status = ?,
+      completed_at = datetime('now')
+    WHERE id = ?
+  `).run(actualOutput, status, linkId);
+}
+
+/**
+ * 按 Feature 查询关联的所有 Sessions（含 session 详情）
+ */
+export function getSessionsForFeature(projectId: string, featureId: string): Array<FeatureSessionLink & { session: SessionInfo | null }> {
+  const db = getDb();
+  const links = db.prepare(
+    'SELECT * FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC'
+  ).all(projectId, featureId) as any[];
+
+  return links.map(link => ({
+    ...mapFeatureSessionRow(link),
+    session: (() => {
+      const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(link.session_id) as any;
+      return row ? mapSessionRow(row) : null;
+    })(),
+  }));
+}
+
+/**
+ * 按 Session 查询关联的所有 Features
+ */
+export function getFeaturesForSession(sessionId: string): FeatureSessionLink[] {
+  const db = getDb();
+  const links = db.prepare(
+    'SELECT * FROM feature_sessions WHERE session_id = ? ORDER BY created_at ASC'
+  ).all(sessionId) as any[];
+  return links.map(mapFeatureSessionRow);
+}
+
+/**
+ * 获取项目下所有 Feature-Session 关联（带分页）
+ */
+export function listFeatureSessionLinks(projectId: string, limit: number = 200): FeatureSessionLink[] {
+  const db = getDb();
+  const links = db.prepare(
+    'SELECT * FROM feature_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
+  ).all(projectId, limit) as any[];
+  return links.map(mapFeatureSessionRow);
+}
+
+/**
+ * 获取 Feature 的 Session 统计摘要（用于看板卡片展示）
+ */
+export function getFeatureSessionSummary(projectId: string, featureId: string): {
+  totalSessions: number;
+  workTypes: string[];
+  lastWorkType: string | null;
+  lastAgent: string | null;
+} {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT work_type, agent_id FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC'
+  ).all(projectId, featureId) as Array<{ work_type: string; agent_id: string }>;
+
+  const workTypes = [...new Set(rows.map(r => r.work_type))];
+  const last = rows[rows.length - 1];
+
+  return {
+    totalSessions: rows.length,
+    workTypes,
+    lastWorkType: last?.work_type ?? null,
+    lastAgent: last?.agent_id ?? null,
+  };
+}
+
+/**
+ * 批量获取多个 Feature 的 Session 摘要（看板页面一次性加载）
+ */
+export function batchGetFeatureSessionSummaries(projectId: string): Map<string, {
+  totalSessions: number;
+  workTypes: string[];
+  lastWorkType: string | null;
+  lastAgent: string | null;
+}> {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT feature_id, work_type, agent_id FROM feature_sessions WHERE project_id = ? ORDER BY created_at ASC'
+  ).all(projectId) as Array<{ feature_id: string; work_type: string; agent_id: string }>;
+
+  const map = new Map<string, { entries: Array<{ work_type: string; agent_id: string }> }>();
+  for (const row of rows) {
+    if (!map.has(row.feature_id)) map.set(row.feature_id, { entries: [] });
+    map.get(row.feature_id)!.entries.push({ work_type: row.work_type, agent_id: row.agent_id });
+  }
+
+  const result = new Map<string, { totalSessions: number; workTypes: string[]; lastWorkType: string | null; lastAgent: string | null }>();
+  for (const [fid, data] of map.entries()) {
+    const last = data.entries[data.entries.length - 1];
+    result.set(fid, {
+      totalSessions: data.entries.length,
+      workTypes: [...new Set(data.entries.map(e => e.work_type))],
+      lastWorkType: last?.work_type ?? null,
+      lastAgent: last?.agent_id ?? null,
+    });
+  }
+  return result;
+}
+
+function mapFeatureSessionRow(row: any): FeatureSessionLink {
+  return {
+    id: row.id,
+    featureId: row.feature_id,
+    sessionId: row.session_id,
+    projectId: row.project_id,
+    agentId: row.agent_id,
+    agentRole: row.agent_role,
+    workType: row.work_type,
+    expectedOutput: row.expected_output,
+    actualOutput: row.actual_output,
+    status: row.status,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  };
+}

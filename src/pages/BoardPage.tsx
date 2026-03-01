@@ -6,6 +6,15 @@ type Feature = {
   category: string; status: string; locked_by: string | null;
 };
 
+/** v8.1: 工作类型 → 简短中文标签 */
+const WORK_TYPE_LABELS: Record<string, string> = {
+  'pm-analysis': 'PM分析', 'pm-design': 'PM设计', 'pm-incremental': 'PM增量',
+  'pm-acceptance': 'PM验收', 'architect-design': '架构设计',
+  'dev-implement': '开发', 'dev-rework': '重做',
+  'qa-review': 'QA审查', 'qa-tdd': 'TDD',
+  'devops-build': '构建', 'doc-generation': '文档', 'meta-agent': '元Agent',
+};
+
 const STATUS_COLS = [
   { key: 'todo',        label: '待做',   color: 'bg-slate-500',   ring: 'ring-slate-500/30' },
   { key: 'in_progress', label: '开发中', color: 'bg-blue-500',    ring: 'ring-blue-500/30' },
@@ -17,11 +26,17 @@ const STATUS_COLS = [
 export function BoardPage() {
   const { currentProjectId, featureStatuses } = useAppStore();
   const [features, setFeatures] = useState<Feature[]>([]);
+  const [sessionSummaries, setSessionSummaries] = useState<Record<string, FeatureSessionSummary>>({});
 
   const load = async () => {
     if (!currentProjectId) return;
     const data = await window.agentforge.project.getFeatures(currentProjectId);
     setFeatures(data || []);
+    // v8.1: 批量加载所有 Feature 的 Session 摘要
+    try {
+      const summaries = await window.agentforge.session.batchFeatureSummaries(currentProjectId);
+      setSessionSummaries(summaries || {});
+    } catch { /* session API 可能未就绪 */ }
   };
 
   useEffect(() => { load(); }, [currentProjectId]);
@@ -68,16 +83,32 @@ export function BoardPage() {
                 <span className="text-[10px] text-slate-600 ml-auto">{items.length}</span>
               </div>
               <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-                {items.map(f => (
-                  <div key={f.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1 hover:border-slate-700 transition-colors">
-                    <div className="flex items-start justify-between">
-                      <span className="text-[10px] text-slate-600 font-mono">{f.id}</span>
-                      <span className={`text-[10px] px-1 py-0.5 rounded ${f.priority === 0 ? 'bg-red-500/20 text-red-400' : f.priority === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'}`}>P{f.priority}</span>
+                {items.map(f => {
+                  const ss = sessionSummaries[f.id];
+                  return (
+                    <div key={f.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1 hover:border-slate-700 transition-colors">
+                      <div className="flex items-start justify-between">
+                        <span className="text-[10px] text-slate-600 font-mono">{f.id}</span>
+                        <span className={`text-[10px] px-1 py-0.5 rounded ${f.priority === 0 ? 'bg-red-500/20 text-red-400' : f.priority === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'}`}>P{f.priority}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-snug line-clamp-2">{f.title || f.description}</p>
+                      {f.locked_by && <p className="text-[10px] text-forge-400">🔨 {f.locked_by}</p>}
+                      {/* v8.1: Session 关联摘要 */}
+                      {ss && ss.totalSessions > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                          <span className="text-[10px] text-slate-600" title={`${ss.totalSessions} 个关联 Session`}>
+                            📎{ss.totalSessions}
+                          </span>
+                          {ss.workTypes.map(wt => (
+                            <span key={wt} className="text-[9px] px-1 py-px rounded bg-slate-800 text-slate-500">
+                              {WORK_TYPE_LABELS[wt] || wt}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-xs text-slate-300 leading-snug line-clamp-2">{f.title || f.description}</p>
-                    {f.locked_by && <p className="text-[10px] text-forge-400">🔨 {f.locked_by}</p>}
-                  </div>
-                ))}
+                  );
+                })}
                 {items.length === 0 && <div className="text-center py-6 text-slate-700 text-xs">—</div>}
               </div>
             </div>
@@ -87,4 +118,3 @@ export function BoardPage() {
     </div>
   );
 }
-

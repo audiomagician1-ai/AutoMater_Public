@@ -8,6 +8,7 @@
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { sendToUI } from './ui-bridge';
+import type { MemberLLMConfig, AppSettings } from './types';
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -126,6 +127,104 @@ export function getTeamPrompt(projectId: string, role: string, agentIndex: numbe
     return prompt && prompt.length > 10 ? prompt : null;
   } catch {
     return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// v11.0: 成员级 LLM / MCP / Skill 配置
+// ═══════════════════════════════════════
+
+/**
+ * 获取指定角色成员的 LLM 配置。
+ * 成员级配置优先，缺省字段 fallback 到全局 settings。
+ * 返回 { provider, apiKey, baseUrl, model } — 全部已填充。
+ */
+export function getTeamMemberLLMConfig(
+  projectId: string,
+  role: string,
+  agentIndex: number = 0,
+  globalSettings: AppSettings,
+): { provider: string; apiKey: string; baseUrl: string; model: string } {
+  const defaultModel = (role === 'developer' || role === 'devops')
+    ? globalSettings.workerModel
+    : globalSettings.strongModel;
+
+  const fallback = {
+    provider: globalSettings.llmProvider,
+    apiKey: globalSettings.apiKey,
+    baseUrl: globalSettings.baseUrl,
+    model: defaultModel,
+  };
+
+  try {
+    const db = getDb();
+    const members = db.prepare(
+      'SELECT llm_config, model FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
+    ).all(projectId) as Array<{ llm_config: string | null; model: string | null }>;
+
+    if (members.length === 0) return fallback;
+
+    const member = members[Math.min(agentIndex, members.length - 1)];
+
+    // 先检查 v11.0 的 llm_config JSON
+    if (member.llm_config) {
+      try {
+        const cfg = JSON.parse(member.llm_config) as MemberLLMConfig;
+        return {
+          provider: cfg.provider || fallback.provider,
+          apiKey: cfg.apiKey || fallback.apiKey,
+          baseUrl: cfg.baseUrl || fallback.baseUrl,
+          model: cfg.model || fallback.model,
+        };
+      } catch { /* JSON parse error — fallback */ }
+    }
+
+    // 向后兼容: 旧版 model 字段 (直接文本)
+    if (member.model?.trim()) {
+      return { ...fallback, model: member.model.trim() };
+    }
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * 获取成员级 MCP 服务器列表 (返回 JSON 解析后的数组)。
+ * 为空时返回 [] (表示只用全局 MCP)。
+ */
+export function getTeamMemberMcpServers(projectId: string, role: string, agentIndex: number = 0): any[] {
+  try {
+    const db = getDb();
+    const members = db.prepare(
+      'SELECT mcp_servers FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
+    ).all(projectId) as Array<{ mcp_servers: string | null }>;
+    if (members.length === 0) return [];
+    const member = members[Math.min(agentIndex, members.length - 1)];
+    if (!member.mcp_servers) return [];
+    return JSON.parse(member.mcp_servers);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 获取成员级 Skill 列表 (返回 skill 名称数组)。
+ * 为空时返回 [] (表示只用全局 Skill)。
+ */
+export function getTeamMemberSkills(projectId: string, role: string, agentIndex: number = 0): string[] {
+  try {
+    const db = getDb();
+    const members = db.prepare(
+      'SELECT skills FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
+    ).all(projectId) as Array<{ skills: string | null }>;
+    if (members.length === 0) return [];
+    const member = members[Math.min(agentIndex, members.length - 1)];
+    if (!member.skills) return [];
+    return JSON.parse(member.skills);
+  } catch {
+    return [];
   }
 }
 

@@ -2,6 +2,34 @@
  * Preload API 类型声明 — 渲染进程可用的接口
  */
 
+/** v6.0: 系统性能指标 */
+interface SystemMetrics {
+  timestamp: number;
+  cpu: { usage: number; cores: number; perCore: number[] };
+  memory: { used: number; total: number; percent: number };
+  gpu: { usage: number; memoryPercent: number; name: string };
+  disk: { readBytesPerSec: number; writeBytesPerSec: number };
+  network: { rxBytesPerSec: number; txBytesPerSec: number };
+  process: { memoryMB: number; uptimeS: number };
+}
+
+/** v6.0: 活动时序数据点 */
+interface ActivityDataPoint {
+  minute: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  linesWritten: number;
+  llmCalls: number;
+  toolCalls: number;
+}
+
+/** v6.0: 模型定价 */
+interface ModelPricingEntry {
+  input: number;
+  output: number;
+}
+
 /** v7.0: 元Agent 管理配置 */
 interface MetaAgentConfig {
   name: string;
@@ -167,6 +195,8 @@ interface AgentForgeAPI {
     update(memberId: string, fields: Partial<TeamMember>): Promise<{ success: boolean }>;
     delete(memberId: string): Promise<{ success: boolean }>;
     initDefaults(projectId: string): Promise<{ success: boolean; count?: number }>;
+    /** v11.0: 测试成员级 LLM 连通性 (使用成员自己的配置, fallback 到全局) */
+    testMemberModel(memberId: string, config: MemberLLMConfig): Promise<{ success: boolean; message: string; model?: string }>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;
@@ -260,12 +290,55 @@ interface AgentForgeAPI {
     getPatches(missionId: string): Promise<Array<{ file: string; diff: string; description: string }>>;
   };
 
+  /** v12.0: 工作流预设管理 */
+  workflow: {
+    list(projectId: string): Promise<WorkflowPresetInfo[]>;
+    getActive(projectId: string): Promise<WorkflowPresetInfo | null>;
+    get(presetId: string): Promise<WorkflowPresetInfo | null>;
+    activate(projectId: string, presetId: string): Promise<{ success: boolean }>;
+    create(projectId: string, data: { name: string; description?: string; icon?: string; stages: WorkflowStageInfo[] }): Promise<WorkflowPresetInfo>;
+    update(presetId: string, updates: { name?: string; description?: string; icon?: string; stages?: WorkflowStageInfo[] }): Promise<WorkflowPresetInfo | null>;
+    delete(presetId: string): Promise<{ success: boolean; error?: string }>;
+    duplicate(presetId: string): Promise<WorkflowPresetInfo | { success: false; error: string }>;
+    availableStages(): Promise<WorkflowStageInfo[]>;
+  };
+
   /** v5.2: 缩放控制 */
   zoom: {
     /** 获取当前缩放倍率 (1.0 = 100%) */
     get(): number;
     /** 设置缩放倍率 (0.5 ~ 3.0) */
     set(factor: number): void;
+  };
+
+  /** v6.0: 系统监控 + 活动时序 */
+  monitor: {
+    /** 获取系统性能快照 */
+    getSystemMetrics(): Promise<SystemMetrics>;
+    /** 获取项目活动时序数据 */
+    getActivityTimeseries(projectId: string, minutes?: number): Promise<ActivityDataPoint[]>;
+    /** 获取内置模型价格表 */
+    getBuiltinPricing(): Promise<Record<string, { input: number; output: number }>>;
+  };
+
+  /** v8.0: Session 管理 + v8.1: Feature-Session 关联 */
+  session: {
+    create(projectId: string | null, agentId: string, agentRole: string): Promise<SessionInfo>;
+    switch(sessionId: string): Promise<SessionInfo | null>;
+    getActive(projectId: string | null, agentId: string): Promise<SessionInfo | null>;
+    list(projectId: string | null, agentId?: string): Promise<SessionInfo[]>;
+    listAll(limit?: number): Promise<SessionInfo[]>;
+    readBackup(sessionId: string): Promise<any>;
+    backupStats(): Promise<{ totalSessions: number; totalBackupFiles: number; totalBackupSizeBytes: number; oldestBackup: string | null; newestBackup: string | null }>;
+    cleanup(keepDays?: number): Promise<{ success: boolean; deletedFolders: number }>;
+    /** v8.1: 获取某个 Feature 关联的所有 Sessions */
+    featureSessions(projectId: string, featureId: string): Promise<Array<FeatureSessionLink & { session: SessionInfo | null }>>;
+    /** v8.1: 获取某个 Session 关联的所有 Features */
+    sessionFeatures(sessionId: string): Promise<FeatureSessionLink[]>;
+    /** v8.1: 获取项目所有 Feature-Session 关联 */
+    featureSessionLinks(projectId: string, limit?: number): Promise<FeatureSessionLink[]>;
+    /** v8.1: 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
+    batchFeatureSummaries(projectId: string): Promise<Record<string, FeatureSessionSummary>>;
   };
 }
 
@@ -281,7 +354,7 @@ interface WishItem {
   updated_at: string;
 }
 
-/** 团队成员 (v3.1) */
+/** 团队成员 (v3.1 → v11.0: +llm_config/mcp_servers/skills) */
 interface TeamMember {
   id: string;
   project_id: string;
@@ -293,6 +366,40 @@ interface TeamMember {
   context_files: string;  // JSON array string
   max_context_tokens: number;
   created_at: string;
+  /** v11.0: 成员级 LLM 配置 (JSON string or null) */
+  llm_config: string | null;
+  /** v11.0: 成员级 MCP 服务器 (JSON string or null) */
+  mcp_servers: string | null;
+  /** v11.0: 成员级 Skill 列表 (JSON string or null) */
+  skills: string | null;
+}
+
+/** v11.0: 成员级 LLM 配置 — 覆盖全局设置 */
+interface MemberLLMConfig {
+  provider?: 'openai' | 'anthropic' | 'custom';
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+/** v11.0: 成员级 MCP 服务器 */
+interface MemberMcpServer {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled: boolean;
+}
+
+/** v11.0: 成员级 Skill 引用 */
+interface MemberSkillRef {
+  name: string;
+  override?: Record<string, unknown>;
 }
 
 /** 文档变更记录 (v4.2) */
@@ -363,6 +470,8 @@ interface AppSettings {
   dailyBudgetUsd: number;
   /** UI 缩放倍率 (1.0 = 100%, 默认 1.5) */
   zoomFactor?: number;
+  /** 用户自定义模型定价 ($/1K tokens)。key = 模型名 */
+  modelPricing?: Record<string, ModelPricingEntry>;
 }
 
 /** MCP 服务器配置 (v5.0) */
@@ -477,5 +586,69 @@ interface MissionTaskRecord {
 
 interface Window {
   agentforge: AgentForgeAPI;
+}
+
+/** Session 信息 (v8.0) */
+interface SessionInfo {
+  id: string;
+  projectId: string | null;
+  agentId: string;
+  agentRole: string;
+  agentSeq: number;
+  status: 'active' | 'completed' | 'archived';
+  backupPath: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  messageCount: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
+/** Feature-Session 关联记录 (v8.1) */
+interface FeatureSessionLink {
+  id: string;
+  featureId: string;
+  sessionId: string;
+  projectId: string;
+  agentId: string;
+  agentRole: string;
+  workType: string;
+  expectedOutput: string;
+  actualOutput: string | null;
+  status: 'pending' | 'active' | 'completed' | 'failed';
+  createdAt: string;
+  completedAt: string | null;
+}
+
+/** Feature 的 Session 摘要 (v8.1, 看板卡片用) */
+interface FeatureSessionSummary {
+  totalSessions: number;
+  workTypes: string[];
+  lastWorkType: string | null;
+  lastAgent: string | null;
+}
+
+/** 工作流阶段定义 (v12.0) */
+interface WorkflowStageInfo {
+  id: string;
+  label: string;
+  icon: string;
+  color: string;
+  config?: Record<string, unknown>;
+  skippable?: boolean;
+}
+
+/** 工作流预设 (v12.0) */
+interface WorkflowPresetInfo {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  icon: string;
+  stages: WorkflowStageInfo[];
+  isActive: boolean;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 

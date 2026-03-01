@@ -73,7 +73,7 @@ export interface LLMWithToolsResult {
 // 模型定价表（USD per 1K tokens）
 // ═══════════════════════════════════════
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o':                      { input: 0.0025,  output: 0.01 },
   'gpt-4o-mini':                 { input: 0.00015, output: 0.0006 },
   'gpt-4-turbo':                 { input: 0.01,    output: 0.03 },
@@ -92,8 +92,21 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 
 const FALLBACK_PRICING = { input: 0.002, output: 0.008 };
 
-export function calcCost(model: string, inputTokens: number, outputTokens: number): number {
-  const p = MODEL_PRICING[model] ?? FALLBACK_PRICING;
+/**
+ * 计算 LLM 调用成本。
+ * 优先级：用户自定义定价(settings.modelPricing) > 内置定价表 > 兜底定价
+ * customPricing 参数可选，不传时自动从 DB settings 读取。
+ */
+export function calcCost(model: string, inputTokens: number, outputTokens: number, customPricing?: Record<string, { input: number; output: number }>): number {
+  // 如果没有显式传入自定义价格，尝试从用户设置中读取
+  let userPricing = customPricing;
+  if (!userPricing) {
+    try {
+      const settings = getSettings();
+      if (settings?.modelPricing) userPricing = settings.modelPricing;
+    } catch { /* settings 不可用时降级 */ }
+  }
+  const p = userPricing?.[model] ?? MODEL_PRICING[model] ?? FALLBACK_PRICING;
   return (inputTokens / 1000) * p.input + (outputTokens / 1000) * p.output;
 }
 

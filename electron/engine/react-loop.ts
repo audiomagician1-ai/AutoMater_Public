@@ -12,7 +12,7 @@ import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
-import { updateAgentStats, checkBudget, getTeamPrompt } from './agent-manager';
+import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
@@ -178,10 +178,15 @@ export async function reactDeveloperLoop(
     qaAttempt: qaFeedback ? 2 : 1,
   };
   const modelSelection = selectModelTier(taskComplexity);
-  const model = resolveModel(modelSelection.tier, settings);
+  // v11.0: 成员级模型优先 > model-selector 动态选择
+  const memberConfig = getTeamMemberLLMConfig(projectId, 'developer', workerIndex, settings);
+  const memberHasModel = memberConfig.model !== settings.workerModel && memberConfig.model !== settings.strongModel;
+  const model = memberHasModel ? memberConfig.model : resolveModel(modelSelection.tier, settings);
   sendToUI(win, 'agent:log', {
     projectId, agentId: workerId,
-    content: `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
+    content: memberHasModel
+      ? `🤖 ${feature.id} 成员模型: ${model} (独立配置)`
+      : `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
   });
 
   const tools = getToolsForRole('developer', gitConfig.mode);

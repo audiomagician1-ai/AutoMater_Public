@@ -14,6 +14,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
 import dagre from 'dagre';
 import { TechBackground } from '../components/TechBackground';
+import { SystemMonitor } from '../components/SystemMonitor';
+import { ActivityCharts } from '../components/ActivityCharts';
 
 // ═══════════════════════════════════════
 // Types
@@ -1154,6 +1156,26 @@ export function OverviewPage() {
       </div>
 
       <div className="flex-1 px-6 pb-6 space-y-6 relative z-10">
+        {/* ═══════ Real-time Monitoring Dashboard (v6.0) — 置顶 ═══════ */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-slate-400">📡 实时监控</h3>
+            <span className="text-[9px] text-slate-600">每 2 秒采样</span>
+          </div>
+          <SystemMonitor />
+        </section>
+
+        {/* ═══════ Activity Timeseries Charts (v6.0) ═══════ */}
+        {currentProjectId && (
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-slate-400">📈 活动趋势 <span className="text-[10px] text-slate-600 font-normal">过去 30 分钟</span></h3>
+              <span className="text-[9px] text-slate-600">每 10 秒刷新</span>
+            </div>
+            <ActivityCharts projectId={currentProjectId} />
+          </section>
+        )}
+
         {/* Project Import Analysis — Real-time Progress (v5.1) */}
         {project?.status === 'analyzing' && (
           <section className="bg-gradient-to-r from-cyan-900/15 to-slate-900/30 border border-cyan-800/30 rounded-xl p-5 animate-in fade-in">
