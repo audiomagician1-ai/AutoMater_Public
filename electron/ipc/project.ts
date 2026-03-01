@@ -4,11 +4,9 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import { getDb } from '../db';
-import { v4 as uuid } from 'crypto';
-import { runOrchestrator } from '../engine/orchestrator';
+import { runOrchestrator, stopOrchestrator } from '../engine/orchestrator';
 
 function generateId(): string {
-  // 简易 UUID
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
 
@@ -52,10 +50,37 @@ export function setupProjectHandlers() {
     return db.prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
 
+  // ── 获取项目日志 ──
+  ipcMain.handle('project:get-logs', (_event, projectId: string, limit: number = 200) => {
+    const db = getDb();
+    return db.prepare('SELECT * FROM agent_logs WHERE project_id = ? ORDER BY id DESC LIMIT ?').all(projectId, limit).reverse();
+  });
+
+  // ── 获取项目统计 ──
+  ipcMain.handle('project:get-stats', (_event, projectId: string) => {
+    const db = getDb();
+    const featureStats = db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM features WHERE project_id = ?
+    `).get(projectId);
+    const agentStats = db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(total_input_tokens + total_output_tokens) as total_tokens,
+        SUM(total_cost_usd) as total_cost
+      FROM agents WHERE project_id = ?
+    `).get(projectId);
+    return { features: featureStats, agents: agentStats };
+  });
+
   // ── 启动项目 (开始 Agent 编排) ──
   ipcMain.handle('project:start', async (_event, projectId: string) => {
-    const win = BrowserWindow.getFocusedWindow();
-    // 异步启动编排器，不阻塞 UI
+    const win = BrowserWindow.getAllWindows()[0] ?? null;
     runOrchestrator(projectId, win).catch(err => {
       console.error('[Orchestrator] Fatal error:', err);
       win?.webContents.send('agent:error', { projectId, error: err.message });
@@ -65,9 +90,19 @@ export function setupProjectHandlers() {
 
   // ── 停止项目 ──
   ipcMain.handle('project:stop', (_event, projectId: string) => {
+    stopOrchestrator(projectId);
+    return { success: true };
+  });
+
+  // ── 删除项目 ──
+  ipcMain.handle('project:delete', (_event, projectId: string) => {
+    stopOrchestrator(projectId);
     const db = getDb();
-    db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
-    // TODO: 实际停止 orchestrator
+    db.prepare('DELETE FROM agent_logs WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM agents WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM features WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
     return { success: true };
   });
 }
+

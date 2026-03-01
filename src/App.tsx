@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from './stores/app-store';
 import { Sidebar } from './components/Sidebar';
+import { StatusBar } from './components/StatusBar';
 import { WishPage } from './pages/WishPage';
 import { BoardPage } from './pages/BoardPage';
 import { TeamPage } from './pages/TeamPage';
@@ -8,7 +9,8 @@ import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
-  const { currentPage, addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured } = useAppStore();
+  const { currentPage, addLog, updateFeatureStatus, updateAgentStatus, setSettingsConfigured, currentProjectId } = useAppStore();
+  const [stats, setStats] = useState<any>(null);
 
   // 订阅主进程事件
   useEffect(() => {
@@ -47,6 +49,17 @@ export function App() {
     return () => unsubs.forEach(fn => fn());
   }, []);
 
+  // 定时拉取统计
+  useEffect(() => {
+    if (!currentProjectId) { setStats(null); return; }
+    const poll = async () => {
+      try { setStats(await window.agentforge.project.getStats(currentProjectId)); } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => clearInterval(t);
+  }, [currentProjectId]);
+
   const renderPage = () => {
     switch (currentPage) {
       case 'wish': return <WishPage />;
@@ -58,11 +71,15 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen bg-slate-950 text-slate-100">
-      <Sidebar />
-      <main className="flex-1 overflow-hidden">
-        {renderPage()}
-      </main>
+    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100">
+      <div className="flex flex-1 min-h-0">
+        <Sidebar />
+        <main className="flex-1 overflow-hidden">
+          {renderPage()}
+        </main>
+      </div>
+      <StatusBar stats={stats} />
     </div>
   );
 }
+

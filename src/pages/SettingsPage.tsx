@@ -30,6 +30,7 @@ export function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [models, setModels] = useState<string[]>([]);
 
   // 加载已保存的设置
@@ -81,9 +82,12 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaved(false);
     await window.agentforge.settings.save(settings);
     setSettingsConfigured(!!settings.apiKey);
     setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -205,7 +209,7 @@ export function SettingsPage() {
           onClick={handleSave}
           className="w-full py-3 bg-forge-600 hover:bg-forge-500 rounded-lg font-medium transition-all shadow-lg shadow-forge-600/20"
         >
-          {saving ? '保存中...' : '💾 保存设置'}
+          {saving ? '保存中...' : saved ? '✅ 已保存' : '💾 保存设置'}
         </button>
       </div>
     </div>

@@ -2,8 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 /**
  * Preload — 暴露安全的 API 给渲染进程
- * 
- * 所有主进程通信都通过这里，渲染进程没有 Node 权限
  */
 contextBridge.exposeInMainWorld('agentforge', {
   // ── 设置 ──
@@ -26,8 +24,11 @@ contextBridge.exposeInMainWorld('agentforge', {
     get: (id: string) => ipcRenderer.invoke('project:get', id),
     getFeatures: (projectId: string) => ipcRenderer.invoke('project:get-features', projectId),
     getAgents: (projectId: string) => ipcRenderer.invoke('project:get-agents', projectId),
+    getLogs: (projectId: string, limit?: number) => ipcRenderer.invoke('project:get-logs', projectId, limit),
+    getStats: (projectId: string) => ipcRenderer.invoke('project:get-stats', projectId),
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
+    delete: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
   },
 
   // ── 事件订阅 (主进程 → 渲染进程) ──
@@ -37,3 +38,4 @@ contextBridge.exposeInMainWorld('agentforge', {
     return () => ipcRenderer.removeListener(channel, subscription);
   },
 });
+

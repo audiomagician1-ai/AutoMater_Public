@@ -18,8 +18,11 @@ interface AgentForgeAPI {
     get(id: string): Promise<any>;
     getFeatures(projectId: string): Promise<any[]>;
     getAgents(projectId: string): Promise<any[]>;
+    getLogs(projectId: string, limit?: number): Promise<any[]>;
+    getStats(projectId: string): Promise<{ features: any; agents: any }>;
     start(projectId: string): Promise<{ success: boolean }>;
     stop(projectId: string): Promise<{ success: boolean }>;
+    delete(projectId: string): Promise<{ success: boolean }>;
   };
   on(channel: string, callback: (...args: any[]) => void): () => void;
 }
@@ -41,3 +44,4 @@ declare global {
 }
 
 export {};
+
