@@ -193,27 +193,27 @@ export function App() {
     if (!insideProject) {
       // 外层: 项目列表 / 设置
       switch (globalPage) {
-        case 'settings': return <SettingsPage />;
-        case 'guide':    return <GuidePage />;
+        case 'settings': return <ErrorBoundary key="settings"><SettingsPage /></ErrorBoundary>;
+        case 'guide':    return <ErrorBoundary key="guide"><GuidePage /></ErrorBoundary>;
         case 'projects':
-        default: return <ProjectsPage />;
+        default: return <ErrorBoundary key="projects"><ProjectsPage /></ErrorBoundary>;
       }
     }
-    // 内层: 项目子页
+    // 内层: 项目子页 — 每个页面独立 ErrorBoundary, key 确保页面切换时重置状态
     switch (projectPage) {
-      case 'overview': return <OverviewPage />;
-      case 'wish':     return <WishPage />;
-      case 'board':    return <BoardPage />;
-      case 'team':     return <TeamPage />;
-      case 'docs':     return <DocsPage />;
-      case 'workflow': return <WorkflowPage />;
-      case 'output':   return <OutputPage />;
-      case 'logs':     return <LogsPage />;
-      case 'context':  return <ContextPage />;
-      case 'timeline': return <TimelinePage />;
-      case 'sessions': return <SessionManager projectId={currentProjectId} visible={true} />;
-      case 'guide':    return <GuidePage />;
-      default:         return <OverviewPage />;
+      case 'overview': return <ErrorBoundary key="overview"><OverviewPage /></ErrorBoundary>;
+      case 'wish':     return <ErrorBoundary key="wish"><WishPage /></ErrorBoundary>;
+      case 'board':    return <ErrorBoundary key="board"><BoardPage /></ErrorBoundary>;
+      case 'team':     return <ErrorBoundary key="team"><TeamPage /></ErrorBoundary>;
+      case 'docs':     return <ErrorBoundary key="docs"><DocsPage /></ErrorBoundary>;
+      case 'workflow': return <ErrorBoundary key="workflow"><WorkflowPage /></ErrorBoundary>;
+      case 'output':   return <ErrorBoundary key="output"><OutputPage /></ErrorBoundary>;
+      case 'logs':     return <ErrorBoundary key="logs"><LogsPage /></ErrorBoundary>;
+      case 'context':  return <ErrorBoundary key="context"><ContextPage /></ErrorBoundary>;
+      case 'timeline': return <ErrorBoundary key="timeline"><TimelinePage /></ErrorBoundary>;
+      case 'sessions': return <ErrorBoundary key="sessions"><SessionManager projectId={currentProjectId} visible={true} /></ErrorBoundary>;
+      case 'guide':    return <ErrorBoundary key="guide-proj"><GuidePage /></ErrorBoundary>;
+      default:         return <ErrorBoundary key="overview-default"><OverviewPage /></ErrorBoundary>;
     }
   };
 
@@ -222,9 +222,7 @@ export function App() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 overflow-hidden">
-          <ErrorBoundary>
-            {renderContent()}
-          </ErrorBoundary>
+          {renderContent()}
         </main>
         {insideProject && <MetaAgentPanel />}
       </div>
