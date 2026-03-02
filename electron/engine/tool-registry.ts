@@ -30,6 +30,8 @@ export interface ToolResult {
   output: string;
   /** 操作类型 (用于 UI 展示) */
   action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer';
+  /** 附带图片 Base64 (截图/浏览器截图等) */
+  _imageBase64?: string;
 }
 
 /** v16.0: 项目级 Agent 权限开关 */
@@ -65,11 +67,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   // ── File Operations ──
   {
     name: 'read_file',
-    description: '读取工作区中指定文件的内容，返回带行号的文本。支持分页读取大文件。',
+    description: '读取文件内容（支持任意大小文件）。返回带行号的文本，支持 offset/limit 分页。大文件用流式读取，无大小限制。',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '相对于工作区的文件路径' },
+        path: { type: 'string', description: '文件路径（相对于工作区，或绝对路径需要 externalRead 权限）' },
         offset: { type: 'number', description: '起始行号 (从1开始)，默认1' },
         limit: { type: 'number', description: '读取行数，默认300，最大1000' },
       },
@@ -125,14 +127,92 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'search_files',
-    description: '在工作区文件中搜索文本模式。返回匹配行及前后各2行上下文。',
+    description: '在工作区文件中搜索文本/正则。基于 ripgrep（自动降级）。返回匹配行及上下文。',
     parameters: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: '搜索的文本模式' },
+        pattern: { type: 'string', description: '搜索模式（支持正则语法）' },
         include: { type: 'string', description: '文件类型过滤 (如 *.ts, *.py)', default: '*' },
       },
       required: ['pattern'],
+    },
+  },
+  // v17.0: 高级代码搜索工具
+  {
+    name: 'code_search',
+    description: '高性能代码搜索 (ripgrep)。支持正则、多文件类型过滤、排除模式、大小写控制、全词匹配等高级选项。搜索大型代码库时优先使用此工具。',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: '正则表达式搜索模式' },
+        include: {
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: '文件过滤 glob 模式，如 "*.ts" 或 ["*.ts", "*.tsx"]',
+        },
+        exclude: {
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: '排除 glob 模式，如 "*.test.ts" 或 ["*.test.*", "*.spec.*"]',
+        },
+        context: { type: 'number', description: '上下文行数(前后各N行)，默认2' },
+        max_results: { type: 'number', description: '最大结果数，默认50' },
+        case_sensitive: { type: 'boolean', description: '区分大小写，默认false' },
+        fixed_string: { type: 'boolean', description: '固定字符串搜索(非正则)，默认false' },
+        whole_word: { type: 'boolean', description: '全词匹配，默认false' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'code_search_files',
+    description: '按 glob 模式搜索文件名（基于 ripgrep --files）。比 glob_files 更快，且遵守 .gitignore。',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Glob 模式，如 "*.ts"、"**/*config*"' },
+        max_results: { type: 'number', description: '最大结果数，默认50' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'read_many_files',
+    description: '按 glob 模式批量读取多个文件的内容。一次返回多个文件的带行号内容。适合快速了解多个相关文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        patterns: {
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: 'Glob 模式（字符串或数组），如 "src/**/*.ts" 或 ["src/types.ts", "src/config.ts"]',
+        },
+        max_files: { type: 'number', description: '最多读取文件数，默认30' },
+        max_lines_per_file: { type: 'number', description: '每文件最多行数，默认200' },
+      },
+      required: ['patterns'],
+    },
+  },
+  {
+    name: 'repo_map',
+    description: '生成项目代码结构索引 — 提取所有函数签名、类定义、接口、export 等关键符号。快速了解整体项目架构。',
+    parameters: {
+      type: 'object',
+      properties: {
+        max_files: { type: 'number', description: '最多扫描文件数，默认80' },
+        max_symbols: { type: 'number', description: '每文件最多符号数，默认20' },
+        max_lines: { type: 'number', description: '总输出行数上限，默认300' },
+      },
+    },
+  },
+  {
+    name: 'code_graph_query',
+    description: '查询代码 import/export 依赖图。支持: summary(总览), depends_on(查依赖), depended_by(查被谁依赖), related(N跳关联文件)。',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['summary', 'depends_on', 'depended_by', 'related'], description: '查询类型' },
+        file: { type: 'string', description: '目标文件的相对路径（depends_on/depended_by/related 必填）' },
+        hops: { type: 'number', description: 'related 查询的跳数，默认2' },
+      },
+      required: ['type'],
     },
   },
   {
@@ -1423,7 +1503,9 @@ export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 're
 const ROLE_TOOLS: Record<AgentRole, string[]> = {
   pm: [
     'think', 'task_complete', 'todo_write', 'todo_read',
-    'read_file', 'list_files', 'search_files', 'glob_files',  // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
+    'read_file', 'list_files', 'search_files', 'glob_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0: 高级搜索
+    // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'generate_image', 'configure_image_gen',  // v9.0
@@ -1434,6 +1516,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   architect: [
     'think', 'task_complete', 'todo_write', 'todo_read',
     'read_file', 'list_files', 'search_files', 'glob_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'write_file',
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
@@ -1446,6 +1529,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'think', 'task_complete', 'todo_write', 'todo_read',
     'read_file', 'write_file', 'edit_file', 'batch_edit',
     'list_files', 'glob_files', 'search_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'run_command', 'run_test', 'run_lint',
     'git_commit', 'git_diff',
     'github_close_issue', 'github_add_comment', 'github_get_issue',  // v13.0
@@ -1493,6 +1577,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
     'read_file', 'list_files', 'search_files', 'glob_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'run_command', 'run_test', 'run_lint',
     'web_search', 'fetch_url', 'http_request',
     'web_search_boost', 'deep_research',  // v8.0
@@ -1520,6 +1605,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     // v13.0: 文件操作 (完整读写)
     'read_file', 'write_file', 'edit_file', 'batch_edit',
     'list_files', 'glob_files', 'search_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     // 命令执行
     'run_command', 'check_process', 'run_test', 'run_lint',
     // HTTP
@@ -1554,6 +1640,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   researcher: [
     'think',
     'read_file', 'list_files', 'search_files', 'glob_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research',  // v8.0
   ],
@@ -1561,6 +1648,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   'meta-agent': [
     'think', 'task_complete',
     'read_file', 'list_files', 'search_files', 'glob_files',
+    'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research',  // v8.0
     'memory_read', 'memory_append',
@@ -1702,5 +1790,7 @@ export function isAsyncTool(toolName: string): boolean {
         'web_search_boost', 'deep_research', 'run_blackbox_tests',
         'analyze_image', 'compare_screenshots', 'visual_assert',
         'spawn_agent', 'spawn_parallel', 'spawn_researcher',
+        'read_file', 'read_many_files', 'code_graph_query',  // v17.0: async file ops
+        'generate_image', 'edit_image',
        ].includes(toolName);
 }

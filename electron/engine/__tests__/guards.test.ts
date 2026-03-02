@@ -28,10 +28,9 @@ describe('guardToolCall', () => {
     expect(result.allowed).toBe(true);
   });
 
-  it('rejects absolute path', () => {
+  it('allows absolute path for read_file (v16.0 externalRead)', () => {
     const result = guardToolCall('read_file', { path: '/etc/passwd' }, true);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Absolute');
+    expect(result.allowed).toBe(true);
   });
 
   it('rejects path traversal', () => {

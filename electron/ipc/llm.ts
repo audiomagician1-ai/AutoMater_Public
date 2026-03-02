@@ -164,7 +164,7 @@ async function chatOpenAI(settings: AppSettings, request: ChatRequest) {
     return { success: false, error: `API error ${res.status}: ${text}`, content: '' };
   }
 
-  const data = await res.json() as any;
+  const data = await res.json() as { choices: Array<{ message: { content: string | null } }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
   const choice = data.choices[0];
   return {
     success: true,

@@ -32,6 +32,7 @@ const BATCH_ACCEPT_SIZE = 4;
 export async function phasePMAnalysis(
   projectId: string, project: ProjectRow, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
+  permissions?: import('../tool-registry').AgentPermissions,
 ): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = `pm-${Date.now().toString(36)}`;
@@ -59,6 +60,7 @@ export async function phasePMAnalysis(
       win, signal,
       maxIterations: 15,
       model: getTeamMemberLLMConfig(projectId, 'pm', 0, settings).model,
+      permissions,
     });
 
     if (pmReactResult.blocked) {

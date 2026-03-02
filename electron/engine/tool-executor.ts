@@ -15,6 +15,11 @@ import { execSync } from 'child_process';
 import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
+import {
+  codeSearch, formatSearchResult, codeSearchFiles,
+  readManyFiles, formatReadManyResult,
+  streamReadFile, queryCodeGraph, getRepoMap,
+} from './code-search';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment, getIssue, createBranch, switchBranch, deleteBranch, listBranches, getCurrentBranch, gitPull, gitPush, gitFetch, createPR, listPRs, getPR, mergePR } from './git-provider';
 import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
@@ -95,98 +100,6 @@ function checkExternalReadPermission(inputPath: string, ctx: ToolContext): { all
 }
 
 // ═══════════════════════════════════════
-// v6.0: 搜索结果智能排序
-// ═══════════════════════════════════════
-
-/** 路径权重: 关键路径的匹配更重要 */
-const PATH_WEIGHTS: Array<[RegExp, number]> = [
-  [/\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|h)$/i, 1.5],   // 源文件
-  [/index\.|main\.|app\.|server\./i, 1.3],                // 入口文件
-  [/test|spec|__test__/i, 0.8],                           // 测试文件 (略降)
-  [/\.md$/i, 0.6],                                         // 文档
-  [/\.json$|\.yaml$|\.yml$/i, 0.7],                       // 配置
-  [/node_modules|dist|build|\.min\./i, 0.1],              // 产出/vendor (大幅降权)
-];
-
-function getPathWeight(filepath: string): number {
-  for (const [re, w] of PATH_WEIGHTS) {
-    if (re.test(filepath)) return w;
-  }
-  return 1.0;
-}
-
-/**
- * 对 grep/Select-String 原始输出按文件分组、按匹配密度 × 路径权重排序，
- * 然后只输出 Top N 个最相关文件的匹配。
- */
-function rankSearchResults(raw: string, pattern: string, workspacePath: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '无匹配';
-
-  const lines = trimmed.split('\n');
-
-  // Group by file
-  const fileMatches = new Map<string, { lines: string[]; matchCount: number }>();
-
-  for (const line of lines) {
-    // Windows Select-String: "C:\path\file.ts:123:content" or just file paths
-    // Unix grep: "./path/file.ts:123:content"
-    const match = line.match(/^(?:\s*>?\s*)?(.+?)[:\(](\d+)/);
-    if (!match) continue;
-
-    let filepath = match[1].trim();
-    // Normalize path: strip workspacePath prefix for display
-    filepath = filepath.replace(workspacePath, '').replace(/^[\\/]+/, '');
-
-    if (!fileMatches.has(filepath)) {
-      fileMatches.set(filepath, { lines: [], matchCount: 0 });
-    }
-    const entry = fileMatches.get(filepath)!;
-    entry.lines.push(line.trim());
-    // Check if this line is a direct match (not context)
-    if (!line.trim().startsWith('>') && line.includes(pattern.replace(/[.*+?^${}()|[\]\\]/g, ''))) {
-      entry.matchCount++;
-    } else {
-      entry.matchCount += 0.5; // context lines count less
-    }
-  }
-
-  if (fileMatches.size === 0) return trimmed.slice(0, 6000);
-
-  // Score files: matchCount × pathWeight × density
-  const scored = [...fileMatches.entries()].map(([filepath, data]) => {
-    const pathWeight = getPathWeight(filepath);
-    const density = data.matchCount / Math.max(data.lines.length, 1);
-    const score = data.matchCount * pathWeight * (1 + density);
-    return { filepath, data, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  // Emit top 15 files
-  const output: string[] = [`搜索 "${pattern}" — ${fileMatches.size} 个文件匹配 (按相关性排序):\n`];
-  const topN = scored.slice(0, 15);
-
-  for (const { filepath, data, score } of topN) {
-    output.push(`\n── ${filepath} (${data.matchCount} 处匹配, score=${score.toFixed(1)}) ──`);
-    // Show max 6 lines per file
-    const maxLines = Math.min(data.lines.length, 6);
-    for (let i = 0; i < maxLines; i++) {
-      output.push(data.lines[i]);
-    }
-    if (data.lines.length > maxLines) {
-      output.push(`  ... 和 ${data.lines.length - maxLines} 行更多匹配`);
-    }
-  }
-
-  if (scored.length > 15) {
-    output.push(`\n... 还有 ${scored.length - 15} 个文件有匹配`);
-  }
-
-  return output.join('\n');
-}
-
-// ═══════════════════════════════════════
 // Synchronous Tool Execution
 // ═══════════════════════════════════════
 
@@ -203,43 +116,39 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
     switch (call.name) {
 
+      // v17.0: read_file → 已迁移到 executeToolAsyncRaw (async 路径)
+      // 此处作为 fallback: 若意外走到同步路径, 仍提供基本读取能力
       case 'read_file': {
-        // v16.0: 支持绝对路径只读访问（需要 externalRead 权限）
-        const inputPath = call.arguments.path || '';
-        const normalizedInput = path.normalize(inputPath);
-        let content: string | null;
-        if (path.isAbsolute(normalizedInput)) {
-          const perm = checkExternalReadPermission(inputPath, ctx);
+        const rfInput = call.arguments.path || '';
+        const rfNorm = path.normalize(rfInput);
+        let rfTarget: string;
+        if (path.isAbsolute(rfNorm)) {
+          const perm = checkExternalReadPermission(rfInput, ctx);
           if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
-          if (fs.existsSync(normalizedInput) && fs.statSync(normalizedInput).isFile()) {
-            const stat = fs.statSync(normalizedInput);
-            if (stat.size > 1024 * 1024) {
-              content = `[文件过大: ${(stat.size / 1024).toFixed(0)} KB, 超过 1MB 限制]`;
-            } else {
-              content = fs.readFileSync(normalizedInput, 'utf-8');
-            }
-          } else {
-            content = null;
-          }
+          rfTarget = rfNorm;
         } else {
-          content = readWorkspaceFile(ctx.workspacePath, inputPath);
+          if (rfNorm.startsWith('..')) return { success: false, output: `路径不安全: ${rfInput}`, action: 'read' };
+          rfTarget = path.join(ctx.workspacePath, rfNorm);
         }
-        if (content === null) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'read' };
-        const lines = content.split('\n');
-        const offset = Math.max(1, call.arguments.offset ?? 1);
-        const limit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
-        const start = offset - 1;
-        const end = Math.min(start + limit, lines.length);
-        const numbered = lines.slice(start, end)
-          .map((line, i) => `${String(start + i + 1).padStart(4)}| ${line}`)
-          .join('\n');
-        const header = `[${call.arguments.path}] ${lines.length} 行, 显示 ${offset}-${end}`;
-        const hasMore = end < lines.length ? `\n... 还有 ${lines.length - end} 行 (用 offset=${end + 1} 继续)` : '';
-        return { success: true, output: `${header}\n${numbered}${hasMore}`, action: 'read' };
+        if (!fs.existsSync(rfTarget) || !fs.statSync(rfTarget).isFile()) {
+          return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'read' };
+        }
+        try {
+          const rfContent = fs.readFileSync(rfTarget, 'utf-8');
+          const rfLines = rfContent.split('\n');
+          const rfOffset = Math.max(1, call.arguments.offset ?? 1);
+          const rfLimit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
+          const rfSlice = rfLines.slice(rfOffset - 1, rfOffset - 1 + rfLimit);
+          const rfOut = rfSlice.map((l, i) => `${rfOffset + i}| ${l}`).join('\n');
+          const rfHasMore = rfOffset - 1 + rfLimit < rfLines.length;
+          return { success: true, output: `[${call.arguments.path}] ${rfLines.length} 行, 显示 ${rfOffset}-${Math.min(rfOffset - 1 + rfLimit, rfLines.length)}\n${rfOut}${rfHasMore ? `\n... 还有更多内容 (用 offset=${rfOffset + rfLimit} 继续)` : ''}`, action: 'read' };
+        } catch (rfErr: unknown) {
+          return { success: false, output: `读取失败: ${rfErr instanceof Error ? rfErr.message : String(rfErr)}`, action: 'read' };
+        }
       }
 
       case 'write_file': {
-        const check = assertSafePath(call.arguments.path);
+        const check = assertWritePath(call.arguments.path, ctx);
         if (!check.ok) return { success: false, output: check.error, action: 'write' };
         // v6.1: 文件级写锁 — 多 Worker 并行时防止互相覆盖
         if (ctx.workerId && ctx.featureId) {
@@ -248,7 +157,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
             return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'write' };
           }
         }
-        const absPath = path.join(ctx.workspacePath, check.normalized);
+        const absPath = check.absPath;
         fs.mkdirSync(path.dirname(absPath), { recursive: true });
         fs.writeFileSync(absPath, call.arguments.content, 'utf-8');
         const size = Buffer.byteLength(call.arguments.content, 'utf-8');
@@ -256,7 +165,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'edit_file': {
-        const check = assertSafePath(call.arguments.path);
+        const check = assertWritePath(call.arguments.path, ctx);
         if (!check.ok) return { success: false, output: check.error, action: 'edit' };
         // v6.1: 文件级写锁
         if (ctx.workerId && ctx.featureId) {
@@ -265,9 +174,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
             return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'edit' };
           }
         }
-        const absPath = path.join(ctx.workspacePath, check.normalized);
-        if (!fs.existsSync(absPath)) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'edit' };
-        let content = fs.readFileSync(absPath, 'utf-8');
+        const editAbsPath = check.absPath;
+        if (!fs.existsSync(editAbsPath)) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'edit' };
+        let content = fs.readFileSync(editAbsPath, 'utf-8');
         const oldStr: string | undefined | null = call.arguments.old_string;
         const newStr: string = call.arguments.new_string;
         if (oldStr === undefined || oldStr === null) {
@@ -275,7 +184,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         }
         if (oldStr === '') {
           content = content + newStr;
-          fs.writeFileSync(absPath, content, 'utf-8');
+          fs.writeFileSync(editAbsPath, content, 'utf-8');
           return { success: true, output: `已追加到 ${check.normalized} (${Buffer.byteLength(newStr, 'utf-8')} bytes added)`, action: 'edit' };
         }
         const occurrences = content.split(oldStr).length - 1;
@@ -287,14 +196,14 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
             return { success: false, output: `未找到匹配的文本 (0 occurrences)。请确保 old_string 精确匹配文件内容（包含缩进和空白）。`, action: 'edit' };
           }
           const newTrimmedContent = trimmedContent.replace(trimmedOld, newStr);
-          fs.writeFileSync(absPath, newTrimmedContent, 'utf-8');
+          fs.writeFileSync(editAbsPath, newTrimmedContent, 'utf-8');
           return { success: true, output: `已编辑 ${check.normalized} (1 处替换, trimmed match)`, action: 'edit' };
         }
         if (occurrences > 1) {
           return { success: false, output: `old_string 匹配了 ${occurrences} 处，需要更精确的上下文使其唯一。`, action: 'edit' };
         }
         content = content.replace(oldStr, newStr);
-        fs.writeFileSync(absPath, content, 'utf-8');
+        fs.writeFileSync(editAbsPath, content, 'utf-8');
         return { success: true, output: `已编辑 ${check.normalized} (1 处替换)`, action: 'edit' };
       }
 
@@ -342,29 +251,61 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         }
       }
 
+      // v17.0: search_files → 升级为 ripgrep + 结构化搜索
       case 'search_files': {
-        const pattern = call.arguments.pattern;
-        const include = call.arguments.include || '*';
-        try {
-          let cmd: string;
-          if (process.platform === 'win32') {
-            const escapedPattern = pattern.replace(/'/g, "''");
-            const includeFilter = include === '*' ? '' : ` -Include '${include}'`;
-            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}' -Context 2,2 | Select-Object -First 50 | Out-String -Width 200"`;
-          } else {
-            cmd = `grep -rn --include="${include}" -C 2 "${pattern.replace(/"/g, '\\"')}" . | grep -v node_modules | head -120`;
-          }
-          const rawOutput = execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024, timeout: 20000 });
+        const searchPattern = call.arguments.pattern;
+        const searchInclude = call.arguments.include;
+        const includeArr = searchInclude && searchInclude !== '*' ? [searchInclude] : undefined;
+        const result = codeSearch(ctx.workspacePath, searchPattern, {
+          include: includeArr,
+          maxResults: 50,
+          context: 2,
+        });
+        return { success: true, output: formatSearchResult(result) || '无匹配', action: 'search' };
+      }
 
-          // v6.0: 智能排序 — 按匹配密度 + 文件路径权重排序
-          const ranked = rankSearchResults(rawOutput, pattern, ctx.workspacePath);
-          return { success: true, output: ranked.slice(0, 6000) || '无匹配', action: 'search' };
-        } catch (err) {
-          return { success: true, output: '无匹配', action: 'search' };
-        }
+      // v17.0: 新工具 code_search — 高级代码搜索
+      case 'code_search': {
+        const csPattern = call.arguments.pattern;
+        const csInclude = call.arguments.include ? (Array.isArray(call.arguments.include) ? call.arguments.include : [call.arguments.include]) : undefined;
+        const csExclude = call.arguments.exclude ? (Array.isArray(call.arguments.exclude) ? call.arguments.exclude : [call.arguments.exclude]) : undefined;
+        const csResult = codeSearch(ctx.workspacePath, csPattern, {
+          include: csInclude,
+          exclude: csExclude,
+          maxResults: call.arguments.max_results ?? 50,
+          context: call.arguments.context ?? 2,
+          caseSensitive: call.arguments.case_sensitive ?? false,
+          fixedString: call.arguments.fixed_string ?? false,
+          wholeWord: call.arguments.whole_word ?? false,
+        });
+        return { success: true, output: formatSearchResult(csResult), action: 'search' };
+      }
+
+      // v17.0: code_search_files — 文件名 glob 搜索
+      case 'code_search_files': {
+        const fResult = codeSearchFiles(ctx.workspacePath, call.arguments.pattern, {
+          maxResults: call.arguments.max_results ?? 50,
+        });
+        if (fResult.files.length === 0) return { success: true, output: '无匹配文件', action: 'search' };
+        const footer = fResult.truncated ? `\n... [已截断, 还有更多文件]` : '';
+        return { success: true, output: fResult.files.join('\n') + footer, action: 'search' };
+      }
+
+      // v17.0: repo_map — 代码结构索引
+      case 'repo_map': {
+        const map = getRepoMap(ctx.workspacePath, {
+          maxFiles: call.arguments.max_files ?? 80,
+          maxSymbolsPerFile: call.arguments.max_symbols ?? 20,
+          maxTotalLines: call.arguments.max_lines ?? 300,
+        });
+        return { success: true, output: map || '(空项目, 无代码文件)', action: 'read' };
       }
 
       case 'run_command': {
+        // v16.0: 需要 shellExec 权限
+        if (!ctx.permissions?.shellExec) {
+          return { success: false, output: '执行命令被拒绝。请在全景页开启「执行命令」权限。', action: 'shell' };
+        }
         const background = call.arguments.background === true;
         const timeoutSec = call.arguments.timeout_seconds;
         const timeoutMs = timeoutSec ? timeoutSec * 1000 : (background ? 1800_000 : 60_000);
@@ -496,7 +437,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           `## 影响范围: ${impact}`,
           affectedFeatures.length > 0 ? `受影响的 Features: ${affectedFeatures.join(', ')}` : '',
           '',
-          `> 提出者: ${(call.arguments as any)._agentId || 'agent'}`,
+          `> 提出者: ${call.arguments._agentId as string || 'agent'}`,
           `> 时间: ${new Date().toISOString()}`,
         ].filter(Boolean).join('\n');
 
@@ -524,12 +465,12 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       case 'todo_write': {
         const todos: TodoItem[] = call.arguments.todos || [];
-        const agentId = (call.arguments as any)._agentId || 'default';
+        const agentId = (call.arguments._agentId as string) || 'default';
         return { success: true, output: todoWrite(agentId, todos), action: 'plan' };
       }
 
       case 'todo_read': {
-        const agentId = (call.arguments as any)._agentId || 'default';
+        const agentId = (call.arguments._agentId as string) || 'default';
         return { success: true, output: todoRead(agentId), action: 'plan' };
       }
 
@@ -559,7 +500,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           output: `[screenshot] ${result.width}x${result.height} PNG (${Math.round(result.base64.length / 1024)}KB base64)`,
           action: 'computer',
           ...(result.base64 ? { _imageBase64: result.base64 } : {}),
-        } as any;
+        };
       }
 
       case 'mouse_click': {
@@ -608,6 +549,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'run_blackbox_tests':
       case 'fetch_url':
       case 'http_request':
+      // v17.0: async file operations
+      case 'read_many_files':
+      case 'code_graph_query':
       case 'browser_launch':
       case 'browser_navigate':
       case 'browser_screenshot':
@@ -870,6 +814,68 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     };
   }
 
+  // ── v17.0: Enhanced File Operations (async) ──
+  if (call.name === 'read_file') {
+    const inputPath = call.arguments.path || '';
+    const normalizedInput = path.normalize(inputPath);
+    const offset = Math.max(1, call.arguments.offset ?? 1);
+    const limit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
+
+    let targetPath: string;
+    if (path.isAbsolute(normalizedInput)) {
+      const perm = checkExternalReadPermission(inputPath, ctx);
+      if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+      targetPath = normalizedInput;
+    } else {
+      const check = path.normalize(inputPath);
+      if (check.startsWith('..')) return { success: false, output: `路径不安全: ${inputPath}`, action: 'read' };
+      targetPath = path.join(ctx.workspacePath, check);
+    }
+
+    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+      return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'read' };
+    }
+
+    try {
+      const result = await streamReadFile(targetPath, offset, limit);
+      const sizeStr = result.fileSize > 1024 * 1024
+        ? `${(result.fileSize / (1024 * 1024)).toFixed(1)}MB`
+        : `${(result.fileSize / 1024).toFixed(0)}KB`;
+      const header = `[${call.arguments.path}] ${result.totalLines > 0 ? result.totalLines + ' 行' : sizeStr}, 显示 ${result.startLine}-${result.endLine}`;
+      const hasMore = result.hasMore ? `\n... 还有更多内容 (用 offset=${result.endLine + 1} 继续)` : '';
+      return { success: true, output: `${header}\n${result.content}${hasMore}`, action: 'read' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, output: `读取失败: ${msg}`, action: 'read' };
+    }
+  }
+
+  if (call.name === 'read_many_files') {
+    const patterns: string[] = Array.isArray(call.arguments.patterns)
+      ? call.arguments.patterns
+      : [call.arguments.patterns || call.arguments.pattern];
+    const result = readManyFiles(ctx.workspacePath, patterns, {
+      maxFiles: call.arguments.max_files ?? 30,
+      maxLinesPerFile: call.arguments.max_lines_per_file ?? 200,
+      maxTotalChars: call.arguments.max_total_chars ?? 80000,
+    });
+    return { success: true, output: formatReadManyResult(result), action: 'read' };
+  }
+
+  if (call.name === 'code_graph_query') {
+    try {
+      const output = await queryCodeGraph(ctx.workspacePath, {
+        type: call.arguments.type || 'summary',
+        file: call.arguments.file,
+        hops: call.arguments.hops ?? 2,
+      });
+      return { success: true, output, action: 'read' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, output: `依赖图查询失败: ${msg}`, action: 'read' };
+    }
+  }
+
   // ── Browser ──
   if (call.name === 'browser_launch') {
     const result = await launchBrowser({ headless: call.arguments.headless });
@@ -883,7 +889,7 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     const result = await browserScreenshot(call.arguments.full_page);
     if (result.success) {
       cacheScreenshot('latest', result.base64);
-      return { success: true, output: `[browser_screenshot] ${Math.round(result.base64.length / 1024)}KB PNG`, action: 'computer', _imageBase64: result.base64 } as any;
+      return { success: true, output: `[browser_screenshot] ${Math.round(result.base64.length / 1024)}KB PNG`, action: 'computer', _imageBase64: result.base64 };
     }
     return { success: false, output: `截图失败: ${result.error}`, action: 'computer' };
   }
@@ -1596,7 +1602,7 @@ async function executeMcpTool(call: ToolCall): Promise<ToolResult> {
 
     // 如果包含图片，附加 _imageBase64
     if (result.imageBase64) {
-      (toolResult as any)._imageBase64 = result.imageBase64;
+      toolResult._imageBase64 = result.imageBase64;
     }
 
     return toolResult;
@@ -1647,7 +1653,7 @@ function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
       source: {
         type: 'agent_acquired',
         projectId: ctx.projectId,
-        agentId: (call.arguments as any)._agentId || 'unknown',
+        agentId: (call.arguments._agentId as string) || 'unknown',
         timestamp: new Date().toISOString(),
       },
     });
@@ -1704,7 +1710,7 @@ function executeSkillImprove(call: ToolCall): ToolResult {
       knowledge: args.knowledge,
       trigger: args.trigger,
       changeNote: args.change_note,
-      author: (args as any)._agentId ? `agent:${(args as any)._agentId}` : 'agent:unknown',
+      author: args._agentId ? `agent:${args._agentId}` : 'agent:unknown',
     });
 
     if (!skill) {
@@ -1734,7 +1740,7 @@ function executeSkillRecordUsage(call: ToolCall, ctx: ToolContext): ToolResult {
       ctx.projectId,
       args.success,
       args.feedback,
-      (args as any)._agentId,
+      args._agentId as string | undefined,
     );
 
     return {

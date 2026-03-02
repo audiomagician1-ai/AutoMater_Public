@@ -223,12 +223,19 @@ describe('isAsyncTool', () => {
   });
 
   it('identifies sync tools (local file/think)', () => {
-    const syncTools = ['read_file', 'write_file', 'edit_file', 'list_files',
+    // v17.0: read_file moved to async (stream-based large file reading)
+    const syncTools = ['write_file', 'edit_file', 'list_files',
       'search_files', 'think', 'task_complete', 'todo_write', 'todo_read',
       'run_command', 'run_test', 'run_lint'];
     for (const t of syncTools) {
       expect(isAsyncTool(t), `${t} should be sync`).toBe(false);
     }
+  });
+
+  it('identifies read_file as async (v17.0 stream-based)', () => {
+    expect(isAsyncTool('read_file')).toBe(true);
+    expect(isAsyncTool('read_many_files')).toBe(true);
+    expect(isAsyncTool('code_graph_query')).toBe(true);
   });
 
   it('treats MCP and Skill tools as async', () => {

@@ -331,6 +331,31 @@ export function setupProjectHandlers() {
     return { success: true };
   });
 
+  // v16.0: 更新项目权限开关 (存储在 config JSON 中)
+  ipcMain.handle('project:update-permissions', async (_event, projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }) => {
+    const db = getDb();
+    const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as { config: string } | undefined;
+    if (!row) return { success: false, error: 'Project not found' };
+    let config: Record<string, unknown> = {};
+    try { config = JSON.parse(row.config || '{}'); } catch { /* silent */ }
+    config.permissions = permissions;
+    db.prepare('UPDATE projects SET config = ?, updated_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(config), projectId);
+    return { success: true };
+  });
+
+  // v16.0: 获取项目权限开关
+  ipcMain.handle('project:get-permissions', async (_event, projectId: string) => {
+    const db = getDb();
+    const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as { config: string } | undefined;
+    if (!row) return { externalRead: false, externalWrite: false, shellExec: false };
+    try {
+      const config = JSON.parse(row.config || '{}');
+      return config.permissions || { externalRead: false, externalWrite: false, shellExec: false };
+    } catch {
+      return { externalRead: false, externalWrite: false, shellExec: false };
+    }
+  });
+
   // ══════════════ 需求队列 (v3.1) ══════════════
 
   /** 创建一条新需求 */

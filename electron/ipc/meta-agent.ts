@@ -28,7 +28,8 @@ import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolC
 import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
-import type { LLMToolCall } from '../engine/types';
+import type { LLMToolCall, ProjectRow } from '../engine/types';
+import type { DaemonConfig } from '../engine/meta-agent-daemon';
 
 const log = createLogger('ipc:meta-agent');
 import { toErrorMessage, createLogger } from '../engine/logger';
@@ -170,8 +171,8 @@ function searchMemories(query: string, limit: number = 20): MetaAgentMemory[] {
 
 function getMemoryStats(): { total: number; byCategory: Record<string, number> } {
   const db = getDb();
-  const total = (db.prepare('SELECT COUNT(*) as count FROM meta_agent_memories').get() as any).count;
-  const rows = db.prepare('SELECT category, COUNT(*) as count FROM meta_agent_memories GROUP BY category').all() as any[];
+  const total = (db.prepare('SELECT COUNT(*) as count FROM meta_agent_memories').get() as { count: number }).count;
+  const rows = db.prepare('SELECT category, COUNT(*) as count FROM meta_agent_memories GROUP BY category').all() as Array<{ category: string; count: number }>;
   const byCategory: Record<string, number> = {};
   for (const r of rows) byCategory[r.category] = r.count;
   return { total, byCategory };
@@ -420,7 +421,7 @@ export function setupMetaAgentHandlers() {
     const model = settings.strongModel || settings.workerModel || settings.fastModel || 'gpt-4o';
 
     // 获取 meta-agent 角色的工具集
-    const project = projectId ? (getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any) : null;
+    const project = projectId ? (getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined) : null;
     const workspacePath = project?.workspace_path || '';
     const tools = getToolsForRole('meta-agent', 'local');
     const toolCtx: ToolContext = {
@@ -441,8 +442,8 @@ export function setupMetaAgentHandlers() {
 
     try {
       for (let iter = 1; iter <= MAX_REACT_ITERATIONS; iter++) {
-        const result = await callLLMWithTools(
-          settings, model, messages as any, tools, undefined,
+const result = await callLLMWithTools(
+            settings, model, messages, tools, undefined,
           config.maxResponseTokens || 4096,
         );
         const cost = calcCost(model, result.inputTokens, result.outputTokens);
@@ -588,7 +589,7 @@ export function setupMetaAgentHandlers() {
       projectId,
       agentId,
       agentRole: 'meta-agent',
-      messages: messages.map(m => ({ role: m.role as any, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })),
+      messages: messages.map(m => ({ role: m.role as 'system' | 'user' | 'assistant' | 'tool', content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })),
       totalInputTokens: totalIn,
       totalOutputTokens: totalOut,
       totalCost,
@@ -650,7 +651,7 @@ export function setupMetaAgentHandlers() {
     return getDaemonConfig();
   });
 
-  ipcMain.handle('meta-agent:daemon:config:save', (_event, config: any) => {
+  ipcMain.handle('meta-agent:daemon:config:save', (_event, config: Partial<DaemonConfig>) => {
     const saved = saveDaemonConfig(config);
     // Restart daemon with new config
     restartDaemon();

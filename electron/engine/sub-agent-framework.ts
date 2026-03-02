@@ -304,7 +304,7 @@ export async function spawnSubAgent(
   const agentId = config.agentId || `sub-${config.preset}-${Date.now().toString(36)}`;
   const maxIter = config.maxIterations ?? preset.maxIterations;
   const modelTier = config.modelTier ?? preset.modelTier;
-  const model = resolveModel(modelTier as any, settings);
+  const model = resolveModel(modelTier, settings);
 
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -352,7 +352,7 @@ export async function spawnSubAgent(
     task,
     startedAt: startTime,
     abortController,
-    promise: null as any, // 临时占位, 下面立即赋值
+    promise: null!, // 临时占位, 下面立即赋值
   };
   activeAgents.set(agentId, activeEntry);
 
@@ -395,7 +395,7 @@ export async function spawnSubAgent(
           role: 'assistant',
           content: msg.content,
           tool_calls: msg.tool_calls,
-        } as any);
+        });
 
         // 执行工具调用
         for (const tc of msg.tool_calls) {
@@ -426,7 +426,7 @@ export async function spawnSubAgent(
               role: 'tool',
               tool_call_id: tc.id,
               content: `❌ 权限不足: 子Agent(${config.preset}) 不允许使用 ${toolName}`,
-            } as any);
+            });
             continue;
           }
 
@@ -436,7 +436,7 @@ export async function spawnSubAgent(
               role: 'tool',
               tool_call_id: tc.id,
               content: `❌ 权限不足: 子Agent(${config.preset}) 为只读角色，不能执行写操作`,
-            } as any);
+            });
             continue;
           }
 
@@ -471,7 +471,7 @@ export async function spawnSubAgent(
             role: 'tool',
             tool_call_id: tc.id,
             content: (toolResult.output || '').slice(0, 4000),
-          } as any);
+          });
         }
       }
 

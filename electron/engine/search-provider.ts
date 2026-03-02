@@ -216,7 +216,10 @@ const serperProvider: ISearchProvider = {
       return { success: false, results: [], content: '', provider: 'serper', durationMs: Date.now() - start, error: `Serper HTTP ${res.status}` };
     }
 
-    const data = await res.json() as any;
+    const data = await res.json() as {
+      knowledgeGraph?: { title?: string; website?: string; description?: string };
+      organic?: Array<{ title?: string; link?: string; snippet?: string; date?: string }>;
+    };
     const results: SearchResult[] = [];
 
     // Knowledge Graph

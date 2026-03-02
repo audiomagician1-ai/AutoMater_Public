@@ -102,6 +102,8 @@ interface HotJoinContext {
   workerPromises: Set<Promise<void>>;
   /** 已分配的最大 worker 编号 (用于生成唯一 workerId) */
   nextWorkerSeq: number;
+  /** v16.0: 项目级权限开关 */
+  permissions?: import('./tool-registry').AgentPermissions;
 }
 
 /** 活跃的热加入上下文表 (projectId → HotJoinContext) */
@@ -182,7 +184,7 @@ export function ensureHotJoinListener() {
     // 启动 workerLoop — 它会自动从 lockNextFeature 领取任务
     const promise = workerLoop(
       projectId, workerId, ctx.qaId, ctx.settings, ctx.win, ctx.signal,
-      ctx.workspacePath, ctx.gitConfig,
+      ctx.workspacePath, ctx.gitConfig, ctx.permissions,
     );
     ctx.workerPromises.add(promise);
     // 当 workerLoop 结束（正常完成或异常），从集合中移除
@@ -253,6 +255,19 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     fs.mkdirSync(workspacePath, { recursive: true });
   }
 
+  // v16.0: 从项目 config 解析权限开关
+  let permissions: import('./tool-registry').AgentPermissions | undefined;
+  try {
+    const cfg = JSON.parse(project.config || '{}');
+    if (cfg.permissions) {
+      permissions = {
+        externalRead: cfg.permissions.externalRead === true,
+        externalWrite: cfg.permissions.externalWrite === true,
+        shellExec: cfg.permissions.shellExec === true,
+      };
+    }
+  } catch { /* config parse error — use defaults (all denied) */ }
+
   ensureGlobalMemory();
   if (workspacePath) ensureProjectMemory(workspacePath);
   if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
@@ -295,7 +310,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     // PM 分析 (pm_analysis or pm_triage)
     if (hasStage(workflowStages, 'pm_analysis')) {
-      const features = await phasePMAnalysis(projectId, project, settings, win, signal);
+      const features = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
       if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
       // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
@@ -316,7 +331,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       }
     } else if (hasStage(workflowStages, 'pm_triage')) {
       // 快速迭代模式: 只做分诊, 跳过架构和文档
-      const features = await phasePMAnalysis(projectId, project, settings, win, signal);
+      const features = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
       if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
       // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
@@ -539,6 +554,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     projectId, qaId, settings, win, signal, workspacePath, gitConfig,
     workerPromises: workerPromiseSet,
     nextWorkerSeq: workerCount,  // 从已有 worker 数量开始编号
+    permissions,
   };
   registerHotJoinContext(hotJoinCtx);
 
@@ -546,7 +562,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     const workerId = `dev-${i + 1}`;
     spawnAgent(projectId, workerId, 'developer', win);
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    const p = workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig);
+    const p = workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig, permissions);
     workerPromiseSet.add(p);
     p.finally(() => workerPromiseSet.delete(p));
   }

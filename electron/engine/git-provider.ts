@@ -40,6 +40,8 @@ export interface GitHubIssue {
   body?: string;
   labels: string[];
   html_url: string;
+  /** Present when the issue is actually a PR (GitHub issues API returns PRs too) */
+  pull_request?: Record<string, unknown>;
 }
 
 // ═══════════════════════════════════════

@@ -36,6 +36,7 @@ export async function workerLoop(
   projectId: string, workerId: string, qaId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, gitConfig: GitProviderConfig,
+  permissions?: import('../tool-registry').AgentPermissions,
 ) {
   const db = getDb();
   const maxQARetries = 3;
@@ -162,7 +163,7 @@ export async function workerLoop(
       });
 
       try {
-        const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback);
+        const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback, permissions);
         if (!reactResult.completed) {
           sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ ${feature.id} ReAct 未完成 (${qaAttempt}/${maxQARetries})` });
           completeFeatureSessionLink(devLinkId, `ReAct 未完成 (iter=${reactResult.iterations})`, false);

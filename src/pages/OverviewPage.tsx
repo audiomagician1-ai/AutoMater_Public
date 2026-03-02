@@ -38,8 +38,8 @@ export function OverviewPage() {
   const showAcceptancePanel = useAppStore(s => s.showAcceptancePanel);
   const setShowAcceptancePanel = useAppStore(s => s.setShowAcceptancePanel);
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [stats, setStats] = useState<any>(null);
-  const [project, setProject] = useState<any>(null);
+  const [stats, setStats] = useState<{ features: Record<string, number>; agents: Record<string, number> } | null>(null);
+  const [project, setProject] = useState<ProjectRow | null>(null);
 
   // v5.1: 导入分析实时进度
   const [importProgress, setImportProgress] = useState<{
@@ -93,6 +93,20 @@ export function OverviewPage() {
   }, [currentProjectId, load]);
 
   const [starting, setStarting] = useState(false);
+
+  // v16.0: 项目级权限开关
+  const [permissions, setPermissions] = useState({ externalRead: false, externalWrite: false, shellExec: false });
+  useEffect(() => {
+    if (!currentProjectId) return;
+    window.automater.project.getPermissions(currentProjectId).then(setPermissions);
+  }, [currentProjectId]);
+
+  const togglePermission = async (key: 'externalRead' | 'externalWrite' | 'shellExec') => {
+    if (!currentProjectId) return;
+    const next = { ...permissions, [key]: !permissions[key] };
+    setPermissions(next);
+    await window.automater.project.updatePermissions(currentProjectId, next);
+  };
 
   const handleStart = async () => {
     if (!currentProjectId || starting) return;
@@ -292,6 +306,27 @@ export function OverviewPage() {
                   <span>💰 {a.total_cost ? `$${a.total_cost.toFixed(3)}` : '$0'}</span>
                 </div>
               )}
+
+              {/* v16.0: 权限开关 */}
+              <div className="flex items-center gap-3 shrink-0 ml-auto pl-4 border-l border-slate-800/60">
+                {([
+                  { key: 'externalRead' as const, icon: '📖', label: '读外部' },
+                  { key: 'externalWrite' as const, icon: '✏️', label: '写外部' },
+                  { key: 'shellExec' as const, icon: '⚡', label: '执行命令' },
+                ] as const).map(p => (
+                  <button key={p.key} onClick={() => togglePermission(p.key)}
+                    title={`${permissions[p.key] ? '已开启' : '已关闭'}: Agent ${p.label}`}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                      permissions[p.key]
+                        ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-slate-800/40 text-slate-500 border border-slate-700/30 hover:text-slate-400'
+                    }`}>
+                    <span>{p.icon}</span>
+                    <span>{p.label}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${permissions[p.key] ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

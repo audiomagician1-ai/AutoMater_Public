@@ -53,14 +53,14 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [stats, setStats] = useState<BackupStats | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
-  const [backupContent, setBackupContent] = useState<any | null>(null);
+  const [backupContent, setBackupContent] = useState<BackupContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await (window as any).automater.session.list(projectId, agentId);
+      const list = await window.automater.session.list(projectId, agentId);
       setSessions(list || []);
     } catch (err) {
       log.error('Failed to load sessions:', err);
@@ -70,7 +70,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const loadStats = useCallback(async () => {
     try {
-      const s = await (window as any).automater.session.backupStats();
+      const s = await window.automater.session.backupStats();
       setStats(s);
     } catch (err) {
       log.error('Failed to load backup stats:', err);
@@ -86,7 +86,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const handleCreateSession = async (aId: string, role: string) => {
     try {
-      await (window as any).automater.session.create(projectId, aId, role);
+      await window.automater.session.create(projectId, aId, role);
       await loadSessions();
     } catch (err) {
       log.error('Failed to create session:', err);
@@ -95,7 +95,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
 
   const handleSwitchSession = async (sessionId: string) => {
     try {
-      await (window as any).automater.session.switch(sessionId);
+      await window.automater.session.switch(sessionId);
       await loadSessions();
     } catch (err) {
       log.error('Failed to switch session:', err);
@@ -105,7 +105,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   const handleViewBackup = async (sessionId: string) => {
     setSelectedSession(sessionId);
     try {
-      const backup = await (window as any).automater.session.readBackup(sessionId);
+      const backup = await window.automater.session.readBackup(sessionId);
       setBackupContent(backup);
     } catch (err) {
       log.error('Failed to read backup:', err);
@@ -122,7 +122,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
     });
     if (!ok) return;
     try {
-      const result = await (window as any).automater.session.cleanup(30);
+      const result = await window.automater.session.cleanup(30);
       toast.success(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
       await loadStats();
     } catch (err) {
@@ -182,7 +182,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
           {/* Filter */}
           <select
             value={filter}
-            onChange={e => setFilter(e.target.value as any)}
+            onChange={e => setFilter(e.target.value as 'all' | 'active' | 'completed')}
             className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300"
           >
             <option value="all">全部</option>
@@ -301,8 +301,8 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
                   <div>角色: {backupContent.agentRole} {backupContent.featureId ? `· Feature: ${backupContent.featureId}` : ''}</div>
                   <div>模型: {backupContent.model || 'N/A'}</div>
                   <div>消息: {backupContent.messageCount} 条 {backupContent.reactIterations ? `· ReAct: ${backupContent.reactIterations} 轮` : ''}</div>
-                  <div>Token: {(backupContent.totalInputTokens + backupContent.totalOutputTokens).toLocaleString()} · 费用: ${backupContent.totalCost.toFixed(4)}</div>
-                  <div>时间: {formatTime(backupContent.startedAt)} → {formatTime(backupContent.endedAt)}</div>
+                  <div>Token: {((backupContent.totalInputTokens || 0) + (backupContent.totalOutputTokens || 0)).toLocaleString()} · 费用: ${(backupContent.totalCost ?? 0).toFixed(4)}</div>
+                  <div>时间: {formatTime(backupContent.startedAt ?? null)} → {formatTime(backupContent.endedAt ?? null)}</div>
                 </div>
               </div>
 

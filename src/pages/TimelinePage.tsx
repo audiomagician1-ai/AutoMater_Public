@@ -18,6 +18,34 @@ const log = createLogger('TimelinePage');
 
 type TabId = 'timeline' | 'replay' | 'analytics' | 'checkpoints' | 'knowledge';
 
+/** v17.0: stats 接口 — 来自 events.getStats() */
+interface TimelineStats {
+  totalEvents: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  eventsByType: Record<string, number>;
+  toolStats: Array<{ toolName: string; calls: number; avgDurationMs: number; successRate: number }>;
+  featureStats: Array<{ featureId: string; events: number; durationMs: number; costUsd: number; toolCalls: number; llmCalls: number }>;
+  [key: string]: unknown;
+}
+
+/** v17.0: MissionRecord 扩展（含运行时计算字段） */
+interface MissionStatusRecord extends MissionRecord {
+  passed?: number;
+  total?: number;
+  canResume?: boolean;
+  estimatedRemainingCostUsd?: number;
+}
+
+/** v17.0: knowledge stats 接口 */
+interface KnowledgeStats {
+  totalEntries: number;
+  topUsed: Array<{ id: string; tags: string[]; summary: string; useCount: number }>;
+  byTag: Record<string, number>;
+  [key: string]: unknown;
+}
+
 const EVENT_ICONS: Record<string, string> = {
   'project:start': '🚀',
   'project:stop': '⏹️',
@@ -50,10 +78,10 @@ export default function TimelinePage() {
   const currentProjectId = useAppStore(s => s.currentProjectId);
   const [tab, setTab] = useState<TabId>('timeline');
   const [events, setEvents] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<TimelineStats | null>(null);
   const [checkpoints, setCheckpoints] = useState<any[]>([]);
-  const [missionStatus, setMissionStatus] = useState<any>(null);
-  const [knowledgeStats, setKnowledgeStats] = useState<any>(null);
+  const [missionStatus, setMissionStatus] = useState<MissionStatusRecord | null>(null);
+  const [knowledgeStats, setKnowledgeStats] = useState<KnowledgeStats | null>(null);
   const [filterType, setFilterType] = useState<string>('all');
   const [loading, setLoading] = useState(false);
 
@@ -77,9 +105,9 @@ export default function TimelinePage() {
         window.automater.mission.getStatus(projectId),
       ]);
       setEvents(evts);
-      setStats(st);
+      setStats(st as TimelineStats);
       setCheckpoints(cps);
-      setMissionStatus(ms);
+      setMissionStatus(ms as MissionStatusRecord);
     } catch (err) {
       log.error('Failed to load timeline data:', err);
     }
@@ -114,7 +142,7 @@ export default function TimelinePage() {
 
   useEffect(() => {
     if (tab === 'knowledge' && !knowledgeStats) {
-      window.automater.knowledge.getStats().then(setKnowledgeStats).catch(() => {});
+      window.automater.knowledge.getStats().then((ks) => setKnowledgeStats(ks as KnowledgeStats)).catch(() => {});
     }
   }, [tab, knowledgeStats]);
 

@@ -67,13 +67,13 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
   // Listen for daemon (heartbeat/hook/cron) messages
   useEffect(() => {
-    const unsub = window.automater.on('meta-agent:daemon-message', (data: any) => {
+    const unsub = window.automater.on('meta-agent:daemon-message', (data: { type: string; reply: string; timestamp?: string }) => {
       const typeLabel = data.type === 'heartbeat' ? '💓 心跳' : data.type === 'hook' ? '🪝 事件' : '⏰ 定时';
       const daemonMsg: MetaAgentMessage = {
         id: `daemon-${Date.now()}`,
         role: 'assistant',
-        content: `[${typeLabel}] ${data.message}`,
-        timestamp: data.timestamp || Date.now(),
+        content: `[${typeLabel}] ${data.reply}`,
+        timestamp: Number(data.timestamp) || Date.now(),
       };
       addMessage(chatKey, daemonMsg);
     });

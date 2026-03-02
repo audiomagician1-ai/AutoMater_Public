@@ -296,10 +296,10 @@ export function getFeatureGroupSummary(projectId: string): Array<{
     FROM features WHERE project_id = ?
     GROUP BY group_id
     ORDER BY group_id
-  `).all(projectId) as any[];
+  `).all(projectId) as Array<{ group_id: string | null; total: number; done: number; in_progress: number; failed: number }>;
 
   return rows.map(r => ({
-    groupId: r.group_id,
+    groupId: r.group_id ?? '',
     total: r.total,
     done: r.done,
     inProgress: r.in_progress,

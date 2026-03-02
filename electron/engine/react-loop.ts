@@ -154,7 +154,8 @@ export async function reactDeveloperLoop(
   projectId: string, workerId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, gitConfig: GitProviderConfig,
-  feature: EnrichedFeature, qaFeedback: string
+  feature: EnrichedFeature, qaFeedback: string,
+  permissions?: import('./tool-registry').AgentPermissions,
 ): Promise<ReactResult> {
   const db = getDb();
   const MAX_ITERATIONS = 25;
@@ -206,6 +207,7 @@ export async function reactDeveloperLoop(
     gitConfig,
     workerId,
     featureId: feature.id,
+    permissions,
     callVision: async (prompt: string, imageBase64: string, mimeType?: string) => {
       const visionModel = resolveModel('strong', settings);
       const messages = [
@@ -217,7 +219,7 @@ export async function reactDeveloperLoop(
           ],
         },
       ];
-      const result = await callLLM(settings, visionModel, messages as any, signal, 4096);
+      const result = await callLLM(settings, visionModel, messages, signal, 4096);
       return result.content;
     },
   };
@@ -798,6 +800,8 @@ export interface GenericReactConfig {
   model?: string;
   timeoutMs?: number;
   streamLabel?: string;
+  /** v16.0: 项目级权限开关 */
+  permissions?: import('./tool-registry').AgentPermissions;
 }
 
 export interface GenericReactResult {
@@ -820,10 +824,11 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     maxIterations = 15,
     model = settings.strongModel,
     timeoutMs = 180000,
+    permissions,
   } = config;
 
   const tools = getToolsForRole(role, gitConfig.mode);
-  const toolCtx: ToolContext = { workspacePath: workspacePath || '', projectId, gitConfig };
+  const toolCtx: ToolContext = { workspacePath: workspacePath || '', projectId, gitConfig, permissions };
 
   let totalCost = 0, totalIn = 0, totalOut = 0;
   let completed = false, blocked = false;

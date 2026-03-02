@@ -614,7 +614,7 @@ async function applyFix(
     const ctx: ToolContext = {
       workspacePath: config.workspacePath,
       projectId: config.projectId || '',
-      gitConfig: { mode: 'local', workspacePath: config.workspacePath } as any,
+      gitConfig: { mode: 'local' as const, workspacePath: config.workspacePath },
     };
 
     const task = `修复以下测试失败:

@@ -24,7 +24,7 @@ import { PM_IMPACT_ANALYSIS_PROMPT, PM_UPDATE_DESIGN_PROMPT, QA_UPDATE_TEST_SPEC
 import { parseStructuredOutput } from './output-parser';
 import { emitEvent } from './event-store';
 import { createCheckpoint } from './mission';
-import type { AppSettings, FeatureRow } from './types';
+import type { AppSettings, FeatureRow, ProjectRow } from './types';
 
 // ═══════════════════════════════════════
 // Types
@@ -110,7 +110,7 @@ export async function runChangeRequest(
     return { success: false, error: '未配置 LLM API Key' };
   }
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
   if (!project?.workspace_path) {
     return { success: false, error: '项目无工作区路径' };
   }

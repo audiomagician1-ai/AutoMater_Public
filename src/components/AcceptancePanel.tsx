@@ -63,7 +63,7 @@ export function AcceptancePanel() {
   const addLog = useAppStore(s => s.addLog);
   const setProjectPage = useAppStore(s => s.setProjectPage);
   const [features, setFeatures] = useState<FeatureSummary[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<{ features: Record<string, number>; agents: Record<string, number> } | null>(null);
   const [hasDesignDoc, setHasDesignDoc] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [submitting, setSubmitting] = useState(false);

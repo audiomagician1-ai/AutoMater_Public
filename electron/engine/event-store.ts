@@ -245,7 +245,7 @@ export function queryEvents(query: EventQuery): AgentEvent[] {
   const sql = `SELECT * FROM events WHERE ${conditions.join(' AND ')} ORDER BY id ASC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = db.prepare(sql).all(...params) as EventRow[];
   return rows.map(rowToEvent);
 }
 
@@ -263,7 +263,7 @@ export function getRecentEvents(projectId: string, limit: number = 50): AgentEve
   const db = getDb();
   const rows = db.prepare(
     'SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?'
-  ).all(projectId, limit) as any[];
+  ).all(projectId, limit) as EventRow[];
   return rows.reverse().map(rowToEvent);
 }
 
@@ -308,12 +308,12 @@ export function getProjectEventStats(projectId: string): EventStats {
            COALESCE(SUM(output_tokens), 0) as outp,
            COALESCE(SUM(cost_usd), 0) as cost
     FROM events WHERE project_id = ?
-  `).get(projectId) as any;
+  `).get(projectId) as { cnt: number; dur: number; inp: number; outp: number; cost: number };
 
   // 按类型统计
   const typeRows = db.prepare(
     'SELECT type, COUNT(*) as cnt FROM events WHERE project_id = ? GROUP BY type'
-  ).all(projectId) as any[];
+  ).all(projectId) as Array<{ type: string; cnt: number }>;
   const eventsByType: Record<string, number> = {};
   for (const r of typeRows) eventsByType[r.type] = r.cnt;
 
@@ -327,7 +327,7 @@ export function getProjectEventStats(projectId: string): EventStats {
            SUM(CASE WHEN type = 'llm:call' THEN 1 ELSE 0 END) as llms
     FROM events WHERE project_id = ? AND feature_id IS NOT NULL
     GROUP BY feature_id ORDER BY feature_id
-  `).all(projectId) as any[];
+  `).all(projectId) as Array<{ feature_id: string; cnt: number; dur: number; cost: number; tools: number; llms: number }>;
   const featureStats = featureRows.map(r => ({
     featureId: r.feature_id,
     events: r.cnt,
@@ -345,7 +345,7 @@ export function getProjectEventStats(projectId: string): EventStats {
            SUM(CASE WHEN json_extract(data, '$.success') = 1 THEN 1 ELSE 0 END) as successes
     FROM events WHERE project_id = ? AND type = 'tool:call' AND json_extract(data, '$.tool') IS NOT NULL
     GROUP BY tool_name ORDER BY cnt DESC
-  `).all(projectId) as any[];
+  `).all(projectId) as Array<{ tool_name: string; cnt: number; avg_dur: number; successes: number }>;
   const toolStats = toolRows.map(r => ({
     toolName: r.tool_name || 'unknown',
     calls: r.cnt,

@@ -61,7 +61,7 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
   read_file: {
     name: 'read_file',
     params: [
-      { name: 'path', type: 'string', required: true, maxLength: 500, validate: validateRelativePath },
+      { name: 'path', type: 'string', required: true, maxLength: 500, validate: validateReadPath },
       { name: 'offset', type: 'number', required: false, min: 1, max: 100000 },
       { name: 'limit', type: 'number', required: false, min: 1, max: 1000 },
     ],
@@ -153,6 +153,19 @@ function validateRelativePath(value: unknown): string | null {
   if (typeof value !== 'string') return 'path must be a string';
   const normalized = value.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return 'Absolute paths not allowed';
+  if (normalized.includes('..')) return 'Path traversal (..) not allowed';
+  if (/[\x00-\x1f]/.test(normalized)) return 'Control characters in path not allowed';
+  return null;
+}
+
+/**
+ * v16.0: 读操作路径验证 — 允许绝对路径（权限由 tool-executor 层检查）
+ */
+function validateReadPath(value: unknown): string | null {
+  if (typeof value !== 'string') return 'path must be a string';
+  const normalized = value.replace(/\\/g, '/');
+  // 绝对路径允许通过（externalRead 权限在 tool-executor 中检查）
+  if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return null;
   if (normalized.includes('..')) return 'Path traversal (..) not allowed';
   if (/[\x00-\x1f]/.test(normalized)) return 'Control characters in path not allowed';
   return null;

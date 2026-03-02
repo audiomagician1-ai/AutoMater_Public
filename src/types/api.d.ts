@@ -247,8 +247,23 @@ interface MissionTaskRecord {
   created_at: string;
 }
 
-/** Backup 内容 */
+/** Backup 内容 — 对应 ConversationBackup 完整结构 */
 interface BackupContent {
+  version?: string;
+  sessionId?: string;
+  projectId?: string | null;
+  agentId?: string;
+  agentRole?: string;
+  featureId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  messageCount?: number;
+  reactIterations?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  totalCost?: number;
+  model?: string;
+  completed?: boolean;
   messages?: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: Array<{ function?: { name: string; arguments: string } }> }>;
   metadata?: Record<string, unknown>;
 }
@@ -330,6 +345,10 @@ interface AutoMaterAPI {
     applyModuleCorrection(projectId: string, correction: Record<string, unknown>): Promise<{ success: boolean; graph?: unknown; error?: string }>;
     /** v7.0: 获取用户校正历史 */
     getUserCorrections(projectId: string): Promise<{ success: boolean; corrections?: unknown[]; error?: string }>;
+    /** v16.0: 获取项目权限开关 */
+    getPermissions(projectId: string): Promise<{ externalRead: boolean; externalWrite: boolean; shellExec: boolean }>;
+    /** v16.0: 更新项目权限开关 */
+    updatePermissions(projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }): Promise<{ success: boolean }>;
   };
   /** v3.1: 需求队列 */
   wish: {
@@ -479,6 +498,11 @@ interface AutoMaterAPI {
     getActivityTimeseries(projectId: string, minutes?: number): Promise<ActivityDataPoint[]>;
     /** 获取内置模型价格表 */
     getBuiltinPricing(): Promise<Record<string, { input: number; output: number }>>;
+  };
+
+  /** v5.6: 上下文管理 */
+  context: {
+    previewBaseline(projectId: string, role: string, tokenBudget?: number): Promise<{ success: boolean; snapshot?: ContextSnapshot; error?: string }>;
   };
 
   /** v8.0: Session 管理 + v8.1: Feature-Session 关联 */

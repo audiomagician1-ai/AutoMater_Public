@@ -81,6 +81,11 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('project:apply-module-correction', projectId, correction),
     getUserCorrections: (projectId: string) =>
       ipcRenderer.invoke('project:get-user-corrections', projectId),
+    // v16.0: 项目权限开关
+    getPermissions: (projectId: string) =>
+      ipcRenderer.invoke('project:get-permissions', projectId),
+    updatePermissions: (projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }) =>
+      ipcRenderer.invoke('project:update-permissions', projectId, permissions),
   },
 
   // ── 需求队列 (v3.1) ──
@@ -213,7 +218,7 @@ contextBridge.exposeInMainWorld('automater', {
     // Daemon (heartbeat/hooks/cron)
     getDaemonStatus: () => ipcRenderer.invoke('meta-agent:daemon:status'),
     getDaemonConfig: () => ipcRenderer.invoke('meta-agent:daemon:config:get'),
-    saveDaemonConfig: (config: any) => ipcRenderer.invoke('meta-agent:daemon:config:save', config),
+    saveDaemonConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:daemon:config:save', config),
     startDaemon: () => ipcRenderer.invoke('meta-agent:daemon:start'),
     stopDaemon: () => ipcRenderer.invoke('meta-agent:daemon:stop'),
     triggerHeartbeat: () => ipcRenderer.invoke('meta-agent:daemon:trigger'),

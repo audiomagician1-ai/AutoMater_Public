@@ -497,6 +497,36 @@ export interface EventRow {
   created_at: string;
 }
 
+/** Mission DB row (v5.5) */
+export interface MissionRow {
+  id: string;
+  project_id: string;
+  type: string;
+  status: string;
+  config: string;
+  plan: string | null;
+  conclusion: string | null;
+  patches: string;
+  token_usage: number;
+  cost_usd: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/** Mission task DB row (v5.5) */
+export interface MissionTaskRow {
+  id: string;
+  mission_id: string;
+  title: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+  agent_id: string | null;
+  input: string | null;
+  output: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 // ═══════════════════════════════════════
 // Anthropic API types (v12.3)
 // ═══════════════════════════════════════

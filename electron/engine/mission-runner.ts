@@ -15,6 +15,7 @@ import { getDb } from '../db';
 import { callLLM, getSettings } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { createLogger } from './logger';
+import type { MissionRow, MissionTaskRow, ProjectRow } from './types';
 import { BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
@@ -102,17 +103,24 @@ export function createMission(
 
 export function getMission(missionId: string) {
   const db = getDb();
-  return db.prepare('SELECT * FROM missions WHERE id = ?').get(missionId) as any;
+  return db.prepare('SELECT * FROM missions WHERE id = ?').get(missionId) as MissionRow | undefined;
 }
 
 export function listMissions(projectId: string) {
   const db = getDb();
-  return db.prepare('SELECT * FROM missions WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  return db.prepare('SELECT * FROM missions WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as MissionRow[];
 }
 
-export function getMissionTasks(missionId: string) {
+export function getMissionTasks(missionId: string): MissionTask[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM mission_tasks WHERE mission_id = ? ORDER BY created_at').all(missionId) as any[];
+  const rows = db.prepare('SELECT * FROM mission_tasks WHERE mission_id = ? ORDER BY created_at').all(missionId) as MissionTaskRow[];
+  return rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    input: r.input || '{}',
+    output: r.output ?? undefined,
+  }));
 }
 
 // ═══════════════════════════════════════
@@ -207,10 +215,10 @@ export async function runMission(
   const prompts = MISSION_PROMPTS[type] || MISSION_PROMPTS.custom;
 
   // Get project context
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
-  if (!project) throw new Error('Project not found');
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
+  if (!project || !project.workspace_path) throw new Error('Project not found or no workspace');
 
-  const workspacePath = project.workspace_path;
+  const workspacePath: string = project.workspace_path;
   const missionDir = path.join(workspacePath, '.automater', 'missions', missionId);
   fs.mkdirSync(missionDir, { recursive: true });
 
@@ -463,7 +471,7 @@ export function cleanupMission(missionId: string) {
   const mission = getMission(missionId);
   if (!mission) return;
 
-  const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as any;
+  const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as { workspace_path: string } | undefined;
   if (project?.workspace_path) {
     const missionDir = path.join(project.workspace_path, '.automater', 'missions', missionId);
     if (fs.existsSync(missionDir)) {
@@ -584,7 +592,7 @@ export function getMissionPatches(missionId: string): Array<{ file: string; diff
   if (!mission) return [];
 
   const db = getDb();
-  const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as any;
+  const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(mission.project_id) as { workspace_path: string } | undefined;
   if (!project?.workspace_path) return [];
 
   const patchesFile = path.join(project.workspace_path, '.automater', 'missions', missionId, 'patches.json');

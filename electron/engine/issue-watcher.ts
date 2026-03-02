@@ -103,7 +103,7 @@ export async function syncIssuesToFeatures(
 
   for (const issue of issues) {
     // 跳过 PR（GitHub API 的 issues 接口也返回 PR）
-    if ((issue as any).pull_request) {
+    if (issue.pull_request) {
       result.skipped++;
       continue;
     }

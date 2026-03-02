@@ -237,7 +237,7 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
     WHERE project_id = ? AND created_at >= ?
     GROUP BY minute
     ORDER BY minute ASC
-  `).all(projectId, since) as any[];
+  `).all(projectId, since) as Array<{ minute: string; input_tokens: number; output_tokens: number; cost_usd: number; llm_calls: number; tool_calls: number }>;
 
   // 代码行写入：从 tool:result 事件中提取 (file-writer 写入会记录行数)
   const lineRows = db.prepare(`
@@ -250,7 +250,7 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
       AND json_extract(data, '$.linesWritten') IS NOT NULL
     GROUP BY minute
     ORDER BY minute ASC
-  `).all(projectId, since) as any[];
+  `).all(projectId, since) as Array<{ minute: string; lines: number }>;
 
   const linesMap = new Map<string, number>();
   for (const r of lineRows) linesMap.set(r.minute, r.lines);

@@ -203,7 +203,7 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
 
 export async function callLLM(
   settings: AppSettings, model: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   signal?: AbortSignal,
   maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
   retries: number = 2,
@@ -231,7 +231,7 @@ export async function callLLM(
 
 async function _callLLMOnce(
   settings: AppSettings, model: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   signal?: AbortSignal,
   maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
   onChunk?: StreamCallback,
@@ -260,7 +260,7 @@ async function _callLLMOnce(
 
 async function _callOpenAI(
   settings: AppSettings, model: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   maxTokens: number, fetchOpts: RequestInit,
   stream: boolean, onChunk?: StreamCallback
 ): Promise<LLMResult> {
@@ -329,7 +329,7 @@ async function _callOpenAI(
 
 async function _callAnthropic(
   settings: AppSettings, model: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   maxTokens: number, fetchOpts: RequestInit,
   stream: boolean, onChunk?: StreamCallback
 ): Promise<LLMResult> {
@@ -477,7 +477,7 @@ async function _callAnthropicWithTools(
   const otherMsgs = messages.filter(m => m.role !== 'system');
 
   // Anthropic 需要将 tool_result 消息转换格式
-  const anthropicMessages = otherMsgs.map(m => {
+  const anthropicMessages = otherMsgs.map((m: { role: string; content: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> }) => {
     if (m.role === 'tool') {
       // OpenAI tool result → Anthropic tool_result
       // v2.2: 支持 multimodal content (图像)
@@ -506,16 +506,16 @@ async function _callAnthropicWithTools(
         role: 'user',
         content: [{
           type: 'tool_result',
-          tool_use_id: (m as any).tool_call_id,
+          tool_use_id: m.tool_call_id,
           content: anthropicToolContent,
         }],
       };
     }
-    if (m.role === 'assistant' && (m as any).tool_calls) {
+    if (m.role === 'assistant' && m.tool_calls) {
       // OpenAI assistant with tool_calls → Anthropic with tool_use blocks
       const content: Array<Record<string, unknown>> = [];
       if (m.content) content.push({ type: 'text', text: m.content });
-      for (const tc of (m as any).tool_calls) {
+      for (const tc of m.tool_calls) {
         content.push({
           type: 'tool_use',
           id: tc.id,

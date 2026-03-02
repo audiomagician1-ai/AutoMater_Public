@@ -323,7 +323,7 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
     setError(null);
     setPreview(null);
     const budget = member.max_context_tokens ?? 128000;
-    (window as any).automater.context.previewBaseline(projectId, member.role, budget)
+    window.automater.context.previewBaseline(projectId, member.role, budget)
       .then((res: { success: boolean; snapshot?: ContextSnapshot; error?: string }) => {
         if (res.success && res.snapshot) {
           setBaseline(res.snapshot);

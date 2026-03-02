@@ -259,7 +259,7 @@ export function getActiveSession(projectId: string | null, agentId: string): Ses
   const db = getDb();
   const row = db.prepare(
     "SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
-  ).get(projectId, projectId, agentId) as any;
+  ).get(projectId, projectId, agentId) as SessionRow | undefined;
   return row ? mapSessionRow(row) : null;
 }
 
@@ -281,7 +281,7 @@ export function getOrCreateSession(
  */
 export function switchSession(sessionId: string): SessionInfo | null {
   const db = getDb();
-  const target = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
+  const target = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as SessionRow | undefined;
   if (!target) return null;
 
   // 将该 agent 当前的 active session 标记为 completed
@@ -377,7 +377,7 @@ export function backupConversation(opts: {
     // 获取或创建 session
     let session: SessionInfo;
     if (opts.sessionId) {
-      const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(opts.sessionId) as any;
+      const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(opts.sessionId) as SessionRow | undefined;
       session = row ? mapSessionRow(row) : createSession(opts.projectId, opts.agentId, opts.agentRole);
     } else {
       session = getOrCreateSession(opts.projectId, opts.agentId, opts.agentRole);
@@ -496,7 +496,7 @@ export function getBackupStats(): {
       MIN(created_at) as oldest,
       MAX(created_at) as newest
     FROM sessions
-  `).get() as any;
+  `).get() as { total: number; oldest: string | null; newest: string | null };
 
   let totalSize = 0;
   let fileCount = 0;
@@ -617,12 +617,12 @@ export function getSessionsForFeature(projectId: string, featureId: string): Arr
   const db = getDb();
   const links = db.prepare(
     'SELECT * FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC'
-  ).all(projectId, featureId) as any[];
+  ).all(projectId, featureId) as FeatureSessionRow[];
 
   return links.map(link => ({
     ...mapFeatureSessionRow(link),
     session: (() => {
-      const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(link.session_id) as any;
+      const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(link.session_id) as SessionRow | undefined;
       return row ? mapSessionRow(row) : null;
     })(),
   }));
@@ -635,7 +635,7 @@ export function getFeaturesForSession(sessionId: string): FeatureSessionLink[] {
   const db = getDb();
   const links = db.prepare(
     'SELECT * FROM feature_sessions WHERE session_id = ? ORDER BY created_at ASC'
-  ).all(sessionId) as any[];
+  ).all(sessionId) as FeatureSessionRow[];
   return links.map(mapFeatureSessionRow);
 }
 
@@ -646,7 +646,7 @@ export function listFeatureSessionLinks(projectId: string, limit: number = 200):
   const db = getDb();
   const links = db.prepare(
     'SELECT * FROM feature_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
-  ).all(projectId, limit) as any[];
+  ).all(projectId, limit) as FeatureSessionRow[];
   return links.map(mapFeatureSessionRow);
 }
 
