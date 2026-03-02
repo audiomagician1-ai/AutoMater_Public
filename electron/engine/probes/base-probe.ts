@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Base Probe — 探针基础设施
  *
  * 提供所有探针共用的文件读取、grep、graph 遍历工具，
@@ -51,7 +51,7 @@ export function readFileContent(
     const lines = content.split('\n');
     if (lines.length <= maxLines) return content;
     return lines.slice(0, maxLines).join('\n') + `\n... [truncated, ${lines.length - maxLines} more lines]`;
-  } catch {
+  } catch { /* silent: 文件读取截断时异常,返回原内容 */
     return '';
   }
 }

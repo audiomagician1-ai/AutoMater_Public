@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Bootstrap Phase (Phase 0) — 环境初始化
  *
  * 在所有 Agent 阶段之前执行:
@@ -106,7 +106,7 @@ export async function phaseEnvironmentBootstrap(
       await execAsync('go mod download 2>&1', { cwd: workspacePath, encoding: 'utf-8', timeout: 120_000 });
       result.dependenciesInstalled = true;
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ✅ Go 模块下载成功' });
-    } catch {
+    } catch { /* silent: go mod download可能失败,非阻塞 */
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ⚠️ Go 模块下载失败 (非致命)' });
     }
   } else {

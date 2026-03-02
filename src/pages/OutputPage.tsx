@@ -212,7 +212,7 @@ export function OutputPage() {
     try {
       const result = await window.automater.workspace.readFile(currentProjectId, filePath);
       setFileContent(result.success ? result.content : '无法读取文件');
-    } catch {
+    } catch { /* silent: 文件读取失败 */
       setFileContent('读取失败');
     }
     setLoading(false);

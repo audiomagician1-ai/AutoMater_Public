@@ -313,7 +313,7 @@ async function executeCommandTest(
           }
         }
       }
-    } catch {
+    } catch { /* silent: 测试清理失败不影响结果 */
       // Docker 不可用, fallback
     }
   }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Worker Phase — Developer ReAct + QA + Lesson Extraction per Feature
  * Extracted from orchestrator.ts for maintainability.
  * @module phases/worker-phase
@@ -301,7 +301,7 @@ export async function workerLoop(
     if (issueBranch && workspacePath && gitConfig.mode === 'github') {
       try {
         await switchBranch(gitConfig, 'main');
-      } catch {
+      } catch { /* silent: 分支切回main失败不影响主流程 */
         // Non-fatal: might not have a main branch
       }
     }

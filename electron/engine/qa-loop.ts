@@ -349,7 +349,7 @@ ${testSpec ? `## 测试规格\n${testSpec}\n` : ''}
     const cleaned = result.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
     files = Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
+  } catch { /* silent: 测试文件列表解析失败 */
     log.warn('Failed to parse TDD test skeleton output', { raw: result.content.slice(0, 200) });
     // Fallback: 将整个输出作为单个测试文件
     if (result.content.includes('import') || result.content.includes('describe') || result.content.includes('def test_')) {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Issue Watcher — GitHub Issue → Feature 自动关联
  *
  * 扫描项目 GitHub repo 的 open issues，自动创建对应 Feature 并关联。
@@ -143,7 +143,7 @@ export async function syncIssuesToFeatures(
           issue.number,
           `🤖 **AutoMater** 已接收此 Issue 并创建开发任务 \`${featureId}\`\n\n分支: \`${branchName}\`\n优先级: P${priority} | 分类: ${category}\n\n开发完成后将自动提交 PR 并关闭此 Issue。`,
         );
-      } catch {
+      } catch { /* silent: GitHub评论失败不影响Feature创建 */
         log.debug(`Failed to comment on issue #${issue.number} (non-fatal)`);
       }
 

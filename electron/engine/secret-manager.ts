@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Secret Manager — 统一密钥/凭证管理
  *
  * 为项目提供加密的密钥存储，支持多平台凭证 (GitHub / Supabase / Cloudflare / 自定义)。
@@ -36,7 +36,7 @@ function getEncryptionKey(): Buffer {
     // Electron 环境: 使用进程 PID 文件夹路径作为 machine 标识 (跨重启稳定)
     const { app } = require('electron');
     machineId = app.getPath('userData');
-  } catch {
+  } catch { /* silent: electron app路径获取失败,使用回退 */
     // 非 Electron 环境 (测试): 使用 hostname
     const os = require('os');
     machineId = os.hostname();
@@ -160,7 +160,7 @@ export function listSecrets(projectId: string, provider?: SecretProvider): Secre
       } else {
         maskedValue = plain.slice(0, 4) + '…' + plain.slice(-4);
       }
-    } catch {
+    } catch { /* silent: 解密失败,值不可用 */
       maskedValue = '(解密失败)';
     }
 

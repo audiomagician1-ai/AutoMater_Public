@@ -1,4 +1,4 @@
-/**
+﻿/**
  * System Monitor — 系统性能指标采集 + 活动时序聚合
  *
  * 1. 系统性能：CPU / GPU / 内存 / 硬盘 / 网络实时采样
@@ -154,7 +154,7 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
         name: parts[2],
       };
     }
-  } catch {
+  } catch { /* silent: 系统指标采集失败,返回空 */
     // nvidia-smi 不存在或执行失败 — 保持上一次值或 -1
   }
   _gpuSamplePending = false;

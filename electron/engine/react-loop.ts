@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ReAct Developer Loop — 多轮工具调用核心
  *
  * 思考 → 行动 → 观察 循环，最多 25 轮
@@ -282,7 +282,7 @@ export async function reactDeveloperLoop(
     if (skillContextText) {
       log.debug('Matched skills for feature', { featureId: feature.id, length: skillContextText.length });
     }
-  } catch {
+  } catch { /* silent: 技能上下文加载失败,非关键路径 */
     // skill-evolution 模块可能未初始化, 跳过
   }
 
@@ -860,6 +860,8 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       ...DEFAULT_REACT_CONFIG,
       maxIterations,
       maxWallTimeMs: maxIterations * timeoutMs,
+      // PM / Architect 角色以分析为主，天然只读不写，放宽空转检测
+      maxIdleIterations: (role === 'pm' || role === 'architect') ? 12 : DEFAULT_REACT_CONFIG.maxIdleIterations,
     }, signal.aborted);
     if (!termCheck.shouldContinue) {
       sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 终止: ${termCheck.reason}` });

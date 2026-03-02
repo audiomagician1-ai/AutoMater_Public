@@ -283,7 +283,7 @@ export async function runMission(
     try {
       const jsonMatch = planResult.content.match(/\[[\s\S]*\]/);
       if (jsonMatch) tasks = JSON.parse(jsonMatch[0]);
-    } catch {
+    } catch { /* silent: plan JSON解析失败,后续会fallback */
       log.warn('Failed to parse planner output as JSON, creating single task');
       tasks = [{ title: '全量分析', input: planResult.content }];
     }

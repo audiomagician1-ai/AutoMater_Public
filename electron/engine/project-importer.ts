@@ -654,7 +654,7 @@ async function phase2Fuse(
   if (moduleGraphMatch?.[1]) {
     try {
       moduleGraph = JSON.parse(moduleGraphMatch[1].trim());
-    } catch {
+    } catch { /* silent: moduleGraph JSON解析失败 */
       log.warn('Failed to parse module-graph JSON from LLM output');
     }
   }

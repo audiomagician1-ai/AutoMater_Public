@@ -296,7 +296,7 @@ export async function getCurrentBranch(workspacePath: string): Promise<string> {
   try {
     const { stdout } = await execAsync('git branch --show-current', { cwd: workspacePath, encoding: 'utf-8' });
     return stdout.trim();
-  } catch {
+  } catch { /* silent: git branch查询失败 */
     return '';
   }
 }
@@ -309,7 +309,7 @@ export async function listBranches(workspacePath: string): Promise<BranchInfo[]>
       name: line.replace(/^\*?\s+/, '').trim(),
       current: line.startsWith('*'),
     }));
-  } catch {
+  } catch { /* silent: git branch解析失败 */
     return [];
   }
 }

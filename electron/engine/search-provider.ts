@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Search Provider System — 可插拔多引擎搜索 + 自动 Fallback
  *
  * 支持的搜索引擎:
@@ -515,7 +515,7 @@ export async function readUrl(
         : text;
       return { success: true, content, title, length: text.length };
     }
-  } catch {
+  } catch { /* silent: fetch/解析失败,返回空结果 */
     // Jina 失败, 继续 fallback
   }
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * WorkflowPage — v3.0 多工作流预设 + 大尺寸预览
  */
 
@@ -140,7 +140,7 @@ export function WorkflowPage() {
     try {
       const tasks = await window.automater.ephemeralMission.getTasks(id);
       setExpandedTasks(tasks || []);
-    } catch {
+    } catch { /* silent: 任务列表加载失败 */
       setExpandedTasks([]);
     }
   };

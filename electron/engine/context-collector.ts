@@ -61,7 +61,7 @@ export function loadModuleGraph(workspacePath: string): ModuleGraph | null {
     if (!graph.nodes || !graph.edges) return null;
     moduleGraphCache = { path: fullPath, mtime: stat.mtimeMs, graph };
     return graph;
-  } catch {
+  } catch { /* silent: 模块图缓存加载失败,重新构建 */
     return null;
   }
 }
@@ -475,7 +475,7 @@ export async function collectDeveloperContext(
             .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
           graphSource = 'code-graph';
         }
-      } catch {
+      } catch { /* silent: code-graph构建失败,降级为文件扫描 */
         // Code Graph 失败时 fallback 到关键词匹配
       }
     }

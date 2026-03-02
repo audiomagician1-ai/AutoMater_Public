@@ -440,7 +440,7 @@ export class McpConnection {
           try {
             const json = JSON.parse(dataLine.slice(6)) as JsonRpcResponse;
             this.handleResponse(json);
-          } catch {
+          } catch { /* silent: JSON-RPC响应解析失败,跳过损坏帧 */
             log.debug('Failed to parse SSE data', { data: dataLine.slice(0, 200) });
           }
         }

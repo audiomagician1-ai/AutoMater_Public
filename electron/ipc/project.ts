@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 项目 IPC — 创建项目、启动 Agent 编排
  * v0.8: 支持 git_mode (local/github)
  */
@@ -351,7 +351,7 @@ export function setupProjectHandlers() {
     try {
       const config = JSON.parse(row.config || '{}');
       return config.permissions || { externalRead: false, externalWrite: false, shellExec: false };
-    } catch {
+    } catch { /* silent: 权限config解析失败,使用默认值 */
       return { externalRead: false, externalWrite: false, shellExec: false };
     }
   });

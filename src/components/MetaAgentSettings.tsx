@@ -671,7 +671,7 @@ function DaemonTab() {
         setTimeout(() => setSaved(false), 2000);
         refreshLogs();
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { log.error('Daemon config save failed', err); }
     finally { setSaving(false); }
   };
 
@@ -688,7 +688,7 @@ function DaemonTab() {
     try {
       await window.automater.metaAgent.triggerHeartbeat();
       setTimeout(refreshLogs, 3000); // Wait for LLM response
-    } catch (err) { console.error(err); }
+    } catch (err) { log.error('Heartbeat trigger failed', err); }
     finally { setTriggering(false); }
   };
 

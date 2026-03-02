@@ -49,7 +49,7 @@ function getSchemaVersion(): number {
   try {
     const row = db.prepare("SELECT value FROM schema_version WHERE key = 'version'").get() as { value: string } | undefined;
     return row ? parseInt(row.value, 10) : 0;
-  } catch {
+  } catch { /* silent: schema_version表不存在(首次运行) */
     // schema_version 表不存在 = 旧版本数据库
     return 0;
   }

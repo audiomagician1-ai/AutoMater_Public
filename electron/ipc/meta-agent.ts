@@ -574,7 +574,7 @@ const result = await callLLMWithTools(
         wishContent = parsed.wishContent || '';
         memoryNotes = parsed.memoryNotes || '';
       }
-    } catch {
+    } catch { /* silent: 意图/记忆解析失败,使用原始回复 */
       // 非JSON输出 → 当作纯文本回复
       reply = finalReply.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || finalReply;
     }

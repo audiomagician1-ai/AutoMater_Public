@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LLM Settings Tab — Provider选择、API Key、模型配置、定价、限制
  * v16.0: 回退为平铺布局, 定价内联到每个模型后面 (USD/MTokens)
  */
@@ -64,7 +64,7 @@ export function LlmTab({ settings, setSettings, setSettingsConfigured }: LlmTabP
         apiKey: settings.apiKey,
       });
       setTestResult(result);
-    } catch {
+    } catch { /* silent: LLM测试请求失败 */
       setTestResult({ success: false, message: '连接测试失败' });
     }
     setTesting(false);

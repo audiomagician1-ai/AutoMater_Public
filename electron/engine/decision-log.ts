@@ -80,7 +80,7 @@ function readEntries(workspacePath: string): DecisionEntry[] {
     if (!trimmed) continue;
     try {
       entries.push(JSON.parse(trimmed));
-    } catch {
+    } catch { /* silent: 单行JSON解析失败,跳过损坏条目 */
       log.warn('Failed to parse decision log line:', { preview: trimmed.slice(0, 100) });
     }
   }

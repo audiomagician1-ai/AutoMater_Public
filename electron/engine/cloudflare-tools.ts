@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cloudflare Tools — Wrangler CLI + Cloudflare API 封装
  *
  * 两个通道:
@@ -247,7 +247,7 @@ export async function setWorkerSecret(
       child.on('error', () => resolve(false));
       setTimeout(() => { child.kill(); resolve(false); }, 30_000);
     });
-  } catch {
+  } catch { /* silent: 进程kill失败(可能已退出) */
     return false;
   }
 }

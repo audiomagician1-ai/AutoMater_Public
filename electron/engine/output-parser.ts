@@ -311,7 +311,7 @@ function tryLineScan(raw: string, targetBracket: '[' | '{'): unknown | null {
     if (depth <= 0 && collecting) {
       try {
         return JSON.parse(buffer.trim());
-      } catch {
+      } catch { /* silent: 最终JSON解析尝试失败 */
         // reset and continue
         collecting = false;
         buffer = '';

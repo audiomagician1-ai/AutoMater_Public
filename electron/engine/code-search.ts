@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Code Search — 高性能代码搜索引擎
  *
  * 基于 ripgrep (rg) 实现，对标 EchoAgent 的 code-search_grep / code-search_read_many_files。
@@ -75,7 +75,7 @@ function isRipgrepAvailable(): boolean {
         }
       }
     }
-  } catch {
+  } catch { /* silent: ripgrep执行失败,降级搜索 */
     _rgAvailable = false;
   }
   return _rgAvailable;
@@ -179,7 +179,7 @@ function ripgrepSearch(
 
     const stdout = result.stdout || '';
     return parseRipgrepJson(stdout, options.maxResults, startTime);
-  } catch {
+  } catch { /* silent: ripgrep JSON解析失败 */
     return fallbackSearch(workspacePath, pattern, options, startTime);
   }
 }
@@ -317,7 +317,7 @@ function fallbackSearch(
       engine: 'fallback',
       durationMs: Date.now() - startTime,
     };
-  } catch {
+  } catch { /* silent: grep搜索异常 */
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
 }
@@ -432,7 +432,7 @@ export function codeSearchFiles(
         totalFound: files.length,
         truncated: files.length > maxResults,
       };
-    } catch {
+    } catch { /* silent: 文件列表搜索异常 */
       // fallthrough to fallback
     }
   }

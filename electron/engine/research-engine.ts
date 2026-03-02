@@ -127,7 +127,7 @@ ${question}`;
       subQueries: (parsed.sub_queries || parsed.subQueries || [question]).slice(0, maxQueries),
       searchStrategy: parsed.strategy || '',
     };
-  } catch {
+  } catch { /* silent: 搜索策略LLM解析失败 */
     // LLM 解析失败 → 用原始问题
     decomposed = {
       subQueries: [question, `${question} best practices`, `${question} examples`].slice(0, maxQueries),
@@ -197,7 +197,7 @@ async function deepExtract(
         extractions.set(r.url, read.content);
         onProgress?.('extraction', `✓ 已提取: ${r.title.slice(0, 50)}`);
       }
-    } catch {
+    } catch { /* silent: 单页提取失败,继续下一页 */
       // 单个提取失败不影响整体
     }
   });

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Probe Cache System — v7.0 Phase D
  *
  * Provides:
@@ -74,7 +74,7 @@ function hashFile(filePath: string): string {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
-  } catch {
+  } catch { /* silent: 文件hash计算失败 */
     return 'missing';
   }
 }
@@ -109,7 +109,7 @@ export function loadProbeCache(workspacePath: string): ProbeCache | null {
       return null;
     }
     return cache;
-  } catch {
+  } catch { /* silent: 缓存加载失败,重新扫描 */
     return null;
   }
 }
@@ -314,7 +314,7 @@ export function detectIncrementalChanges(workspacePath: string): IncrementalResu
     if (untrackedOutput) {
       changedFiles.push(...untrackedOutput.split('\n').filter(Boolean));
     }
-  } catch {
+  } catch { /* silent: git untracked文件列表失败 */
     // Git not available — fall back to mtime comparison
     log.debug('Git not available, falling back to mtime check');
     for (const probe of cache.probes) {
@@ -324,7 +324,7 @@ export function detectIncrementalChanges(workspacePath: string): IncrementalResu
           if (stat.mtimeMs > cache.cachedAt) {
             changedFiles.push(file);
           }
-        } catch {
+        } catch { /* silent: git diff解析失败 */
           // File deleted — counts as changed
           changedFiles.push(file);
         }
@@ -403,7 +403,7 @@ export function applyUserCorrection(
   let graph: ModuleGraph;
   try {
     graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
-  } catch {
+  } catch { /* silent: code-graph缓存读取失败 */
     log.warn('Cannot load module-graph for correction');
     return null;
   }

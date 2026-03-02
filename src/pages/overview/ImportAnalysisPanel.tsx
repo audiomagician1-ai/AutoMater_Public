@@ -9,6 +9,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('ImportAnalysisPanel');
 
 /* ─── Types mirroring backend probe-types.ts ─── */
 interface ModuleGraphNode {
@@ -118,7 +121,7 @@ export function ImportAnalysisPanel({ projectId }: { projectId: string }) {
         reason: incrRes.reason ?? '',
       });
     } catch (err) {
-      console.error('Failed to load analysis data', err);
+      log.error('Failed to load analysis data', err);
     } finally {
       setLoading(false);
     }

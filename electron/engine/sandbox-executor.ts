@@ -125,7 +125,7 @@ function validateWorkspacePath(workspacePath: string): { ok: boolean; error?: st
     if (!stat.isDirectory()) {
       return { ok: false, error: `工作路径不是目录: ${resolved}`, resolved };
     }
-  } catch {
+  } catch { /* silent: 路径stat失败 */
     // Directory doesn't exist — will be created by caller
   }
 
@@ -138,7 +138,7 @@ function validateWorkspacePath(workspacePath: string): { ok: boolean; error?: st
         return { ok: false, error: `工作路径是指向系统目录的符号链接: ${resolved} → ${real}`, resolved };
       }
     }
-  } catch {
+  } catch { /* silent: 进程清理失败(可能已退出) */
     // realpathSync failed — directory may not exist yet, allow it
   }
 
