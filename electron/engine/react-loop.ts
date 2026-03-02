@@ -31,6 +31,11 @@ import { readRecentDecisions, formatDecisionsForContext, appendSharedDecision } 
 import { emitEvent } from './event-store';
 import { createLogger } from './logger';
 import { backupConversation } from './conversation-backup';
+import {
+  isRetryableTool, isRetryableError,
+  getBackoffDelayMs, checkContextBudget, compressToolOutputs,
+  buildRecoveryHint,
+} from './react-resilience';
 import type { GitProviderConfig } from './git-provider';
 
 const log = createLogger('react-loop');
@@ -486,6 +491,23 @@ export async function reactDeveloperLoop(
           toolResult = executeTool(toolCall, toolCtx);
         }
 
+        // v8.0: 工具调用智能重试 — 对可重试工具的网络/超时错误自动重试一次
+        if (!toolResult.success && isRetryableTool(tc.function.name) && isRetryableError(toolResult.output || '')) {
+          log.info(`[${workerId}] Auto-retrying ${tc.function.name} after transient error`);
+          await sleep(1500);
+          if (isAsync) {
+            toolResult = await executeToolAsync(toolCall, toolCtx);
+          } else {
+            toolResult = executeTool(toolCall, toolCtx);
+          }
+          if (toolResult.success) {
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `🔄 ${tc.function.name} 自动重试成功`,
+            });
+          }
+        }
+
         // 推送工具调用日志
         const argsSummary = tc.function.name === 'write_file'
           ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')} bytes`
@@ -591,9 +613,23 @@ export async function reactDeveloperLoop(
         break;
       }
 
-      // ── 消息窗口压缩 ──
-      if (messages.length > 30) {
+      // ── v8.0 消息窗口智能压缩 ──
+      // 基于 token 预算检查 (优先于简单的消息数量检查)
+      const budget = checkContextBudget(contextTokens, model);
+      if (budget.status === 'overflow') {
+        log.warn(`Context overflow: ${contextTokens}/${budget.limit} (${Math.round(budget.ratio * 100)}%)`);
+        compressToolOutputs(messages, 'overflow');
         await compressMessageHistorySmart(messages, settings, signal);
+      } else if (budget.status === 'critical') {
+        compressToolOutputs(messages, 'critical');
+        if (messages.length > 20) {
+          await compressMessageHistorySmart(messages, settings, signal);
+        }
+      } else if (budget.status === 'warning' || messages.length > 30) {
+        compressToolOutputs(messages, 'warning');
+        if (messages.length > 30) {
+          await compressMessageHistorySmart(messages, settings, signal);
+        }
       }
 
     } catch (err: unknown) {
@@ -609,12 +645,14 @@ export async function reactDeveloperLoop(
       }
       const errMsg = err instanceof Error ? err.message : String(err);
       guardState.consecutiveErrorCount++;
+      // v8.0: 指数退避 (替代固定 sleep(2000))
+      const backoffMs = getBackoffDelayMs(guardState.consecutiveErrorCount);
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
-        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${errMsg}`,
+        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误 (第${guardState.consecutiveErrorCount}次): ${errMsg} — 等待 ${Math.round(backoffMs / 1000)}s`,
       });
       addLog(projectId, workerId, 'error', `[${feature.id}] iter ${iter}: ${errMsg}`);
-      await sleep(2000);
+      await sleep(backoffMs);
     }
   }
 
@@ -886,9 +924,17 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         // 执行工具
         const isAsync = isAsyncTool(tc.function.name);
 
-        const toolResult: ToolResult = isAsync
+        let toolResult: ToolResult = isAsync
           ? await executeToolAsync(toolCall, toolCtx)
           : executeTool(toolCall, toolCtx);
+
+        // v8.0: 工具调用智能重试 — 对可重试工具的网络/超时错误自动重试一次
+        if (!toolResult.success && isRetryableTool(tc.function.name) && isRetryableError(toolResult.output || '')) {
+          await sleep(1500);
+          toolResult = isAsync
+            ? await executeToolAsync(toolCall, toolCtx)
+            : executeTool(toolCall, toolCtx);
+        }
 
         const argsSummary = tc.function.name === 'write_file'
           ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
@@ -920,7 +966,15 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         break;
       }
 
-      if (messages.length > 20) await compressMessageHistorySmart(messages, settings, signal);
+      // v8.0: Token 预算感知压缩
+      const { total: ctxTokens } = computeMessageBreakdown(messages);
+      const budget = checkContextBudget(ctxTokens, model);
+      if (budget.status === 'overflow' || budget.status === 'critical') {
+        compressToolOutputs(messages, budget.status);
+        await compressMessageHistorySmart(messages, settings, signal);
+      } else if (messages.length > 20) {
+        await compressMessageHistorySmart(messages, settings, signal);
+      }
 
     } catch (err: unknown) {
       if (signal.aborted) break;
@@ -932,9 +986,10 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       }
       const errMsg = err instanceof Error ? err.message : String(err);
       guardState.consecutiveErrorCount++;
-      sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误: ${errMsg}` });
+      const backoffMs = getBackoffDelayMs(guardState.consecutiveErrorCount);
+      sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误 (第${guardState.consecutiveErrorCount}次): ${errMsg} — 等待 ${Math.round(backoffMs / 1000)}s` });
       addLog(projectId, agentId, 'error', `iter ${iter}: ${errMsg}`);
-      await sleep(2000);
+      await sleep(backoffMs);
     }
   }
 

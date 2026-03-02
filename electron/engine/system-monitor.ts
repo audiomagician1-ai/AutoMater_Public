@@ -9,6 +9,7 @@
 
 import * as os from 'os';
 import { getDb } from '../db';
+import { MODEL_PRICING } from './llm-client';
 
 // ═══════════════════════════════════════
 // Types
@@ -282,8 +283,5 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
  * 获取内置模型价格表（供前端设置界面展示默认值参考）
  */
 export function getBuiltinModelPricing(): Record<string, { input: number; output: number }> {
-  // Lazy import to avoid circular dependency
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { MODEL_PRICING } = require('./llm-client');
   return { ...MODEL_PRICING };
 }

@@ -18,6 +18,7 @@ import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues } from './git-provider';
 import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
+import { getDb } from '../db';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
 import { webSearchBoost } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
@@ -36,6 +37,8 @@ import {
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
 import type { AppSettings, FileTreeNode } from './types';
 import { trimToolResult } from './context-collector';
+import { configureSearch, getAvailableProviders } from './search-provider';
+import { skillEvolution } from './skill-evolution';
 
 const log = createLogger('tool-executor');
 
@@ -427,7 +430,6 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         // 如果有 projectId, 写入 change_requests 表
         if (ctx.projectId) {
           try {
-            const { getDb } = require('../db') as typeof import('../db'); // eslint-disable-line @typescript-eslint/no-var-requires
             const db = getDb();
             const rfcId = `rfc-${Date.now().toString(36)}`;
             db.prepare(`INSERT INTO change_requests (id, project_id, description, status, affected_features)
@@ -563,7 +565,8 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       // Sync-only tools
       case 'list_sub_agents': {
-        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
+        // Lazy import: sub-agent-framework → tool-executor circular dep
+        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework'); // eslint-disable-line
         const agents = getActiveSubAgents();
         if (agents.length === 0) return { success: true, output: '无活跃子 Agent', action: 'read' };
         const lines = agents.map(a => `${a.id} [${a.preset}] 运行 ${Math.round(a.runningMs / 1000)}s — ${a.task}`);
@@ -571,7 +574,8 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'cancel_sub_agent': {
-        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
+        // Lazy import: sub-agent-framework → tool-executor circular dep
+        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework'); // eslint-disable-line
         const ok = cancelSubAgent(call.arguments.agent_id);
         return ok
           ? { success: true, output: `已取消子 Agent: ${call.arguments.agent_id}`, action: 'write' }
@@ -580,7 +584,6 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       // v8.0: 搜索引擎配置 (同步)
       case 'configure_search': {
-        const { configureSearch, getAvailableProviders } = require('./search-provider') as typeof import('./search-provider');
         configureSearch({
           braveApiKey: call.arguments.brave_api_key,
           searxngUrl: call.arguments.searxng_url,
@@ -670,7 +673,6 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
 
   if (call.name === 'deep_research') {
     const { deepResearch } = await import('./research-engine');
-    const { getDb } = await import('../db');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
     const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
@@ -705,7 +707,6 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
   // ── v8.0: Black-box Test Runner ──
   if (call.name === 'run_blackbox_tests') {
     const { runBlackboxTests } = await import('./blackbox-test-runner');
-    const { getDb } = await import('../db');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
     const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
@@ -894,7 +895,6 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
   // ── v7.0: Sub-Agent Framework ──
   if (call.name === 'spawn_agent') {
     const { spawnSubAgent } = await import('./sub-agent-framework');
-    const { getDb } = await import('../db');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
     const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
@@ -928,7 +928,6 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
 
   if (call.name === 'spawn_parallel') {
     const { spawnParallel } = await import('./sub-agent-framework');
-    const { getDb } = await import('../db');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
     const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
@@ -1061,7 +1060,6 @@ async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
 
 function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.name || !args.description || !args.trigger || !args.knowledge) {
@@ -1095,7 +1093,6 @@ function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
 
 function executeSkillSearch(call: ToolCall): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const query = call.arguments.query || '';
     const maxResults = call.arguments.max_results ?? 3;
 
@@ -1126,7 +1123,6 @@ function executeSkillSearch(call: ToolCall): ToolResult {
 
 function executeSkillImprove(call: ToolCall): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.skill_id || !args.change_note) {
@@ -1156,7 +1152,6 @@ function executeSkillImprove(call: ToolCall): ToolResult {
 
 function executeSkillRecordUsage(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.skill_id || args.success === undefined) {
