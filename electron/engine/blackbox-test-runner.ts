@@ -208,7 +208,7 @@ ${config.appUrl ? `\nApp URL for E2E: ${config.appUrl}` : ''}
       description: (t.description as string) || '',
       type: (t.type as string) || 'unit',
       command: t.command as string,
-      steps: t.steps as string[] | undefined,
+      steps: t.steps as E2EStep[] | undefined,
       expected: (t.expected as string) || '',
     }));
   } catch {
@@ -699,19 +699,15 @@ export async function runBlackboxTests(
   for (let round = 0; round <= maxRounds; round++) {
     onProgress?.('round', `=== 测试轮次 ${round}/${maxRounds} ===`);
 
-    // ── Phase 2: Execute Tests ──
-    onProgress?.('execute', `执行 ${plan.tests.length} 个测试用例...`);
+    // ── Phase 2: Execute Tests (严格串行, 避免 Docker/Browser 资源竞争) ──
+    onProgress?.('execute', `执行 ${plan.tests.length} 个测试用例 (串行)...`);
 
-    const resultPromises = plan.tests.map(async (test) => {
-      onProgress?.('execute', `运行: ${test.name}`);
-      return executeTestCase(test, config, settings, signal);
-    });
-
-    // 串行执行 (避免资源竞争)
     currentResults = [];
-    for (const promise of resultPromises) {
+    for (const test of plan.tests) {
       if (signal.aborted) break;
-      currentResults.push(await promise);
+      onProgress?.('execute', `运行: ${test.name}`);
+      const result = await executeTestCase(test, config, settings, signal);
+      currentResults.push(result);
     }
 
     // ── Check Results ──

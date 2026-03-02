@@ -338,7 +338,17 @@ export async function spawnSubAgent(
   const filesModified: string[] = [];
   const actionLog: string[] = [];
 
-  // 注册为活跃子 Agent
+  // 注册为活跃子 Agent (必须在 Promise 创建之前, 避免竞态)
+  const activeEntry: ActiveSubAgent = {
+    id: agentId,
+    preset: config.preset,
+    task,
+    startedAt: startTime,
+    abortController,
+    promise: null as any, // 临时占位, 下面立即赋值
+  };
+  activeAgents.set(agentId, activeEntry);
+
   const resultPromise = (async (): Promise<SubAgentResult> => {
     try {
       for (let iter = 0; iter < maxIter; iter++) {
@@ -354,6 +364,7 @@ export async function spawnSubAgent(
             model,
             messages,
             toolsForLLM,
+            signal,
           );
         } catch (err: unknown) {
           if (err instanceof NonRetryableError) {
@@ -468,15 +479,8 @@ export async function spawnSubAgent(
     }
   })();
 
-  // 注册追踪
-  activeAgents.set(agentId, {
-    id: agentId,
-    preset: config.preset,
-    task,
-    startedAt: startTime,
-    abortController,
-    promise: resultPromise,
-  });
+  // 更新 promise 引用 (已经在 Map 中)
+  activeEntry.promise = resultPromise;
 
   // helper: 构造结果
   function makeResult(

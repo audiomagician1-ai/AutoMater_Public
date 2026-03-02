@@ -1154,6 +1154,7 @@ export function isAsyncTool(toolName: string): boolean {
   return toolName.startsWith('github_')
     || toolName.startsWith('browser_')
     || toolName.startsWith('sandbox_')
+    || toolName.startsWith('git_')
     || ['web_search', 'fetch_url', 'http_request',
         'web_search_boost', 'deep_research', 'run_blackbox_tests',
         'analyze_image', 'compare_screenshots', 'visual_assert',

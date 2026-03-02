@@ -368,6 +368,7 @@ export async function deepResearch(
   const allSources: ResearchSource[] = [];
   let currentReport = '';
   let currentFindings: string[] = [];
+  let currentFollowUp: string[] = [];
   let currentConfidence = 0;
 
   try {
@@ -387,10 +388,12 @@ export async function deepResearch(
         totalOutput += decomp.outputTokens;
         onProgress?.('decomposition', `已拆解为 ${queries.length} 个子查询:\n${queries.map((q, i) => `  ${i + 1}. ${q}`).join('\n')}`);
       } else {
-        // 后续轮次: 基于前一轮的 follow-up queries
-        queries = currentFindings.length > 0
-          ? currentFindings.slice(0, maxQueries).map(f => `${f} latest information`)
-          : [request.question + ' additional details'];
+        // 后续轮次: 优先使用前一轮的 follow-up queries (比 keyFindings 更精准)
+        queries = currentFollowUp.length > 0
+          ? currentFollowUp.slice(0, maxQueries)
+          : currentFindings.length > 0
+            ? currentFindings.slice(0, maxQueries).map(f => `${f} latest information`)
+            : [request.question + ' additional details'];
         onProgress?.('decomposition', `追加查询: ${queries.length} 个`);
       }
       timing.decomposition += Date.now() - decompStart;
@@ -447,6 +450,7 @@ export async function deepResearch(
 
       currentReport = synthesis.report;
       currentFindings = synthesis.keyFindings;
+      currentFollowUp = synthesis.followUpQueries;
       currentConfidence = synthesis.confidence;
 
       onProgress?.('synthesis', `置信度: ${synthesis.confidence}% | 关键发现: ${synthesis.keyFindings.length} 条`);

@@ -1,3 +1,4 @@
+﻿/// <reference types="vitest" />
 /**
  * constants.ts — 值域校验 + 关系一致性测试
  *
@@ -99,3 +100,4 @@ describe('constants', () => {
     });
   });
 });
+

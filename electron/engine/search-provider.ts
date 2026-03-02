@@ -539,13 +539,15 @@ export async function readUrl(
       return { success: true, content: truncated, title: url, length: text.length };
     }
 
+    // 先提取 title (在 HTML 清洗之前, 否则标签已被删除)
+    const titleMatch = text.match(/<title>([^<]*)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+
     // HTML → 简易清洗
     if (contentType.includes('html')) {
       text = stripHtml(text);
     }
 
-    const titleMatch = text.match(/<title>([^<]*)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : '';
     const content = text.length > maxLength ? text.slice(0, maxLength) + '\n...[截断]' : text;
     return { success: true, content, title, length: text.length };
 

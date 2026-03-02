@@ -389,3 +389,31 @@ getToolsForRole() → getExternalSkillTools() → skillManager.getDefinitionsFor
 - 🟡 meta-agent 自建循环缺少 Guard/压缩/预算 保护
 
 **最紧急修复**: 统一 isAsync 路由到 `isAsyncTool()` 函数，一次修复解决所有问题。
+
+---
+
+## 九、修复记录 (2026-03-02 已执行)
+
+### 修复 1: isAsyncTool() 补充 git_* 前缀
+- **文件**: `electron/engine/tool-registry.ts` 第1157行
+- **变更**: 添加 `|| toolName.startsWith('git_')`
+- **效果**: git_commit, git_diff, git_log 现在被权威 isAsyncTool() 函数正确标记为异步
+
+### 修复 2: reactDeveloperLoop isAsync 统一化  
+- **文件**: `electron/engine/react-loop.ts` 第18行, 第443行
+- **变更**: import 添加 `isAsyncTool`; 第443行硬编码替换为 `isAsyncTool(tc.function.name)`
+- **效果**: 修复了 spawn_agent, spawn_parallel, sandbox_*, web_search_boost, deep_research, run_blackbox_tests 在开发者ReAct循环中无法获得真实结果的问题
+
+### 修复 3: reactAgentLoop isAsync 统一化
+- **文件**: `electron/engine/react-loop.ts` 第887行
+- **变更**: 硬编码替换为 `isAsyncTool(tc.function.name)`
+- **效果**: 通用ReAct循环 (PM/Architect/QA/DevOps) 的异步路由与权威函数同步
+
+### 修复 4: meta-agent isAsync 统一化
+- **文件**: `electron/ipc/meta-agent.ts` 第22行, 第519行  
+- **变更**: import 添加 `isAsyncTool`; 第519行硬编码替换为 `isAsyncTool(tc.function.name)`
+- **效果**: 修复了 web_search_boost, deep_research 在元Agent中无法获得真实结果的问题
+
+### tsc 验证
+- 四个修改文件 **零新增 tsc 错误**
+- 项目现存 245 个 tsc 错误全部来自 `__tests__/*.test.ts` 和 `context-collector.ts`，为预存旧错误

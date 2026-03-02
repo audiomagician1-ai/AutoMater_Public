@@ -1,3 +1,4 @@
+﻿/// <reference types="vitest" />
 /**
  * decision-log.ts — 并行 Worker 文件冲突检测测试
  *
@@ -181,3 +182,4 @@ describe('decision-log', () => {
     });
   });
 });
+

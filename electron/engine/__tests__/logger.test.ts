@@ -1,3 +1,4 @@
+﻿/// <reference types="vitest" />
 /**
  * logger.ts — 日志系统测试
  *
@@ -158,3 +159,4 @@ describe('logger', () => {
     });
   });
 });
+

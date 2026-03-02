@@ -1,3 +1,4 @@
+﻿/// <reference types="vitest" />
 /**
  * model-selector.ts — 模型选择策略测试
  *
@@ -186,3 +187,4 @@ describe('model-selector', () => {
     });
   });
 });
+

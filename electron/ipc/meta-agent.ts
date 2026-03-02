@@ -19,7 +19,7 @@ import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getDb } from '../db';
 import { runOrchestrator } from '../engine/orchestrator';
 import { backupConversation } from '../engine/conversation-backup';
-import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
+import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
 import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
@@ -516,8 +516,7 @@ export function setupMetaAgentHandlers() {
           }
 
           // 执行工具
-          const isAsync = ['web_search', 'fetch_url', 'git_log'].includes(tc.function.name)
-            || tc.function.name.startsWith('mcp_');
+          const isAsync = isAsyncTool(tc.function.name);
           const toolResult: ToolResult = isAsync
             ? await executeToolAsync(toolCall, toolCtx)
             : executeTool(toolCall, toolCtx);

@@ -1,3 +1,4 @@
+﻿/// <reference types="vitest" />
 /**
  * file-writer.ts — 文件解析 + 写入测试
  *
@@ -184,3 +185,4 @@ Trailing text`;
     });
   });
 });
+

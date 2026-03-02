@@ -18,5 +18,5 @@
     }
   },
   "include": ["src", "electron"],
-  "exclude": ["node_modules", "dist", "dist-electron", "release"]
+  "exclude": ["node_modules", "dist", "dist-electron", "release", "**/*.test.ts", "**/__tests__/**"]
 }

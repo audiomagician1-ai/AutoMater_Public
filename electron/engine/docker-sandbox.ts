@@ -22,6 +22,30 @@ import path from 'path';
 import os from 'os';
 import { createLogger } from './logger';
 
+// ═══════════════════════════════════════
+// Platform Helpers
+// ═══════════════════════════════════════
+
+/**
+ * 将宿主路径转换为 Docker mount 可用的格式
+ * Windows: D:\project → /d/project (Docker Desktop 规范)
+ */
+function toDockerMountPath(hostPath: string): string {
+  if (process.platform === 'win32') {
+    return hostPath
+      .replace(/\\/g, '/')
+      .replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`);
+  }
+  return hostPath;
+}
+
+/**
+ * 对 shell 命令参数进行单引号转义, 防止注入
+ */
+function shellEscape(cmd: string): string {
+  return "'" + cmd.replace(/'/g, "'\\''") + "'";
+}
+
 const execAsync = promisify(execCb);
 const log = createLogger('docker-sandbox');
 
@@ -137,7 +161,8 @@ export async function initSandbox(config: SandboxConfig): Promise<{ success: boo
     // 挂载宿主 workspace
     if (config.mountWorkspace && config.hostWorkspacePath) {
       const hostPath = path.resolve(config.hostWorkspacePath);
-      args.push('-v', `${hostPath}:${workDir}`);
+      const dockerPath = toDockerMountPath(hostPath);
+      args.push('-v', `${dockerPath}:${workDir}`);
     }
 
     // 镜像 + 保持运行的 entrypoint
@@ -187,7 +212,7 @@ export async function execInContainer(
   try {
     const args: string[] = ['docker', 'exec'];
     if (opts?.workDir) args.push('-w', opts.workDir);
-    args.push(containerId, 'sh', '-c', command);
+    args.push(containerId, 'sh', '-c', shellEscape(command));
 
     const { stdout, stderr } = await execAsync(args.join(' '), {
       timeout: timeoutMs,
