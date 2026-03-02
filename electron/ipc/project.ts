@@ -1201,11 +1201,11 @@ export function setupProjectHandlers() {
   });
 
   // ── 删除项目 ──
-  ipcMain.handle('project:delete', (_event, projectId: string) => {
+  ipcMain.handle('project:delete', (_event, projectId: string, deleteFiles: boolean = false) => {
     assertProjectId('project:delete', projectId);
     stopOrchestrator(projectId);
     const db = getDb();
-    // 获取 workspace 路径以清理磁盘
+    // 获取 workspace 路径以备清理磁盘
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
       | { workspace_path?: string }
       | undefined;
@@ -1213,8 +1213,8 @@ export function setupProjectHandlers() {
     db.prepare('DELETE FROM agents WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM features WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
-    // 可选：清理工作区磁盘（异步，不阻塞）
-    if (project?.workspace_path && fs.existsSync(project.workspace_path)) {
+    // 仅在用户明确选择时清理工作区磁盘（默认保留文件）
+    if (deleteFiles && project?.workspace_path && fs.existsSync(project.workspace_path)) {
       fs.rm(project.workspace_path, { recursive: true, force: true }, () => {});
     }
     return { success: true };

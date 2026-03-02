@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('automater', {
     getLogAgentIds: (projectId: string) => ipcRenderer.invoke('project:get-log-agent-ids', projectId),
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
-    delete: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
+    delete: (projectId: string, deleteFiles?: boolean) => ipcRenderer.invoke('project:delete', projectId, deleteFiles ?? false),
     openWorkspace: (projectId: string) => ipcRenderer.invoke('project:open-workspace', projectId),
     export: (projectId: string) => ipcRenderer.invoke('project:export', projectId),
     gitCommit: (projectId: string, message: string) => ipcRenderer.invoke('project:git-commit', projectId, message),

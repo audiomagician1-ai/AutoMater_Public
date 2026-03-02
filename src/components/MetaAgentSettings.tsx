@@ -622,13 +622,13 @@ function MemoryTab({
         {memoryFilter !== 'all' && (
           <button
             onClick={async () => {
-              const ok = await showConfirm({
+              const { confirmed } = await showConfirm({
                 title: '清空记忆',
                 message: `确定清空所有「${CATEGORY_LABELS[memoryFilter].label}」类记忆？此操作不可撤销。`,
                 confirmText: '清空',
                 danger: true,
               });
-              if (ok) onClearCategory(memoryFilter);
+              if (confirmed) onClearCategory(memoryFilter);
             }}
             className="px-3 py-2 rounded-lg bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs transition-all shrink-0"
           >

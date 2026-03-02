@@ -389,7 +389,7 @@ interface AutoMaterAPI {
     /** 获取项目日志中出现过的所有 agent_id (不受筛选影响) */
     getLogAgentIds(projectId: string): Promise<string[]>;
     stop(projectId: string): Promise<{ success: boolean }>;
-    delete(projectId: string): Promise<{ success: boolean }>;
+    delete(projectId: string, deleteFiles?: boolean): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
     export(projectId: string): Promise<{ success: boolean; path?: string; error?: string }>;
     gitCommit(projectId: string, message: string): Promise<{ success: boolean; hash?: string; pushed?: boolean }>;

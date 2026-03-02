@@ -15,12 +15,24 @@ export interface ToastItem {
   createdAt: number;
 }
 
+export interface ConfirmCheckbox {
+  label: string;
+  defaultChecked?: boolean;
+}
+
 export interface ConfirmOptions {
   title: string;
   message: string;
   confirmText?: string;
   cancelText?: string;
   danger?: boolean;
+  /** 可选复选框，用于附加选项（如 "同时删除文件"） */
+  checkbox?: ConfirmCheckbox;
+}
+
+export interface ConfirmResult {
+  confirmed: boolean;
+  checkboxValue?: boolean;
 }
 
 interface ToastState {
@@ -29,8 +41,9 @@ interface ToastState {
   removeToast: (id: string) => void;
 
   // Confirm dialog
-  confirmDialog: (ConfirmOptions & { resolve: (ok: boolean) => void }) | null;
-  showConfirm: (options: ConfirmOptions) => Promise<boolean>;
+  confirmDialog: (ConfirmOptions & { resolve: (result: ConfirmResult) => void; checkboxValue: boolean }) | null;
+  showConfirm: (options: ConfirmOptions) => Promise<ConfirmResult>;
+  setConfirmCheckbox: (value: boolean) => void;
   resolveConfirm: (ok: boolean) => void;
 }
 
@@ -53,15 +66,22 @@ export const useToastStore = create<ToastState>((set, get) => ({
   confirmDialog: null,
 
   showConfirm: (options) => {
-    return new Promise<boolean>((resolve) => {
-      set({ confirmDialog: { ...options, resolve } });
+    return new Promise<ConfirmResult>((resolve) => {
+      set({ confirmDialog: { ...options, resolve, checkboxValue: options.checkbox?.defaultChecked ?? false } });
     });
+  },
+
+  setConfirmCheckbox: (value) => {
+    const dialog = get().confirmDialog;
+    if (dialog) {
+      set({ confirmDialog: { ...dialog, checkboxValue: value } });
+    }
   },
 
   resolveConfirm: (ok) => {
     const dialog = get().confirmDialog;
     if (dialog) {
-      dialog.resolve(ok);
+      dialog.resolve({ confirmed: ok, checkboxValue: dialog.checkboxValue });
       set({ confirmDialog: null });
     }
   },
@@ -76,3 +96,9 @@ export const toast = {
 };
 
 export const confirm = (options: ConfirmOptions) => useToastStore.getState().showConfirm(options);
+
+/** 向后兼容: 简单确认（不使用 checkbox 时直接返回 boolean） */
+export const confirmSimple = async (options: ConfirmOptions): Promise<boolean> => {
+  const result = await confirm(options);
+  return result.confirmed;
+};

@@ -54,6 +54,7 @@ export function ToastContainer() {
 export function ConfirmDialog() {
   const dialog = useToastStore(s => s.confirmDialog);
   const resolveConfirm = useToastStore(s => s.resolveConfirm);
+  const setConfirmCheckbox = useToastStore(s => s.setConfirmCheckbox);
 
   // Escape 关闭
   useEffect(() => {
@@ -77,6 +78,19 @@ export function ConfirmDialog() {
         <div className="px-6 pt-6 pb-2">
           <h3 className="text-base font-bold text-slate-100">{dialog.title}</h3>
           <p className="mt-2 text-sm text-slate-400 leading-relaxed">{dialog.message}</p>
+          {dialog.checkbox && (
+            <label className="flex items-center gap-2 mt-3 cursor-pointer select-none group">
+              <input
+                type="checkbox"
+                checked={dialog.checkboxValue}
+                onChange={e => setConfirmCheckbox(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-red-500 focus:ring-red-500/30 focus:ring-offset-0 cursor-pointer"
+              />
+              <span className="text-sm text-slate-400 group-hover:text-slate-300 transition-colors">
+                {dialog.checkbox.label}
+              </span>
+            </label>
+          )}
         </div>
         <div className="flex justify-end gap-2 px-6 py-4">
           <button

@@ -68,13 +68,13 @@ export function WorkflowPage() {
   };
 
   const handleDeletePreset = async (presetId: string) => {
-    const ok = await confirm({
+    const { confirmed } = await confirm({
       title: '删除工作流预设',
       message: '确定要删除此工作流预设吗？此操作无法撤销。',
       confirmText: '删除',
       danger: true,
     });
-    if (!ok) return;
+    if (!confirmed) return;
     await window.automater.workflow.delete(presetId);
     toast.success('工作流预设已删除');
     loadPresets();
@@ -117,13 +117,13 @@ export function WorkflowPage() {
   };
 
   const handleDeleteMission = async (id: string) => {
-    const ok = await confirm({
+    const { confirmed } = await confirm({
       title: '删除任务',
       message: '确定要删除此任务吗？',
       confirmText: '删除',
       danger: true,
     });
-    if (!ok) return;
+    if (!confirmed) return;
     if (expandedMission === id) setExpandedMission(null);
     await window.automater.ephemeralMission.delete(id);
     toast.success('任务已删除');

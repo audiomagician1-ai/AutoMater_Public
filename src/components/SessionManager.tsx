@@ -114,13 +114,13 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   };
 
   const handleCleanup = async () => {
-    const ok = await confirm({
+    const { confirmed } = await confirm({
       title: '清理旧备份',
       message: '确认清理 30 天前的旧备份？此操作无法撤销。',
       confirmText: '清理',
       danger: true,
     });
-    if (!ok) return;
+    if (!confirmed) return;
     try {
       const result = await window.automater.session.cleanup(30);
       toast.success(`已清理 ${result.deletedFolders} 个旧备份文件夹`);

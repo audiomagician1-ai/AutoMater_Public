@@ -117,15 +117,19 @@ export function ProjectsPage() {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const ok = await confirm({
+    const { confirmed, checkboxValue } = await confirm({
       title: '删除项目',
       message: '确定要删除此项目吗？项目数据将被永久移除，此操作无法撤销。',
       confirmText: '删除',
       danger: true,
+      checkbox: {
+        label: '同时删除项目工作区文件',
+        defaultChecked: false,
+      },
     });
-    if (!ok) return;
-    await window.automater.project.delete(id);
-    toast.success('项目已删除');
+    if (!confirmed) return;
+    await window.automater.project.delete(id, checkboxValue ?? false);
+    toast.success(checkboxValue ? '项目及文件已删除' : '项目已删除（工作区文件已保留）');
     loadProjects();
   };
 

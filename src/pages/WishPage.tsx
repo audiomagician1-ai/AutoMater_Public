@@ -874,8 +874,8 @@ function WishDetailPanel({
         </div>
         <button
           onClick={async () => {
-            const ok = await confirm({ title: '删除需求', message: '确定要删除此需求吗？此操作无法撤销。', confirmText: '删除', danger: true });
-            if (ok) onDelete(wish.id);
+            const { confirmed } = await confirm({ title: '删除需求', message: '确定要删除此需求吗？此操作无法撤销。', confirmText: '删除', danger: true });
+            if (confirmed) onDelete(wish.id);
           }}
           className="text-[10px] text-red-500/60 hover:text-red-400 transition-colors"
           title="删除需求"

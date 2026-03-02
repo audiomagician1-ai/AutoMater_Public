@@ -104,13 +104,13 @@ export function TeamPage() {
 
   /** 删除成员 */
   const handleDeleteMember = async (id: string) => {
-    const ok = await confirm({
+    const { confirmed } = await confirm({
       title: '删除团队成员',
       message: '确定要移除此成员吗？关联的配置将一并删除。',
       confirmText: '删除',
       danger: true,
     });
-    if (!ok) return;
+    if (!confirmed) return;
     await window.automater.team.delete(id);
     toast.success('成员已移除');
     loadMembers();
