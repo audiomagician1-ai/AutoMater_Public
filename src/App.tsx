@@ -1,29 +1,38 @@
-﻿import { useEffect, useState, useCallback, useRef } from 'react';
+﻿import { useEffect, useState, useCallback, useRef, Suspense, lazy } from 'react';
 import { useAppStore } from './stores/app-store';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { OverviewPage } from './pages/OverviewPage';
-import { WishPage } from './pages/WishPage';
-import { BoardPage } from './pages/BoardPage';
-import { TeamPage } from './pages/TeamPage';
-import { DocsPage } from './pages/DocsPage';
-import { AcceptancePanel } from './components/AcceptancePanel';
-import { LogsPage } from './pages/LogsPage';
-import { OutputPage } from './pages/OutputPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { ContextPage } from './pages/ContextPage';
-import { WorkflowPage } from './pages/WorkflowPage';
-import TimelinePage from './pages/TimelinePage';
-import { MetaAgentPanel } from './components/MetaAgentPanel';
-import { SessionManager } from './components/SessionManager';
-import { GuidePage } from './pages/GuidePage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, ConfirmDialog } from './components/Toast';
 import { ProjectBar } from './components/ProjectBar';
 import { GlobalSearchBar } from './components/GlobalSearchBar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { toast } from './stores/toast-store';
+
+// ── Lazy-loaded pages (code-split per route) ──
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const OverviewPage = lazy(() => import('./pages/OverviewPage').then(m => ({ default: m.OverviewPage })));
+const WishPage = lazy(() => import('./pages/WishPage').then(m => ({ default: m.WishPage })));
+const BoardPage = lazy(() => import('./pages/BoardPage').then(m => ({ default: m.BoardPage })));
+const TeamPage = lazy(() => import('./pages/TeamPage').then(m => ({ default: m.TeamPage })));
+const DocsPage = lazy(() => import('./pages/DocsPage').then(m => ({ default: m.DocsPage })));
+const LogsPage = lazy(() => import('./pages/LogsPage').then(m => ({ default: m.LogsPage })));
+const OutputPage = lazy(() => import('./pages/OutputPage').then(m => ({ default: m.OutputPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ContextPage = lazy(() => import('./pages/ContextPage').then(m => ({ default: m.ContextPage })));
+const WorkflowPage = lazy(() => import('./pages/WorkflowPage').then(m => ({ default: m.WorkflowPage })));
+const TimelinePage = lazy(() => import('./pages/TimelinePage'));
+const GuidePage = lazy(() => import('./pages/GuidePage').then(m => ({ default: m.GuidePage })));
+const AcceptancePanel = lazy(() => import('./components/AcceptancePanel').then(m => ({ default: m.AcceptancePanel })));
+const MetaAgentPanel = lazy(() => import('./components/MetaAgentPanel').then(m => ({ default: m.MetaAgentPanel })));
+const SessionManager = lazy(() => import('./components/SessionManager').then(m => ({ default: m.SessionManager })));
+
+const PageFallback = () => (
+  <div className="flex items-center justify-center h-full text-slate-500">
+    <div className="animate-spin w-5 h-5 border-2 border-slate-400 border-t-transparent rounded-full mr-2" />
+    加载中...
+  </div>
+);
 
 export function App() {
   // ── 精确选择器: 只订阅渲染需要的状态片段，避免不相关 store 变化触发 App 重渲染 ──
@@ -203,12 +212,16 @@ export function App() {
   // 定时拉取统计
   useEffect(() => {
     if (!currentProjectId) { setStats(null); return; }
+    let visible = true;
     const poll = async () => {
+      if (!visible) return; // v22: skip polling when tab is hidden
       try { setStats(await window.automater.project.getStats(currentProjectId)); } catch { /* stats query failed, non-critical */ }
     };
     poll();
     const t = setInterval(poll, 5000);
-    return () => clearInterval(t);
+    const onVisChange = () => { visible = !document.hidden; if (visible) poll(); };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisChange); };
   }, [currentProjectId]);
 
   const renderContent = () => {
@@ -252,14 +265,16 @@ export function App() {
               <GlobalSearchBar />
             </div>
           </div>
-          <main className="flex-1 overflow-hidden">
-            {renderContent()}
-          </main>
+            <main className="flex-1 overflow-hidden">
+              <Suspense fallback={<PageFallback />}>
+                {renderContent()}
+              </Suspense>
+            </main>
         </div>
-        {insideProject && <MetaAgentPanel />}
+        {insideProject && <Suspense fallback={null}><MetaAgentPanel /></Suspense>}
       </div>
       {insideProject && <StatusBar stats={stats} />}
-      {insideProject && <AcceptancePanel />}
+      {insideProject && <Suspense fallback={null}><AcceptancePanel /></Suspense>}
       <ToastContainer />
       <ConfirmDialog />
     </div>

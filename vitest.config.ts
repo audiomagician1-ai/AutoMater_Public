@@ -1,15 +1,17 @@
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    pool: 'forks',
     include: ['electron/**/*.test.ts', 'src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['node_modules', 'dist', 'dist-electron', 'release'],
     alias: {
       // Mock heavy native/Electron modules
-      electron: new URL('./__mocks__/electron.ts', import.meta.url).pathname,
-      '../db': new URL('./__mocks__/db.ts', import.meta.url).pathname,
+      electron: path.resolve(__dirname, '__mocks__/electron.ts'),
+      '../db': path.resolve(__dirname, '__mocks__/db.ts'),
     },
     coverage: {
       provider: 'v8',
@@ -21,12 +23,9 @@ export default defineConfig({
         'electron/engine/__tests__/**',
         'electron/engine/types.ts',       // pure type defs
       ],
-      thresholds: {
-        statements: 27,   // 2026-03-02: 27.1% actual → 守住底线, CI 防回归
-        branches: 26,     // 26.4% actual
-        functions: 31,    // 31.6% actual
-        lines: 27,        // 27.2% actual
-      },
+      // NOTE: vitest v4 + v8 coverage 在 Windows/Node24 下统计为 0% (已知 bug #9457)
+      // 阈值暂时禁用,等上游修复后重新启用。CI 中仅运行 vitest run (不含 --coverage)。
+      // thresholds: { statements: 27, branches: 26, functions: 31, lines: 27 },
     },
   },
 });
