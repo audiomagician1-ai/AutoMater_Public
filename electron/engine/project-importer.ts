@@ -475,6 +475,7 @@ async function phase1Probe(
   scan: ScanResult,
   signal?: AbortSignal,
   onProgress?: (event: ImportProgressEvent) => void,
+  onLog?: ImportLogCallback,
 ): Promise<ProbeReport[]> {
   const settings = getSettings();
   if (!settings) throw new Error('未配置 LLM 设置，请先在设置页面配置 API');
@@ -543,6 +544,8 @@ async function phase1Probe(
       signal,
       budgetUsd: resolveImportBudget(settings),
       settings,
+      onLog,
+      probeTimeoutMs: 300_000, // 5 min per probe
       onProbeComplete: (report) => {
         probeStatuses.set(report.probeId, {
           probeId: report.probeId,
