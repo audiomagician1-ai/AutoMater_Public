@@ -18,6 +18,7 @@ import TimelinePage from './pages/TimelinePage';
 import { MetaAgentPanel } from './components/MetaAgentPanel';
 import { SessionManager } from './components/SessionManager';
 import { GuidePage } from './pages/GuidePage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export function App() {
   const {
@@ -221,7 +222,9 @@ export function App() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 overflow-hidden">
-          {renderContent()}
+          <ErrorBoundary>
+            {renderContent()}
+          </ErrorBoundary>
         </main>
         {insideProject && <MetaAgentPanel />}
       </div>

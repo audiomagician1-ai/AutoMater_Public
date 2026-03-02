@@ -772,8 +772,10 @@ export function getToolsForLLM(gitMode: string = 'local'): any[] {
  * 从 MCP Manager 获取外部工具 (OpenAI format)。
  * 使用延迟 require 避免模块初始化时的循环依赖。
  */
-function getExternalMcpTools(role?: string): any[] {
+function getExternalMcpTools(role?: string): Record<string, unknown>[] {
   try {
+    // Lazy import to avoid circular dependency
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
     const allTools = mcpManager.getAllTools();
 
@@ -790,8 +792,10 @@ function getExternalMcpTools(role?: string): any[] {
 /**
  * 从 Skill Manager 获取外部工具 (OpenAI format)。
  */
-function getExternalSkillTools(role?: string): any[] {
+function getExternalSkillTools(role?: string): Record<string, unknown>[] {
   try {
+    // Lazy import to avoid circular dependency
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
     const defs = role
       ? skillManager.getDefinitionsForRole(role)

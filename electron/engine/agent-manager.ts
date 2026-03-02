@@ -8,7 +8,7 @@
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { sendToUI } from './ui-bridge';
-import type { MemberLLMConfig, AppSettings } from './types';
+import type { MemberLLMConfig, AppSettings, FeatureRow } from './types';
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -91,9 +91,9 @@ export function updateAgentStats(agentId: string, projectId: string, inputTokens
  * 检查项目预算是否超限。
  * budget=0 表示无上限 (永远返回 ok=true)。
  */
-export function checkBudget(projectId: string, settings: any): { ok: boolean; spent: number; budget: number } {
+export function checkBudget(projectId: string, settings: AppSettings): { ok: boolean; spent: number; budget: number } {
   const db = getDb();
-  const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as any;
+  const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as { total: number | null } | undefined;
   const spent = row?.total ?? 0;
   const budget = settings.dailyBudgetUsd ?? 0;
   // 0 = 无上限
@@ -228,7 +228,7 @@ export function getTeamMemberSkills(projectId: string, role: string, agentIndex:
   }
 }
 
-export function lockNextFeature(projectId: string, workerId: string): any | null {
+export function lockNextFeature(projectId: string, workerId: string): FeatureRow | null {
   const db = getDb();
   const tryLock = db.transaction(() => {
     const passedRows = db.prepare("SELECT id FROM features WHERE project_id = ? AND status = 'passed'").all(projectId) as { id: string }[];
@@ -241,17 +241,17 @@ export function lockNextFeature(projectId: string, workerId: string): any | null
     ).get(projectId, workerId) as { group_id: string } | undefined;
 
     // 查询所有 todo features, 按 group 亲和力 + priority 排序
-    let todos: any[];
+    let todos: FeatureRow[];
     if (currentGroup?.group_id) {
       // 同 group 优先 (group affinity ordering)
       todos = db.prepare(
         `SELECT * FROM features WHERE project_id = ? AND status = 'todo'
          ORDER BY CASE WHEN group_id = ? THEN 0 ELSE 1 END, priority ASC, id ASC`
-      ).all(projectId, currentGroup.group_id) as any[];
+      ).all(projectId, currentGroup.group_id) as FeatureRow[];
     } else {
       todos = db.prepare(
         "SELECT * FROM features WHERE project_id = ? AND status = 'todo' ORDER BY priority ASC, id ASC"
-      ).all(projectId) as any[];
+      ).all(projectId) as FeatureRow[];
     }
 
     for (const f of todos) {
@@ -265,7 +265,7 @@ export function lockNextFeature(projectId: string, workerId: string): any | null
       ).run(workerId, f.id, projectId);
 
       if (result.changes > 0) {
-        return { ...f, status: 'in_progress', locked_by: workerId };
+        return { ...f, status: 'in_progress' as const, locked_by: workerId };
       }
     }
     return null;

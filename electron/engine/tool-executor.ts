@@ -418,7 +418,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         // 如果有 projectId, 写入 change_requests 表
         if (ctx.projectId) {
           try {
-            const { getDb } = require('../db') as typeof import('../db');
+            const { getDb } = require('../db') as typeof import('../db'); // eslint-disable-line @typescript-eslint/no-var-requires
             const db = getDb();
             const rfcId = `rfc-${Date.now().toString(36)}`;
             db.prepare(`INSERT INTO change_requests (id, project_id, description, status, affected_features)
@@ -690,7 +690,7 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
  */
 async function executeMcpTool(call: ToolCall): Promise<ToolResult> {
   try {
-    const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
+    const { mcpManager } = await import('./mcp-client');
 
     // 解析 serverId 和 原始工具名
     // 格式: mcp_{serverId}_{toolName}
@@ -736,7 +736,7 @@ async function executeMcpTool(call: ToolCall): Promise<ToolResult> {
  */
 async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
   try {
-    const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
+    const { skillManager } = await import('./skill-loader');
     const result = await skillManager.executeSkill(call.name, call.arguments);
     return {
       success: result.success,
@@ -754,7 +754,7 @@ async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
 
 function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.name || !args.description || !args.trigger || !args.knowledge) {
@@ -788,7 +788,7 @@ function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
 
 function executeSkillSearch(call: ToolCall): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const query = call.arguments.query || '';
     const maxResults = call.arguments.max_results ?? 3;
 
@@ -819,7 +819,7 @@ function executeSkillSearch(call: ToolCall): ToolResult {
 
 function executeSkillImprove(call: ToolCall): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.skill_id || !args.change_note) {
@@ -849,7 +849,7 @@ function executeSkillImprove(call: ToolCall): ToolResult {
 
 function executeSkillRecordUsage(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
-    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const { skillEvolution } = require('./skill-evolution') as typeof import('./skill-evolution'); // eslint-disable-line @typescript-eslint/no-var-requires
     const args = call.arguments;
 
     if (!args.skill_id || args.success === undefined) {

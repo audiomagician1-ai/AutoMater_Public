@@ -255,3 +255,96 @@ export interface WorkflowPreset {
   createdAt: string;
   updatedAt: string;
 }
+
+// ═══════════════════════════════════════
+// Feature Pipeline Types (v12.1 — 消除 any)
+// ═══════════════════════════════════════
+
+/**
+ * ParsedFeature — PM LLM 输出归一化后的 Feature
+ * PM 分析阶段解析 LLM JSON 后产出此类型，写入 DB 前的中间态
+ */
+export interface ParsedFeature {
+  id: string;
+  category: string;
+  priority: number;
+  group_name: string;
+  sub_group: string;
+  title: string;
+  description: string;
+  dependsOn: string[];          // LLM 倾向 camelCase
+  depends_on?: string[];        // DB 使用 snake_case, 向后兼容
+  acceptance_criteria: string[];
+  acceptanceCriteria?: string[]; // LLM 可能输出 camelCase
+  notes: string;
+  group_id?: string;
+}
+
+/**
+ * EnrichedFeature — 注入运行时上下文后的 Feature
+ * 从 DB 读取 + 注入 doc/TDD/conflict 等上下文后的完整类型
+ * 用于 workerLoop / reactDeveloperLoop / QA 等阶段
+ */
+export interface EnrichedFeature extends FeatureRow {
+  /** v4.2: 关联的子需求+测试规格文档摘要 */
+  _docContext?: string;
+  /** v5.3: 文件锁冲突警告 */
+  _conflictWarning?: string;
+  /** v5.3: 其他 Worker 的文件占用信息 */
+  _otherWorkerClaims?: string;
+  /** v5.4: TDD 预生成的测试文件路径 */
+  _tddTests?: string[];
+  /** v5.4: TDD 上下文提示 */
+  _tddContext?: string;
+}
+
+// ═══════════════════════════════════════
+// Error Types — 统一引擎错误层次 (v12.1)
+// ═══════════════════════════════════════
+
+/** 引擎层基础错误 — 所有引擎错误的父类 */
+export class EngineError extends Error {
+  public readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'EngineError';
+    this.code = code;
+  }
+}
+
+/** 网络/API 错误 (LLM 调用失败、连接超时等) */
+export class NetworkError extends EngineError {
+  public readonly statusCode?: number;
+  constructor(message: string, statusCode?: number) {
+    super(message, 'NETWORK_ERROR');
+    this.name = 'NetworkError';
+    this.statusCode = statusCode;
+  }
+}
+
+/** 解析错误 (LLM 输出无法解析为有效 JSON 等) */
+export class ParseError extends EngineError {
+  constructor(message: string) {
+    super(message, 'PARSE_ERROR');
+    this.name = 'ParseError';
+  }
+}
+
+/** 配置错误 (API Key 缺失、模型不存在等) */
+export class ConfigError extends EngineError {
+  constructor(message: string) {
+    super(message, 'CONFIG_ERROR');
+    this.name = 'ConfigError';
+  }
+}
+
+/** 工具执行错误 (文件读写失败、命令超时等) */
+export class ToolError extends EngineError {
+  public readonly toolName: string;
+  constructor(message: string, toolName: string) {
+    super(message, 'TOOL_ERROR');
+    this.name = 'ToolError';
+    this.toolName = toolName;
+  }
+}
+

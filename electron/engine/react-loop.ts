@@ -13,6 +13,7 @@ import { getDb } from '../db';
 import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
+import type { AppSettings } from './types';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
@@ -145,7 +146,7 @@ function computeMessageBreakdown(messages: Array<{ role: string; content: any }>
 // ═══════════════════════════════════════
 
 export async function reactDeveloperLoop(
-  projectId: string, workerId: string, settings: any,
+  projectId: string, workerId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, gitConfig: GitProviderConfig,
   feature: any, qaFeedback: string
@@ -165,6 +166,9 @@ export async function reactDeveloperLoop(
     taskCompleted: false,
     filesWritten: new Set<string>(),
   };
+
+  // v11.0: 从 workerId 提取 worker 索引 (用于成员级配置)
+  const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
 
   // ── v1.3: Dynamic Model Selection ──
   const featureComplexity = estimateFeatureComplexity(feature);
@@ -263,7 +267,7 @@ export async function reactDeveloperLoop(
   // v5.1: 技能自动匹配 — 搜索与当前任务相关的已习得技能
   let skillContextText = '';
   try {
-    const { buildSkillContext } = require('./skill-evolution') as typeof import('./skill-evolution');
+    const { buildSkillContext } = await import('./skill-evolution');
     const taskDesc = `${feature.title} ${feature.description} ${feature.acceptance_criteria || ''}`;
     skillContextText = buildSkillContext(taskDesc, 2);
     if (skillContextText) {
@@ -274,7 +278,6 @@ export async function reactDeveloperLoop(
   }
 
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
-  const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
   const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
 
   const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
@@ -659,7 +662,7 @@ export async function reactDeveloperLoop(
 
 async function compressMessageHistorySmart(
   messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>,
-  settings: any,
+  settings: AppSettings,
   signal?: AbortSignal
 ): Promise<void> {
   const keepRecent = 10;
@@ -732,7 +735,7 @@ export interface GenericReactConfig {
   role: import('./tool-registry').AgentRole;
   systemPrompt: string;
   userMessage: string;
-  settings: any;
+  settings: AppSettings;
   workspacePath: string | null;
   gitConfig: import('./git-provider').GitProviderConfig;
   win: BrowserWindow | null;

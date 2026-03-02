@@ -17,10 +17,14 @@
 
 import { BrowserWindow } from 'electron';
 import { EventEmitter } from 'events';
+import { exec as execCb, execSync } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db';
 import { createLogger } from './logger';
+
+const execAsync = promisify(execCb);
 
 const log = createLogger('orchestrator');
 
@@ -38,7 +42,7 @@ import type { GenericReactResult } from './react-loop';
 import { runQAReview, generateTestSkeleton } from './qa-loop';
 
 // ── 引擎依赖 ──
-import type { AppSettings, ProjectRow, FeatureRow, CountResult } from './types';
+import type { AppSettings, ProjectRow, FeatureRow, CountResult, ParsedFeature, EnrichedFeature } from './types';
 import {
   PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT,
   PM_DESIGN_DOC_PROMPT, PM_SPLIT_REQS_PROMPT, QA_TEST_SPEC_PROMPT, PM_ACCEPTANCE_PROMPT,
@@ -86,6 +90,11 @@ function getActiveWorkflowStages(projectId: string): WorkflowStageId[] {
 /** 检查工作流是否包含指定阶段 */
 function hasStage(stages: WorkflowStageId[], stageId: WorkflowStageId): boolean {
   return stages.includes(stageId);
+}
+
+/** 模块级成员模型解析器 — 按角色返回该成员实际使用的 LLM 模型名 (供 standalone phase 函数使用) */
+function resolveMemberModel(projectId: string, role: string, settings: AppSettings, agentIndex: number = 0): string {
+  return getTeamMemberLLMConfig(projectId, role, agentIndex, settings).model;
 }
 
 // ═══════════════════════════════════════
@@ -550,7 +559,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 async function phasePMAnalysis(
   projectId: string, project: ProjectRow, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
-): Promise<any[] | null> {
+): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = `pm-${Date.now().toString(36)}`;
   spawnAgent(projectId, pmId, 'pm', win);
@@ -560,7 +569,7 @@ async function phasePMAnalysis(
   db.prepare("UPDATE projects SET status = 'initializing', updated_at = datetime('now') WHERE id = ?").run(projectId);
   sendToUI(win, 'project:status', { projectId, status: 'initializing' });
 
-  let features: any[] = [];
+  let features: ParsedFeature[] = [];
   try {
     if (signal.aborted) return null;
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
@@ -608,10 +617,11 @@ async function phasePMAnalysis(
     }
     db.prepare("UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ?")
       .run(pmReactResult.totalInputTokens, pmReactResult.totalOutputTokens, pmReactResult.totalCost, pmId);
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return null;
-    addLog(projectId, pmId, 'error', err.message);
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 分析失败: ${err.message}` });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    addLog(projectId, pmId, 'error', errMsg);
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 分析失败: ${errMsg}` });
     db.prepare("UPDATE agents SET status = 'error' WHERE id = ?").run(pmId);
     db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
     sendToUI(win, 'project:status', { projectId, status: 'error' });
@@ -635,7 +645,7 @@ async function phasePMAnalysis(
 
   // 写入 DB
   const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
-  db.transaction((items: any[]) => {
+  db.transaction((items: ParsedFeature[]) => {
     for (let i = 0; i < items.length; i++) {
       const f = items[i];
       const groupId = f.group_name || f.category || 'default';
@@ -676,7 +686,7 @@ async function phaseIncrementalPM(
   newCapabilities: Array<{ title: string; description: string }>,
   settings: AppSettings, win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null,
-): Promise<any[] | null> {
+): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = `pm-incr-${Date.now().toString(36)}`;
   spawnAgent(projectId, pmId, 'pm', win);
@@ -703,7 +713,7 @@ async function phaseIncrementalPM(
 
   try {
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
-    const pmModel = memberModel('pm');
+    const pmModel = resolveMemberModel(projectId, 'pm', settings);
     const result = await callLLM(settings, pmModel, [
       { role: 'system', content: pmPrompt },
       {
@@ -760,7 +770,7 @@ async function phaseIncrementalPM(
       `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`
     );
-    db.transaction((items: any[]) => {
+    db.transaction((items: ParsedFeature[]) => {
       for (let i = 0; i < items.length; i++) {
         const f = items[i];
         const groupId = f.group_name || f.category || 'default';
@@ -783,9 +793,10 @@ async function phaseIncrementalPM(
 
     return newFeatures;
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return null;
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析失败: ${err.message}` });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析失败: ${errMsg}` });
     return null;
   }
 }
@@ -795,7 +806,7 @@ async function phaseIncrementalPM(
 // ═══════════════════════════════════════
 
 async function phasePMDesignDoc(
-  projectId: string, project: ProjectRow, features: any[], settings: AppSettings,
+  projectId: string, project: ProjectRow, features: ParsedFeature[], settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
 ): Promise<void> {
   const pmId = `pm-design-${Date.now().toString(36)}`;
@@ -811,13 +822,13 @@ async function phasePMDesignDoc(
     sendToUI(win, 'agent:stream-start', { projectId, agentId: pmId, label: 'PM 设计文档' });
 
     const designPrompt = getTeamPrompt(projectId, 'pm') ? null : PM_DESIGN_DOC_PROMPT;
-    const result = await callLLM(settings, memberModel('pm'), [
+    const result = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
       { role: 'system', content: designPrompt ?? PM_DESIGN_DOC_PROMPT },
       { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单 (${features.length} 个):\n${featureSummary}\n\n请编写产品设计文档。` },
     ], signal, 16384, 2, onChunk);
     sendToUI(win, 'agent:stream-end', { projectId, agentId: pmId });
 
-    const cost = calcCost(memberModel('pm'), result.inputTokens, result.outputTokens);
+    const cost = calcCost(resolveMemberModel(projectId, 'pm', settings), result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
 
     // v8.0: 备份 PM 设计文档对话
@@ -844,10 +855,11 @@ async function phasePMDesignDoc(
 
     emitEvent({ projectId, agentId: pmId, type: 'phase:design-doc:end', data: { version, chars: result.content.length } });
     createCheckpoint(projectId, '设计文档完成');
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return;
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 设计文档生成失败 (非致命): ${err.message}` });
-    addLog(projectId, pmId, 'error', err.message);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 设计文档生成失败 (非致命): ${errMsg}` });
+    addLog(projectId, pmId, 'error', errMsg);
   }
 
   const db = getDb();
@@ -859,7 +871,7 @@ async function phasePMDesignDoc(
 // ═══════════════════════════════════════
 
 async function phaseArchitect(
-  projectId: string, project: ProjectRow, features: any[], settings: AppSettings,
+  projectId: string, project: ProjectRow, features: ParsedFeature[], settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string | null,
 ): Promise<void> {
   if (signal.aborted) return;
@@ -879,13 +891,13 @@ async function phaseArchitect(
     const [onChunk] = createStreamCallback(win, projectId, archId);
     sendToUI(win, 'agent:stream-start', { projectId, agentId: archId, label: '架构 + 产品设计' });
     const archPrompt = getTeamPrompt(projectId, 'architect') ?? ARCHITECT_SYSTEM_PROMPT;
-    const archResult = await callLLM(settings, memberModel('architect'), [
+    const archResult = await callLLM(settings, resolveMemberModel(projectId, 'architect', settings), [
       { role: 'system', content: archPrompt },
       { role: 'user', content: `用户需求:\n${project.wish}\n\nFeature 清单 (${features.length} 个):\n${featureSummary}\n\n请完成以下两份文档:\n\n1. **产品设计文档** — 产品愿景、功能全景、用户流程、数据模型概要、非功能性需求\n2. **技术架构文档 (ARCHITECTURE.md)** — 技术选型、目录结构、核心数据模型、模块设计、API 接口、编码规范\n\n两份文档合并为一份完整输出, 先产品设计后技术架构。` },
     ], signal, 16384, 2, onChunk);
     sendToUI(win, 'agent:stream-end', { projectId, agentId: archId });
 
-    const archCost = calcCost(memberModel('architect'), archResult.inputTokens, archResult.outputTokens);
+    const archCost = calcCost(resolveMemberModel(projectId, 'architect', settings), archResult.inputTokens, archResult.outputTokens);
     addLog(projectId, archId, 'output', archResult.content.slice(0, 3000));
 
     // v5.0: 同时写入设计文档和架构文档
@@ -928,9 +940,10 @@ async function phaseArchitect(
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
     emitEvent({ projectId, agentId: archId, type: 'phase:architect:end', data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost }, inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost });
     createCheckpoint(projectId, '架构 + 产品设计完成');
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return;
-    sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `⚠️ 架构设计失败 (非致命): ${err.message}` });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `⚠️ 架构设计失败 (非致命): ${errMsg}` });
     db.prepare("UPDATE agents SET status = 'error' WHERE id = ?").run(archId);
   }
 }
@@ -943,7 +956,7 @@ const BATCH_DOC_SIZE = 5; // 每批处理的 Feature 数
 const PHASE3_TIMEOUT_MS = 300_000; // Phase 3 单次 LLM 调用超时 5 分钟 (子需求生成量大)
 
 async function phaseReqsAndTestSpecs(
-  projectId: string, features: any[], settings: AppSettings,
+  projectId: string, features: ParsedFeature[], settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
 ): Promise<void> {
   const db = getDb();
@@ -952,7 +965,7 @@ async function phaseReqsAndTestSpecs(
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📋 Phase 3: 批量生成 ${features.length} 个 Feature 的子需求和测试规格 (每批 ${BATCH_DOC_SIZE} 个)...` });
 
   // ── 3a: 批量子需求文档 ──
-  const batches: any[][] = [];
+  const batches: ParsedFeature[][] = [];
   for (let i = 0; i < features.length; i += BATCH_DOC_SIZE) {
     batches.push(features.slice(i, i + BATCH_DOC_SIZE));
   }
@@ -960,17 +973,17 @@ async function phaseReqsAndTestSpecs(
   for (let bi = 0; bi < batches.length; bi++) {
     if (signal.aborted) return;
     const batch = batches[bi];
-    const batchIds = batch.map((f: any, i: number) => f.id || `F${features.indexOf(f) + 1}`);
+    const batchIds = batch.map((f, i) => f.id || `F${features.indexOf(f) + 1}`);
 
     // 批量子需求: 一次调用生成多个 Feature 的子需求
     try {
       const pmReqId = `pm-req-batch-${Date.now().toString(36)}`;
-      const batchFeatureDesc = batch.map((f: any) => {
+      const batchFeatureDesc = batch.map((f) => {
         const fid = f.id || `F${features.indexOf(f) + 1}`;
         return `### Feature ${fid}\n标题: ${f.title || f.description}\n描述: ${f.description}\n验收标准: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(f.dependsOn || f.depends_on || [])}\n备注: ${f.notes || '无'}`;
       }).join('\n\n');
 
-      const reqResult = await callLLM(settings, memberModel('pm'), [
+      const reqResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
         { role: 'system', content: PM_SPLIT_REQS_PROMPT },
         {
           role: 'user',
@@ -978,7 +991,7 @@ async function phaseReqsAndTestSpecs(
         },
       ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
-      const reqCost = calcCost(memberModel('pm'), reqResult.inputTokens, reqResult.outputTokens);
+      const reqCost = calcCost(resolveMemberModel(projectId, 'pm', settings), reqResult.inputTokens, reqResult.outputTokens);
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 批次 ${bi + 1}/${batches.length} 子需求生成完成 ($${reqCost.toFixed(4)})` });
 
       // 解析批量输出, 按 Feature 分割
@@ -989,9 +1002,10 @@ async function phaseReqsAndTestSpecs(
         db.prepare("UPDATE features SET requirement_doc_ver = ? WHERE id = ? AND project_id = ?")
           .run(reqVer, fid, projectId);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${err.message}${err.message.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     // 批量测试规格: 一次调用生成多个 Feature 的测试规格
@@ -1003,7 +1017,7 @@ async function phaseReqsAndTestSpecs(
       }).filter(Boolean).join('\n\n---\n\n');
 
       if (batchReqDocs) {
-        const specResult = await callLLM(settings, memberModel('pm'), [
+        const specResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
           { role: 'system', content: QA_TEST_SPEC_PROMPT },
           {
             role: 'user',
@@ -1011,7 +1025,7 @@ async function phaseReqsAndTestSpecs(
           },
         ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
-        const specCost = calcCost(memberModel('pm'), specResult.inputTokens, specResult.outputTokens);
+        const specCost = calcCost(resolveMemberModel(projectId, 'pm', settings), specResult.inputTokens, specResult.outputTokens);
         sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 批次 ${bi + 1}/${batches.length} 测试规格生成完成 ($${specCost.toFixed(4)})` });
 
         const specSections = splitBatchOutput(specResult.content, batchIds);
@@ -1022,16 +1036,17 @@ async function phaseReqsAndTestSpecs(
             .run(specVer, fid, projectId);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) return;
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${err.message}${err.message.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     createCheckpoint(projectId, `Phase 3: 批次 ${bi + 1}/${batches.length} 文档已生成`);
   }
 
   // 一致性检查
-  const featureIds = features.map((f: any, i: number) => f.id || `F${String(i + 1).padStart(3, '0')}`);
+  const featureIds = features.map((f, i) => f.id || `F${String(i + 1).padStart(3, '0')}`);
   const consistency = checkConsistency(workspacePath, featureIds);
   if (!consistency.ok) {
     const issueList = consistency.issues.map(i => `  - [${i.severity}] ${i.description}`).join('\n');
@@ -1093,8 +1108,8 @@ async function workerLoop(
       break;
     }
 
-    const feature = lockNextFeature(projectId, workerId);
-    if (!feature) {
+    const lockedFeature = lockNextFeature(projectId, workerId);
+    if (!lockedFeature) {
       const inProgress = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").get(projectId) as CountResult;
       if (inProgress.c > 0) { await sleep(3000); continue; }
       sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: '✅ 没有更多任务，下班了' });
@@ -1102,6 +1117,9 @@ async function workerLoop(
       sendToUI(win, 'agent:status', { projectId, agentId: workerId, status: 'idle', currentTask: null });
       break;
     }
+
+    // Enrich: cast to EnrichedFeature for runtime context injection
+    const feature: EnrichedFeature = { ...lockedFeature };
 
     db.prepare("UPDATE agents SET status = 'working', current_task = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?")
       .run(feature.id, workerId, projectId);
@@ -1166,8 +1184,9 @@ async function workerLoop(
         }
         db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
         sendToUI(win, 'agent:status', { projectId, agentId: qaId, status: 'idle' });
-      } catch (err: any) {
-        sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `  ⚠️ TDD 测试骨架生成失败 (将继续正常开发): ${err.message}` });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: `  ⚠️ TDD 测试骨架生成失败 (将继续正常开发): ${errMsg}` });
       }
     }
     let lastErrorMsg = '';  // v5.6: 记录最后一个错误，用于 circuit-breaker
@@ -1211,7 +1230,7 @@ async function workerLoop(
           });
 
           const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath, projectId);
-          const qaCost = calcCost(resolveModel('qa'), qaResult.inputTokens, qaResult.outputTokens);
+          const qaCost = calcCost(resolveMemberModel(projectId, 'qa', settings), qaResult.inputTokens, qaResult.outputTokens);
           updateAgentStats(qaId, projectId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
           db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(qaId, projectId);
 
@@ -1237,9 +1256,10 @@ async function workerLoop(
           sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `✅ ${feature.id} 完成 (无文件, $${reactResult.totalCost.toFixed(4)})` });
           break;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (signal.aborted) break;
-        lastErrorMsg = err.message || 'Unknown error';
+        const errMsg = err instanceof Error ? err.message : String(err);
+        lastErrorMsg = errMsg || 'Unknown error';
         completeFeatureSessionLink(devLinkId, `错误: ${lastErrorMsg.slice(0, 150)}`, false);
         // v5.6: 不可重试错误 → 直接终止 QA 重试循环
         if (err instanceof NonRetryableError) {
@@ -1248,8 +1268,8 @@ async function workerLoop(
           addLog(projectId, workerId, 'error', `[${feature.id}] NonRetryable: ${err.message}`);
           break;
         }
-        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `❌ ${feature.id} 错误: ${err.message}` });
-        addLog(projectId, workerId, 'error', `[${feature.id}] ${err.message}`);
+        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `❌ ${feature.id} 错误: ${errMsg}` });
+        addLog(projectId, workerId, 'error', `[${feature.id}] ${errMsg}`);
         if (qaAttempt >= maxQARetries) break;
         await sleep(2000);
       }
@@ -1337,7 +1357,7 @@ async function phasePMAcceptance(
         ].filter(Boolean).join('\n');
       }).join('\n\n---\n\n');
 
-      const acceptResult = await callLLM(settings, memberModel('pm'), [
+      const acceptResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
         { role: 'system', content: PM_ACCEPTANCE_PROMPT },
         {
           role: 'user',
@@ -1345,7 +1365,7 @@ async function phasePMAcceptance(
         },
       ], signal, 8192);
 
-      const accCost = calcCost(memberModel('pm'), acceptResult.inputTokens, acceptResult.outputTokens);
+      const accCost = calcCost(resolveMemberModel(projectId, 'pm', settings), acceptResult.inputTokens, acceptResult.outputTokens);
       updateAgentStats(pmAccId, projectId, acceptResult.inputTokens, acceptResult.outputTokens, accCost);
 
       // 尝试解析为数组
@@ -1392,13 +1412,14 @@ async function phasePMAcceptance(
       }
 
       sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `  📋 批次 ${bi + 1}/${accBatches.length} 验收完成 ($${accCost.toFixed(4)})` });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) return;
+      const errMsg = err instanceof Error ? err.message : String(err);
       // 批次验收失败 → 全部视为 conditional_accept
-      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `⚠️ 批次 ${bi + 1} PM 验收出错 (全部视为通过): ${err.message}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `⚠️ 批次 ${bi + 1} PM 验收出错 (全部视为通过): ${errMsg}` });
       for (const feature of batch) {
         db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?")
-          .run(`PM 验收异常: ${err.message}`, feature.id, projectId);
+          .run(`PM 验收异常: ${errMsg}`, feature.id, projectId);
         sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId });
       }
     }
@@ -1436,7 +1457,6 @@ async function phaseIncrementalDocSync(
     // 获取自上次分析以来的变更文件 (git diff)
     let changedFiles: string[] = [];
     try {
-      const { execSync } = require('child_process');
       const diffOutput = execSync('git diff --name-only HEAD~5 HEAD', {
         cwd: workspacePath,
         encoding: 'utf-8',
@@ -1448,7 +1468,6 @@ async function phaseIncrementalDocSync(
     } catch {
       // 如果 git diff 失败（如首次提交），尝试 git status
       try {
-        const { execSync } = require('child_process');
         const statusOutput = execSync('git diff --name-only --cached', {
           cwd: workspacePath,
           encoding: 'utf-8',
@@ -1484,10 +1503,11 @@ async function phaseIncrementalDocSync(
     }
 
     emitEvent({ projectId, agentId: 'system', type: 'phase:dev:end', data: { incrementalDocSync: true, updatedModules: result.updatedModules.length } });
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return;
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 增量文档同步失败 (非致命): ${err.message}` });
-    log.warn('Incremental doc sync failed', err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 增量文档同步失败 (非致命): ${errMsg}` });
+    log.warn('Incremental doc sync failed', { error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -1566,23 +1586,23 @@ async function phaseDevOpsBuild(
 
   let allPassed = true;
   const results: Array<{ name: string; ok: boolean; output: string }> = [];
-  const { execSync } = require('child_process');
 
   for (const step of buildSteps) {
     if (signal.aborted) break;
     sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  🔧 ${step.name}...` });
 
     try {
-      const output = execSync(step.cmd, {
+      const { stdout } = await execAsync(step.cmd, {
         cwd: workspacePath,
         encoding: 'utf-8',
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
       });
-      results.push({ name: step.name, ok: true, output: output.slice(-500) });
+      results.push({ name: step.name, ok: true, output: (stdout || '').slice(-500) });
       sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: `  ✅ ${step.name} 成功` });
-    } catch (err: any) {
-      const output = (err.stdout || '') + (err.stderr || '');
+    } catch (err: unknown) {
+      const errObj = err as { stdout?: string; stderr?: string; message?: string };
+      const output = (errObj.stdout || '') + (errObj.stderr || '');
       results.push({ name: step.name, ok: false, output: output.slice(-500) });
       if (step.critical) {
         allPassed = false;
@@ -1684,7 +1704,7 @@ async function phaseFinalize(
 // ═══════════════════════════════════════
 
 async function extractLessons(
-  projectId: string, qaId: string, feature: any, qaFeedback: string,
+  projectId: string, qaId: string, feature: EnrichedFeature | FeatureRow, qaFeedback: string,
   filesWritten: string[], qaScore: number, qaAttempt: number,
   settings: AppSettings, signal: AbortSignal, workspacePath: string,
 ): Promise<void> {
@@ -1705,8 +1725,9 @@ async function extractLessons(
       sendToUI(null, 'agent:log', { projectId, agentId: 'system', content: `📝 经验已记录:\n${lessons.slice(0, 200)}` });
       addLog(projectId, 'system', 'lesson', `[${feature.id}] ${lessons}`);
     }
-  } catch (e: any) {
-    sendToUI(null, 'agent:log', { projectId, agentId: 'system', content: `⚠️ 经验提取失败: ${e.message}` });
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    sendToUI(null, 'agent:log', { projectId, agentId: 'system', content: `⚠️ 经验提取失败: ${errMsg}` });
   }
 }
 
@@ -1714,7 +1735,7 @@ async function extractLessons(
 // Utility Helpers
 // ═══════════════════════════════════════
 
-function safeJsonParse(str: string | null | undefined, fallback: any): any {
+function safeJsonParse<T>(str: string | null | undefined, fallback: T): T {
   if (!str) return fallback;
   try { return JSON.parse(str); }
   catch (err) {

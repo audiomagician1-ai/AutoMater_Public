@@ -7,14 +7,14 @@ contextBridge.exposeInMainWorld('automater', {
   // ── 设置 ──
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
-    save: (settings: any) => ipcRenderer.invoke('settings:save', settings),
+    save: (settings: Record<string, unknown>) => ipcRenderer.invoke('settings:save', settings),
   },
 
   // ── LLM ──
   llm: {
-    testConnection: (provider: any) => ipcRenderer.invoke('llm:test-connection', provider),
-    chat: (request: any) => ipcRenderer.invoke('llm:chat', request),
-    listModels: (provider: any) => ipcRenderer.invoke('llm:list-models', provider),
+    testConnection: (provider: { type: string; baseUrl: string; apiKey: string }) => ipcRenderer.invoke('llm:test-connection', provider),
+    chat: (request: { model: string; messages: Array<{ role: string; content: string }> }) => ipcRenderer.invoke('llm:chat', request),
+    listModels: (provider: { type: string; baseUrl: string; apiKey: string }) => ipcRenderer.invoke('llm:list-models', provider),
   },
 
   // ── 项目 ──
@@ -75,19 +75,19 @@ contextBridge.exposeInMainWorld('automater', {
     create: (projectId: string, content: string) => ipcRenderer.invoke('wish:create', projectId, content),
     list: (projectId: string) => ipcRenderer.invoke('wish:list', projectId),
     get: (wishId: string) => ipcRenderer.invoke('wish:get', wishId),
-    update: (wishId: string, fields: any) => ipcRenderer.invoke('wish:update', wishId, fields),
+    update: (wishId: string, fields: Record<string, unknown>) => ipcRenderer.invoke('wish:update', wishId, fields),
     delete: (wishId: string) => ipcRenderer.invoke('wish:delete', wishId),
   },
 
   // ── 团队管理 (v3.1 → v11.0) ──
   team: {
     list: (projectId: string) => ipcRenderer.invoke('team:list', projectId),
-    add: (projectId: string, member: any) => ipcRenderer.invoke('team:add', projectId, member),
-    update: (memberId: string, fields: any) => ipcRenderer.invoke('team:update', memberId, fields),
+    add: (projectId: string, member: Record<string, unknown>) => ipcRenderer.invoke('team:add', projectId, member),
+    update: (memberId: string, fields: Record<string, unknown>) => ipcRenderer.invoke('team:update', memberId, fields),
     delete: (memberId: string) => ipcRenderer.invoke('team:delete', memberId),
     initDefaults: (projectId: string) => ipcRenderer.invoke('team:init-defaults', projectId),
     /** v11.0: 测试成员级 LLM 连通性 */
-    testMemberModel: (memberId: string, config: any) => ipcRenderer.invoke('team:test-member-model', memberId, config),
+    testMemberModel: (memberId: string, config: Record<string, unknown>) => ipcRenderer.invoke('team:test-member-model', memberId, config),
   },
 
   // ── 工作区文件系统 ──
@@ -99,7 +99,7 @@ contextBridge.exposeInMainWorld('automater', {
 
   // ── v2.0: 事件流 + Mission ──
   events: {
-    query: (projectId: string, options?: any) => ipcRenderer.invoke('events:query', projectId, options),
+    query: (projectId: string, options?: Record<string, unknown>) => ipcRenderer.invoke('events:query', projectId, options),
     getStats: (projectId: string) => ipcRenderer.invoke('events:get-stats', projectId),
     getTimeline: (projectId: string, featureId: string) => ipcRenderer.invoke('events:get-timeline', projectId, featureId),
     exportNDJSON: (projectId: string) => ipcRenderer.invoke('events:export-ndjson', projectId),
@@ -125,13 +125,13 @@ contextBridge.exposeInMainWorld('automater', {
   // ── MCP 服务器管理 (v5.0) ──
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:list-servers'),
-    addServer: (config: any) => ipcRenderer.invoke('mcp:add-server', config),
-    updateServer: (id: string, updates: any) => ipcRenderer.invoke('mcp:update-server', id, updates),
+    addServer: (config: Record<string, unknown>) => ipcRenderer.invoke('mcp:add-server', config),
+    updateServer: (id: string, updates: Record<string, unknown>) => ipcRenderer.invoke('mcp:update-server', id, updates),
     removeServer: (id: string) => ipcRenderer.invoke('mcp:remove-server', id),
     connectServer: (id: string) => ipcRenderer.invoke('mcp:connect-server', id),
     disconnectServer: (id: string) => ipcRenderer.invoke('mcp:disconnect-server', id),
     listTools: () => ipcRenderer.invoke('mcp:list-tools'),
-    testServer: (config: any) => ipcRenderer.invoke('mcp:test-server', config),
+    testServer: (config: Record<string, unknown>) => ipcRenderer.invoke('mcp:test-server', config),
   },
 
   // ── Skill 目录管理 (v5.0) ──
@@ -163,12 +163,12 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('meta-agent:chat', projectId, message, history),
     // Config
     getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
-    saveConfig: (config: any) => ipcRenderer.invoke('meta-agent:config:save', config),
+    saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:config:save', config),
     // Memory
     listMemories: (category?: string, limit?: number) =>
       ipcRenderer.invoke('meta-agent:memory:list', category, limit),
-    addMemory: (memory: any) => ipcRenderer.invoke('meta-agent:memory:add', memory),
-    updateMemory: (id: string, updates: any) => ipcRenderer.invoke('meta-agent:memory:update', id, updates),
+    addMemory: (memory: { category: string; content: string; source?: string; importance?: number }) => ipcRenderer.invoke('meta-agent:memory:add', memory),
+    updateMemory: (id: string, updates: { content?: string; importance?: number; category?: string }) => ipcRenderer.invoke('meta-agent:memory:update', id, updates),
     deleteMemory: (id: string) => ipcRenderer.invoke('meta-agent:memory:delete', id),
     searchMemories: (query: string, limit?: number) => ipcRenderer.invoke('meta-agent:memory:search', query, limit),
     getMemoryStats: () => ipcRenderer.invoke('meta-agent:memory:stats'),
@@ -177,7 +177,7 @@ contextBridge.exposeInMainWorld('automater', {
 
   // ── 临时工作流 (v5.5) ──
   ephemeralMission: {
-    create: (projectId: string, type: string, config?: any) =>
+    create: (projectId: string, type: string, config?: Record<string, unknown>) =>
       ipcRenderer.invoke('mission:create', projectId, type, config),
     get: (missionId: string) => ipcRenderer.invoke('mission:get', missionId),
     list: (projectId: string) => ipcRenderer.invoke('mission:list', projectId),
@@ -233,8 +233,8 @@ contextBridge.exposeInMainWorld('automater', {
     getActive: (projectId: string) => ipcRenderer.invoke('workflow:get-active', projectId),
     get: (presetId: string) => ipcRenderer.invoke('workflow:get', presetId),
     activate: (projectId: string, presetId: string) => ipcRenderer.invoke('workflow:activate', projectId, presetId),
-    create: (projectId: string, data: any) => ipcRenderer.invoke('workflow:create', projectId, data),
-    update: (presetId: string, updates: any) => ipcRenderer.invoke('workflow:update', presetId, updates),
+    create: (projectId: string, data: Record<string, unknown>) => ipcRenderer.invoke('workflow:create', projectId, data),
+    update: (presetId: string, updates: Record<string, unknown>) => ipcRenderer.invoke('workflow:update', presetId, updates),
     delete: (presetId: string) => ipcRenderer.invoke('workflow:delete', presetId),
     duplicate: (presetId: string) => ipcRenderer.invoke('workflow:duplicate', presetId),
     availableStages: () => ipcRenderer.invoke('workflow:available-stages'),
