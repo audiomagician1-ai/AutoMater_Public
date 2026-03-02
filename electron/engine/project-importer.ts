@@ -37,7 +37,7 @@ import { planProbes, executeProbes, mergeFindings } from './probe-orchestrator';
 import { checkProbeCache, updateProbeCache, detectIncrementalChanges } from './probe-cache';
 import type {
   ScanResult, SeedFile, ProbeReport, FuseOutput,
-  ModuleGraph, ImportStats, ImportProgressCallbackV7,
+  ModuleGraph, ArchTree, ArchNode, ArchEdge, ImportStats, ImportProgressCallbackV7,
   ImportProgressEvent, ProbeProgress, MergedFindings,
   ImportLogCallback,
 } from './probe-types';
@@ -119,6 +119,7 @@ const PROBES_DIR = '.automater/analysis/probes';
 const MODULES_DIR = '.automater/analysis/modules';
 const SKELETON_FILE = '.automater/analysis/skeleton.json';
 const MODULE_GRAPH_FILE = '.automater/analysis/module-graph.json';
+const ARCH_TREE_FILE = '.automater/analysis/architecture-tree.json';
 const KNOWN_ISSUES_FILE = '.automater/docs/KNOWN-ISSUES.md';
 const MAX_SCAN_FILES = 5000;
 
@@ -650,12 +651,12 @@ async function phase2Fuse(
     [
       {
         role: 'system',
-        content: '你是一位资深软件架构分析师。你的任务是综合多个独立探针的分析报告，生成全面准确的项目架构文档和结构化模块图。全部用中文回复。',
+        content: '你是一位资深软件架构分析师。你的任务是综合多个独立探针的分析报告，生成全面准确的项目架构文档、层级化架构树(architecture-tree)和结构化模块图。层级架构树是最重要的产物——它是对项目理解深度的证明。全部用中文回复。',
       },
       { role: 'user', content: prompt },
     ],
     signal,
-    8192,
+    16384,
     2,           // retries
     fuseOnChunk, // stream output
   );
@@ -665,14 +666,43 @@ async function phase2Fuse(
   // Parse output — v7.2: more robust regex patterns + retry JSON extraction
   const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/)
     || result.content.match(/```markdown\n([\s\S]*?)```/);
+  const archTreeMatch = result.content.match(/```architecture-tree\n([\s\S]*?)```/);
   const moduleGraphMatch = result.content.match(/```module-graph\n([\s\S]*?)```/)
-    || result.content.match(/```json\n([\s\S]*?\"edges\"[\s\S]*?)```/)
+    || result.content.match(/```json\n([\s\S]*?"edges"[\s\S]*?)```/)
     || result.content.match(/```json\n([\s\S]*?)```/);
   const issuesMatch = result.content.match(/```known-issues\n([\s\S]*?)```/)
     || result.content.match(/```known.issues\n([\s\S]*?)```/);
 
   const architectureMd = archMatch?.[1]?.trim() || result.content;
   const knownIssuesMd = issuesMatch?.[1]?.trim() || '';
+
+  // ── v10.0: Parse architecture-tree JSON ──
+  let archTree: ArchTree = { nodes: [], edges: [] };
+  if (archTreeMatch?.[1]) {
+    const rawJson = archTreeMatch[1].trim();
+    try {
+      archTree = JSON.parse(rawJson);
+    } catch (parseErr) {
+      log.warn('architecture-tree JSON parse failed, attempting repair...', { error: String(parseErr) });
+      try {
+        const repaired = rawJson
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+        archTree = JSON.parse(repaired);
+        log.info('architecture-tree JSON repair successful');
+      } catch {
+        log.error('architecture-tree JSON repair also failed');
+      }
+    }
+    if (!Array.isArray(archTree.nodes)) archTree.nodes = [];
+    if (!Array.isArray(archTree.edges)) archTree.edges = [];
+    log.info(`Parsed architecture-tree: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`);
+  }
+
+  // v10.0: If archTree is empty but moduleGraph has data, auto-derive archTree from moduleGraph
+  if (archTree.nodes.length === 0 && moduleGraphMatch?.[1]) {
+    log.info('architecture-tree empty, will derive from module-graph after parsing');
+  }
 
   // Parse module graph JSON — with repair attempts for common LLM JSON issues
   let moduleGraph: ModuleGraph = { nodes: [], edges: [] };
@@ -723,6 +753,12 @@ async function phase2Fuse(
     timestamp: Date.now(),
   };
 
+  // v10.0: Fallback — derive archTree from moduleGraph if LLM didn't produce architecture-tree
+  if (archTree.nodes.length === 0 && moduleGraph.nodes.length > 0) {
+    archTree = deriveArchTreeFromModuleGraph(moduleGraph, modules);
+    log.info(`Derived architecture-tree from module-graph: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`);
+  }
+
   // Calculate stats
   const stats: ImportStats = {
     totalProbes: reports.length,
@@ -738,6 +774,7 @@ async function phase2Fuse(
 
   return {
     moduleGraph,
+    archTree,
     architectureMd,
     knownIssuesMd,
     enrichedSkeleton,
@@ -794,7 +831,7 @@ function buildFusePrompt(
 - 发现总数: ${merged.findings.length}`);
 
   sections.push(`\n---\n
-请综合以上所有探针报告，生成以下三个部分:
+请综合以上所有探针报告，生成以下四个部分:
 
 \`\`\`architecture
 # ${projectName} — 系统架构文档
@@ -820,6 +857,28 @@ function buildFusePrompt(
 ## 7. 扩展点与限制
 (如何扩展、当前局限)
 \`\`\`
+
+\`\`\`architecture-tree
+{
+  "nodes": [
+    {"id": "D01", "parentId": null, "level": "domain", "name": "域名称", "responsibility": "一句话职责", "type": "business-logic|entry-point|api-layer|data-layer|config|utility|ui|infrastructure", "files": [], "publicAPI": [], "keyTypes": [], "patterns": [], "issues": [], "loc": 0, "fileCount": 0},
+    {"id": "D01-M01", "parentId": "D01", "level": "module", "name": "模块名称", "responsibility": "职责", "type": "...", "files": ["src/xxx/"], "publicAPI": ["export1"], "keyTypes": ["Type1"], "patterns": [], "issues": [], "loc": 100, "fileCount": 5},
+    {"id": "D01-M01-C01", "parentId": "D01-M01", "level": "component", "name": "组件名称", "responsibility": "具体职责", "type": "...", "files": ["src/xxx/file.ts"], "publicAPI": ["func1"], "keyTypes": ["Interface1"], "patterns": ["singleton"], "issues": ["缺少错误处理"], "loc": 50, "fileCount": 1}
+  ],
+  "edges": [
+    {"source": "D01-M01", "target": "D02-M01", "type": "import|dataflow|event|config|ipc", "weight": 1, "label": "可选说明"}
+  ]
+}
+\`\`\`
+
+**architecture-tree 规则:**
+1. 严格三层: domain (D01, D02...) → module (D01-M01, D01-M02...) → component (D01-M01-C01...)
+2. domain 层按架构关注点分 (如: 表示层/业务层/数据层/基础设施), 至少 3 个 domain
+3. 每个 domain 下至少 2 个 module, 每个 module 下至少 1 个 component
+4. component 是叶子节点: files 必须列出具体文件路径, publicAPI 列出实际导出
+5. edges 仅在 module 或 component 层级之间, type 准确反映依赖类型
+6. 所有 files 使用相对于项目根的路径
+7. loc / fileCount 要尽量准确 (参考骨架数据)
 
 \`\`\`module-graph
 {
@@ -854,6 +913,152 @@ function groupProbesByType(reports: ProbeReport[]): Map<string, ProbeReport[]> {
     groups.get(report.type)!.push(report);
   }
   return groups;
+}
+
+// ═══════════════════════════════════════
+// Fallback: Derive ArchTree from flat ModuleGraph
+// ═══════════════════════════════════════
+
+/**
+ * 当 LLM 未生成 architecture-tree 时，从 module-graph + detectModules 自动推导层级树。
+ * 策略: 按 module-graph node.type 分组为 domain, 每个 node 变为 module, 文件按目录拆分为 component。
+ */
+function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleInfo[]): ArchTree {
+  const TYPE_TO_DOMAIN: Record<string, string> = {
+    'entry-point': '入口层',
+    'api-layer': 'API 层',
+    'data-layer': '数据层',
+    'config': '配置/基础设施',
+    'utility': '工具层',
+    'module': '业务逻辑层',
+  };
+
+  const TYPE_TO_ARCH: Record<string, ArchNode['type']> = {
+    'entry-point': 'entry-point',
+    'api-layer': 'api-layer',
+    'data-layer': 'data-layer',
+    'config': 'config',
+    'utility': 'utility',
+    'module': 'business-logic',
+  };
+
+  // Group moduleGraph nodes by type → domain
+  const domainGroups = new Map<string, typeof mg.nodes>();
+  for (const node of mg.nodes) {
+    const domainKey = TYPE_TO_DOMAIN[node.type] || '业务逻辑层';
+    if (!domainGroups.has(domainKey)) domainGroups.set(domainKey, []);
+    domainGroups.get(domainKey)!.push(node);
+  }
+
+  const archNodes: ArchNode[] = [];
+  const archEdges: ArchEdge[] = [];
+  let domainIdx = 0;
+
+  // Map from moduleGraph node.id → archTree module.id (for edge mapping)
+  const mgIdToArchId = new Map<string, string>();
+
+  for (const [domainName, mgNodes] of domainGroups) {
+    domainIdx++;
+    const domainId = `D${String(domainIdx).padStart(2, '0')}`;
+
+    // Domain node
+    const domainFiles = mgNodes.flatMap(n => {
+      const dm = detectedModules.find(m => m.rootPath === n.path || m.id === n.id);
+      return dm?.files || [];
+    });
+    archNodes.push({
+      id: domainId,
+      parentId: null,
+      level: 'domain',
+      name: domainName,
+      responsibility: `${domainName}相关的所有模块`,
+      type: TYPE_TO_ARCH[mgNodes[0]?.type || 'module'] || 'business-logic',
+      files: [...new Set(domainFiles)],
+      publicAPI: [],
+      keyTypes: [],
+      patterns: [],
+      issues: [],
+      loc: mgNodes.reduce((s, n) => s + (n.loc || 0), 0),
+      fileCount: mgNodes.reduce((s, n) => s + (n.fileCount || 0), 0),
+    });
+
+    // Module nodes
+    for (let mi = 0; mi < mgNodes.length; mi++) {
+      const mgNode = mgNodes[mi];
+      const moduleId = `${domainId}-M${String(mi + 1).padStart(2, '0')}`;
+      mgIdToArchId.set(mgNode.id, moduleId);
+
+      const dm = detectedModules.find(m => m.rootPath === mgNode.path || m.id === mgNode.id);
+      const moduleFiles = dm?.files || [];
+
+      archNodes.push({
+        id: moduleId,
+        parentId: domainId,
+        level: 'module',
+        name: mgNode.id,
+        responsibility: mgNode.responsibility,
+        type: TYPE_TO_ARCH[mgNode.type] || 'business-logic',
+        files: moduleFiles,
+        publicAPI: mgNode.publicAPI || [],
+        keyTypes: mgNode.keyTypes || [],
+        patterns: mgNode.patterns || [],
+        issues: mgNode.issues || [],
+        loc: mgNode.loc || 0,
+        fileCount: mgNode.fileCount || 0,
+      });
+
+      // Component nodes — split module files into sub-groups by immediate subdirectory
+      const subDirs = new Map<string, string[]>();
+      for (const file of moduleFiles) {
+        const parts = file.split('/');
+        // Use the first differing path segment as sub-group key
+        const baseParts = mgNode.path ? mgNode.path.split('/') : [];
+        const subDir = parts.length > baseParts.length + 1
+          ? parts.slice(0, baseParts.length + 1).join('/')
+          : file;
+        if (!subDirs.has(subDir)) subDirs.set(subDir, []);
+        subDirs.get(subDir)!.push(file);
+      }
+
+      let ci = 0;
+      for (const [subDir, files] of subDirs) {
+        ci++;
+        const compId = `${moduleId}-C${String(ci).padStart(2, '0')}`;
+        const compName = subDir.split('/').pop() || subDir;
+        archNodes.push({
+          id: compId,
+          parentId: moduleId,
+          level: 'component',
+          name: compName,
+          responsibility: `${mgNode.responsibility} — ${compName}`,
+          type: TYPE_TO_ARCH[mgNode.type] || 'business-logic',
+          files,
+          publicAPI: [],
+          keyTypes: [],
+          patterns: [],
+          issues: [],
+          loc: Math.round((mgNode.loc || 0) * files.length / Math.max(moduleFiles.length, 1)),
+          fileCount: files.length,
+        });
+      }
+    }
+  }
+
+  // Map edges
+  for (const edge of mg.edges) {
+    const source = mgIdToArchId.get(edge.source);
+    const target = mgIdToArchId.get(edge.target);
+    if (source && target && source !== target) {
+      archEdges.push({
+        source,
+        target,
+        type: edge.type as ArchEdge['type'],
+        weight: edge.weight,
+      });
+    }
+  }
+
+  return { nodes: archNodes, edges: archEdges };
 }
 
 // ═══════════════════════════════════════
@@ -949,6 +1154,12 @@ export async function importProject(
     JSON.stringify(fuse.moduleGraph, null, 2), 'utf-8',
   );
 
+  // v10.0: architecture-tree.json
+  fs.writeFileSync(
+    path.join(workspacePath, ARCH_TREE_FILE),
+    JSON.stringify(fuse.archTree, null, 2), 'utf-8',
+  );
+
   // ARCHITECTURE.md
   fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), fuse.architectureMd, 'utf-8');
 
@@ -978,7 +1189,7 @@ export async function importProject(
     tokensUsed: 0,
   }));
 
-  log.info(`=== Import Complete (v7.0) ===`, {
+  log.info(`=== Import Complete (v10.0) ===`, {
     totalMs,
     probes: reports.length,
     findings: reports.reduce((s, r) => s + r.findings.length, 0),
@@ -988,11 +1199,17 @@ export async function importProject(
     docs: docsGenerated,
     moduleGraphNodes: fuse.moduleGraph.nodes.length,
     moduleGraphEdges: fuse.moduleGraph.edges.length,
+    archTreeNodes: fuse.archTree.nodes.length,
+    archTreeEdges: fuse.archTree.edges.length,
   });
+
+  const archDomains = fuse.archTree.nodes.filter(n => n.level === 'domain').length;
+  const archModules = fuse.archTree.nodes.filter(n => n.level === 'module').length;
+  const archComponents = fuse.archTree.nodes.filter(n => n.level === 'component').length;
 
   emitProgress({
     phase: 'fuse',
-    step: `✅ 分析完成! ${scan.snapshot.fileCount} 文件, ${fuse.moduleGraph.nodes.length} 模块, ${fuse.stats.coveragePercent}% 覆盖率, $${fuse.stats.totalCostUsd.toFixed(2)}`,
+    step: `✅ 分析完成! ${scan.snapshot.fileCount} 文件, ${archDomains} 域/${archModules} 模块/${archComponents} 组件, ${fuse.stats.coveragePercent}% 覆盖率, $${fuse.stats.totalCostUsd.toFixed(2)}`,
     progress: 1.0,
     done: true,
     coveragePercent: fuse.stats.coveragePercent,

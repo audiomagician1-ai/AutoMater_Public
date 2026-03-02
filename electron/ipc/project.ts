@@ -774,6 +774,65 @@ export function setupProjectHandlers() {
             },
           );
           const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
+
+          // v10.0: 将架构树组件节点写入 features 表 (status='arch_node')
+          // 作为后续开发的逻辑索引——PM 在此基础上补充开发任务
+          try {
+            const archTreePath = path.join(proj.workspace_path, '.automater/analysis/architecture-tree.json');
+            if (fs.existsSync(archTreePath)) {
+              const archTree = JSON.parse(fs.readFileSync(archTreePath, 'utf-8'));
+              if (Array.isArray(archTree.nodes) && archTree.nodes.length > 0) {
+                const componentNodes = archTree.nodes.filter((n: any) => n.level === 'component');
+                const moduleNodes = archTree.nodes.filter((n: any) => n.level === 'module');
+                const domainNodes = archTree.nodes.filter((n: any) => n.level === 'domain');
+
+                // Build lookup maps for names
+                const nodeById = new Map<string, any>();
+                for (const n of archTree.nodes) nodeById.set(n.id, n);
+
+                const insertArchFeature = db.prepare(
+                  `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, summary, depends_on, status, acceptance_criteria, affected_files, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arch_node', '[]', ?, ?, ?)`
+                );
+
+                db.transaction(() => {
+                  for (const comp of componentNodes) {
+                    const parentModule = nodeById.get(comp.parentId);
+                    const parentDomain = parentModule ? nodeById.get(parentModule.parentId) : null;
+                    const groupName = parentDomain?.name || parentModule?.name || 'Architecture';
+                    const subGroup = parentModule?.name || '';
+
+                    // Find edges involving this component for depends_on
+                    const deps = (archTree.edges || [])
+                      .filter((e: any) => e.target === comp.id)
+                      .map((e: any) => e.source);
+
+                    insertArchFeature.run(
+                      comp.id,                           // id
+                      projectId,                         // project_id
+                      comp.type || 'infrastructure',     // category
+                      5,                                 // priority (low — arch nodes are index, not tasks)
+                      groupName,                         // group_name
+                      subGroup,                          // sub_group
+                      comp.name,                         // title
+                      comp.responsibility,               // description
+                      `[${comp.level}] ${comp.responsibility}`,  // summary
+                      JSON.stringify(deps),              // depends_on
+                      JSON.stringify(comp.files || []),  // affected_files
+                      `架构节点 | ${comp.fileCount || 0} 文件 | ${comp.loc || 0} LOC`,  // notes
+                      parentDomain?.id || parentModule?.id || 'arch',  // group_id
+                    );
+                  }
+                })();
+
+                const archNodeCount = componentNodes.length;
+                log.info(`Wrote ${archNodeCount} arch_node features from architecture-tree`);
+                addLog(projectId, 'project-importer', 'info', `🏛️ 已创建 ${archNodeCount} 个架构索引节点 (${domainNodes.length} 域, ${moduleNodes.length} 模块, ${archNodeCount} 组件)`);
+              }
+            }
+          } catch (archErr) {
+            log.warn('Failed to create arch_node features from architecture-tree', { error: String(archErr) });
+          }
+
           // v7.2: 标记导入完成 — 后续 project:start 不会再重复走导入流程
           let updatedConfig = '{}';
           try {
@@ -1198,6 +1257,22 @@ export function setupProjectHandlers() {
     const graph = loadModuleGraph(project.workspace_path);
     if (!graph) return { success: false, error: 'Module graph not available (run import analysis first)' };
     return { success: true, graph };
+  });
+
+  // v10.0: Architecture Tree API (hierarchical domain→module→component)
+  ipcMain.handle('project:get-arch-tree', (_event, projectId: string) => {
+    assertProjectId('project:get-arch-tree', projectId);
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const treePath = path.join(project.workspace_path, '.automater/analysis/architecture-tree.json');
+    if (!fs.existsSync(treePath)) return { success: false, error: 'Architecture tree not available (run import analysis first)' };
+    try {
+      const tree = JSON.parse(fs.readFileSync(treePath, 'utf-8'));
+      return { success: true, tree };
+    } catch (err) {
+      return { success: false, error: `Failed to parse architecture-tree.json: ${String(err)}` };
+    }
   });
 
   ipcMain.handle('project:get-known-issues', (_event, projectId: string) => {

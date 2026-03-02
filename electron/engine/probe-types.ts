@@ -210,11 +210,80 @@ export interface ModuleGraphEdge {
 }
 
 // ═══════════════════════════════════════
+// Architecture Tree (Phase 2 output — hierarchical)
+// ═══════════════════════════════════════
+
+/**
+ * 层级架构树 — 导入阶段的核心产物。
+ *
+ * 三层结构: domain → module → component
+ *   - domain:    架构域 (如 "渲染层", "数据层", "基础设施")
+ *   - module:    模块 (如 "路由系统", "状态管理", "ORM")
+ *   - component: 组件 (如 "AuthGuard", "UserStore", "MigrationRunner")
+ *
+ * 每个叶子节点在导入完成后自动写入 features 表 (status='arch_node'),
+ * 作为后续开发的逻辑索引——PM 在此基础上补充开发任务,
+ * Developer 通过 affected_files 精准定位上下文。
+ */
+export interface ArchTree {
+  /** 所有节点 (扁平存储, 用 parentId 形成树) */
+  nodes: ArchNode[];
+  /** 跨节点依赖边 (仅 module/component 层级之间) */
+  edges: ArchEdge[];
+}
+
+export type ArchNodeLevel = 'domain' | 'module' | 'component';
+
+export interface ArchNode {
+  /** 唯一标识, 格式: D01, D01-M01, D01-M01-C01 */
+  id: string;
+  /** 父节点 ID (domain 的 parentId 为 null) */
+  parentId: string | null;
+  /** 层级 */
+  level: ArchNodeLevel;
+  /** 人类可读名称 */
+  name: string;
+  /** 一句话职责描述 */
+  responsibility: string;
+  /** 架构类型标签 */
+  type: 'entry-point' | 'api-layer' | 'data-layer' | 'business-logic' | 'config' | 'utility' | 'ui' | 'infrastructure';
+  /** 涉及的文件列表 (相对路径, domain/module 为聚合值, component 为精确值) */
+  files: string[];
+  /** 公开 API / 导出接口 */
+  publicAPI: string[];
+  /** 关键类型 / 接口 */
+  keyTypes: string[];
+  /** 使用的设计模式 */
+  patterns: string[];
+  /** 已知问题 / 技术债 */
+  issues: string[];
+  /** 代码行数 (估算) */
+  loc: number;
+  /** 文件数 */
+  fileCount: number;
+}
+
+export interface ArchEdge {
+  /** 源节点 ID */
+  source: string;
+  /** 目标节点 ID */
+  target: string;
+  /** 依赖类型 */
+  type: 'import' | 'dataflow' | 'event' | 'config' | 'ipc';
+  /** 依赖权重 (越大越关键) */
+  weight: number;
+  /** 人类可读说明 (可选) */
+  label?: string;
+}
+
+// ═══════════════════════════════════════
 // Fuse Output (Phase 2 complete output)
 // ═══════════════════════════════════════
 
 export interface FuseOutput {
   moduleGraph: ModuleGraph;
+  /** v10.0: 层级架构树 — 导入阶段核心产物 */
+  archTree: ArchTree;
   architectureMd: string;
   knownIssuesMd: string;
   enrichedSkeleton: ProjectSkeleton;

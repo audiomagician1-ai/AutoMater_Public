@@ -530,7 +530,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   db.prepare("UPDATE projects SET status = 'developing', updated_at = datetime('now') WHERE id = ?").run(projectId);
   sendToUI(win, 'project:status', { projectId, status: 'developing' });
 
-  const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult).c;
+  const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status != 'arch_node'").get(projectId) as CountResult).c;
   const maxWorkers = settings.workerCount > 0 ? settings.workerCount : featureCount;
   const workerCount = Math.min(maxWorkers, featureCount);
 

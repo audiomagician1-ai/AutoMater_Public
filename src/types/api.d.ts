@@ -396,6 +396,8 @@ interface AutoMaterAPI {
     analyzeExisting(projectId: string): Promise<{ success: boolean; message?: string; error?: string }>;
     /** v7.0: 获取模块依赖图 */
     getModuleGraph(projectId: string): Promise<{ success: boolean; graph?: unknown; error?: string }>;
+    /** v10.0: 获取层级架构树 (domain→module→component) */
+    getArchTree(projectId: string): Promise<{ success: boolean; tree?: unknown; error?: string }>;
     /** v7.0: 获取已知技术问题 */
     getKnownIssues(projectId: string): Promise<{ success: boolean; issues?: string; error?: string }>;
     /** v7.0: 获取所有探针报告 */
@@ -624,6 +626,8 @@ interface AutoMaterAPI {
     featureSessionLinks(projectId: string, limit?: number): Promise<FeatureSessionLink[]>;
     /** v8.1: 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
     batchFeatureSummaries(projectId: string): Promise<Record<string, FeatureSessionSummary>>;
+    /** v22.0: 更新会话的聊天模式 */
+    updateChatMode(sessionId: string, chatMode: string): Promise<{ success: boolean }>;
   };
 }
 

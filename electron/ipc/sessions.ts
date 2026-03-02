@@ -129,4 +129,14 @@ export function setupSessionHandlers() {
     }
     return obj;
   });
+
+  /** v22.0: 更新会话的聊天模式 */
+  ipcMain.handle('session:update-chat-mode', (_event, sessionId: string, chatMode: string) => {
+    assertNonEmptyString('session:update-chat-mode', 'sessionId', sessionId);
+    assertNonEmptyString('session:update-chat-mode', 'chatMode', chatMode);
+    const { getDb } = require('../db');
+    const db = getDb();
+    db.prepare("UPDATE sessions SET chat_mode = ? WHERE id = ?").run(chatMode, sessionId);
+    return { success: true };
+  });
 }

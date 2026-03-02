@@ -51,10 +51,24 @@ export async function phasePMAnalysis(
     const workspacePath = project.workspace_path || '';
     const gitConfig = { mode: (project.git_mode || 'local') as 'local' | 'github', workspacePath, githubRepo: project.github_repo ?? undefined, githubToken: project.github_token ?? undefined };
 
+    // v10.0: 检测 arch_node features — 导入项目已有架构索引, PM 在此基础上生成开发任务
+    const archNodes = db.prepare(
+      "SELECT id, title, description, group_name, sub_group, affected_files, notes FROM features WHERE project_id = ? AND status = 'arch_node'"
+    ).all(projectId) as Array<{ id: string; title: string; description: string; group_name: string; sub_group: string; affected_files: string; notes: string }>;
+
+    let archContext = '';
+    if (archNodes.length > 0) {
+      const archList = archNodes.map(n => {
+        const files = (() => { try { return JSON.parse(n.affected_files || '[]').slice(0, 5).join(', '); } catch { return ''; } })();
+        return `- ${n.id} [${n.group_name}/${n.sub_group}] ${n.title}: ${n.description}${files ? ` (文件: ${files})` : ''}`;
+      }).join('\n');
+      archContext = `\n\n## 📐 项目已导入的架构索引节点 (${archNodes.length} 个组件)\n以下是通过项目导入分析得到的架构组件索引。请基于这些已有的架构理解来拆解 Feature，每个 Feature 的 group_name 应对应架构域名称，sub_group 对应模块名称。\n\n${archList}\n\n**重要**: 不要重复这些架构节点作为 Feature。它们是已有的代码结构索引，你需要基于用户需求生成**开发任务**，这些任务会修改或扩展这些架构组件。`;
+    }
+
     const pmReactResult = await reactAgentLoop({
       projectId, agentId: pmId, role: 'pm',
       systemPrompt: pmPrompt,
-      userMessage: `用户需求:\n${project.wish}\n\n请分析此需求，拆解为 Feature 清单。\n\n**重要**: 如果需求中引用了本地文件/目录，请先用 read_file / list_files 等工具查看内容，再做分析。如果确实无法访问或信息严重不足，使用 report_blocked 工具阻塞。\n\n分析完成后，调用 task_complete 工具，在 summary 字段中输出完整的 JSON Feature 数组（不要 markdown 代码块包裹）。`,
+      userMessage: `用户需求:\n${project.wish}${archContext}\n\n请分析此需求，拆解为 Feature 清单。\n\n**重要**: 如果需求中引用了本地文件/目录，请先用 read_file / list_files 等工具查看内容，再做分析。如果确实无法访问或信息严重不足，使用 report_blocked 工具阻塞。\n\n分析完成后，调用 task_complete 工具，在 summary 字段中输出完整的 JSON Feature 数组（不要 markdown 代码块包裹）。`,
       settings,
       workspacePath: workspacePath || null,
       gitConfig,

@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('automater', {
     // v7.0: Module Graph + Probe Analysis API
     getModuleGraph: (projectId: string) =>
       ipcRenderer.invoke('project:get-module-graph', projectId),
+    // v10.0: Architecture Tree (hierarchical)
+    getArchTree: (projectId: string) =>
+      ipcRenderer.invoke('project:get-arch-tree', projectId),
     getKnownIssues: (projectId: string) =>
       ipcRenderer.invoke('project:get-known-issues', projectId),
     getArchitectureDoc: (projectId: string) =>
@@ -317,6 +320,9 @@ contextBridge.exposeInMainWorld('automater', {
     /** 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
     batchFeatureSummaries: (projectId: string) =>
       ipcRenderer.invoke('session:batch-feature-summaries', projectId),
+    /** v22.0: 更新会话的聊天模式 */
+    updateChatMode: (sessionId: string, chatMode: string) =>
+      ipcRenderer.invoke('session:update-chat-mode', sessionId, chatMode),
   },
 
   // ── 工作流预设管理 (v12.0) ──

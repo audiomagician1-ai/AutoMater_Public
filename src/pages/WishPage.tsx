@@ -68,6 +68,90 @@ function formatTokens(n: number): string {
 }
 
 // ═══════════════════════════════════════
+// ModeSwitchBadge — 会话模式切换徽章
+// ═══════════════════════════════════════
+
+function ModeSwitchBadge({ sessionId, currentMode, onRefresh }: {
+  sessionId: string;
+  currentMode: ChatMode;
+  onRefresh: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hoveredMode, setHoveredMode] = useState<ChatMode | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const info = CHAT_MODE_INFO[currentMode];
+
+  // 关闭 popover 当点击外部
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleSwitch = async (mode: ChatMode) => {
+    if (mode === currentMode) { setOpen(false); return; }
+    try {
+      // 更新 DB 中的 session chat_mode
+      await window.automater.session.updateChatMode(sessionId, mode);
+      onRefresh();
+    } catch { /* silent */ }
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      {/* 模式图标按钮 — 更大、可点击 */}
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className={`w-6 h-6 rounded-md flex items-center justify-center text-sm hover:bg-slate-700/60 transition-all ${info.color}`}
+        title={`${info.label}模式 · 点击切换`}
+      >
+        {info.icon}
+      </button>
+
+      {/* 水平弹出的模式选择面板 */}
+      {open && (
+        <div
+          className="absolute right-0 top-8 z-50 flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
+          onClick={e => e.stopPropagation()}
+        >
+          {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
+            const mi = CHAT_MODE_INFO[m];
+            const isActive = m === currentMode;
+            return (
+              <button
+                key={m}
+                onClick={() => handleSwitch(m)}
+                onMouseEnter={() => setHoveredMode(m)}
+                onMouseLeave={() => setHoveredMode(null)}
+                className={`relative flex flex-col items-center gap-1 px-3.5 py-2.5 transition-all min-w-[56px]
+                  ${isActive
+                    ? 'bg-forge-600/20 border-b-2 border-forge-500'
+                    : 'hover:bg-slate-800/80 border-b-2 border-transparent'}`}
+              >
+                <span className="text-base">{mi.icon}</span>
+                <span className={`text-[10px] font-medium whitespace-nowrap ${isActive ? 'text-forge-400' : 'text-slate-400'}`}>
+                  {mi.label}
+                </span>
+              </button>
+            );
+          })}
+          {/* 悬停说明浮层 */}
+          {hoveredMode && (
+            <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] text-slate-300 whitespace-nowrap shadow-xl pointer-events-none z-50">
+              {CHAT_MODE_INFO[hoveredMode].desc}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
 // SessionListPanel — 会话历史列表 (常驻在许愿页)
 // ═══════════════════════════════════════
 
@@ -190,7 +274,7 @@ function SessionListPanel() {
             <>
               <div className="fixed inset-0 z-40" onClick={() => setNewChatOpen(false)} />
               <div className="absolute right-0 top-7 z-50 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
-                {(['work', 'chat', 'deep'] as ChatMode[]).map(m => {
+                {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
                   const info = CHAT_MODE_INFO[m];
                   return (
                     <button
@@ -227,14 +311,13 @@ function SessionListPanel() {
           const isSelected = currentSessionId === sess.id;
           const title = sess.title || `会话 #${sess.agentSeq}`;
           const isActive = sess.status === 'active';
-          const modeInfo = CHAT_MODE_INFO[sess.chatMode || 'work'];
 
           return (
-            <button
+            <div
               key={sess.id}
               onClick={() => handleSelect(sess.id)}
               onContextMenu={(e) => handleCtx(e, sess.id)}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] transition-colors group
+              className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] transition-colors group cursor-pointer
                 ${isSelected
                   ? 'bg-forge-600/15 border border-forge-500/30 text-slate-200'
                   : 'border border-transparent hover:bg-slate-900/80 hover:border-slate-800 text-slate-400'}`}
@@ -242,14 +325,14 @@ function SessionListPanel() {
               <div className="flex items-center gap-1.5 mb-0.5">
                 {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
                 <span className="truncate font-medium flex-1">{title}</span>
-                <span className={`text-[8px] ${modeInfo.color} shrink-0`} title={`${modeInfo.label}模式`}>{modeInfo.icon}</span>
+                <ModeSwitchBadge sessionId={sess.id} currentMode={sess.chatMode || 'work'} onRefresh={loadSessions} />
               </div>
               <div className="flex items-center gap-1.5 text-[9px] text-slate-600">
                 <span>{formatSessionTime(sess.createdAt)}</span>
                 {sess.totalTokens > 0 && <span>{formatTokens(sess.totalTokens)}</span>}
                 {sess.totalCost > 0 && <span className="text-emerald-700">${sess.totalCost.toFixed(3)}</span>}
               </div>
-            </button>
+            </div>
           );
         })}
 

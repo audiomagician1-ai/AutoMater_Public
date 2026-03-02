@@ -21,7 +21,7 @@ import { TechBackground } from '../components/TechBackground';
 import { SystemMonitor } from '../components/SystemMonitor';
 import { ActivityCharts } from '../components/ActivityCharts';
 import {
-  InteractiveGraph, ModuleArchGraph, ProgressRing, StatCard,
+  InteractiveGraph, ModuleArchGraph, ArchTreeGraph, ProgressRing, StatCard,
   DocCompletionBar,
   AgentActivityPanel, ImportAnalysisPanel,
   STATUS_COLOR, CATEGORY_BADGE, PROJECT_STATUS,
@@ -186,25 +186,30 @@ export function OverviewPage() {
 
         {/* ═══════ ① 系统架构图 — 置顶 (v7.1) ═══════ */}
         {enriched.length > 0 && (
-          <section>
-            <h3 className="text-sm font-medium text-slate-400 mb-3">🗺️ 系统架构图</h3>
-            <InteractiveGraph features={enriched} onDrillDown={() => {}} />
-            <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
-              {Object.entries(STATUS_COLOR).map(([key, sc]) => (
-                <span key={key} className="flex items-center gap-1">
-                  <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
-                  {key === 'todo' ? '待做' : key === 'in_progress' ? '开发中' : key === 'reviewing' ? '审查中' : key === 'passed' ? '已完成' : '失败'}
-                </span>
-              ))}
-            </div>
-          </section>
+          <>
+            {/* v10.0: 层级架构图谱 (始终展示, 作为开发逻辑索引) */}
+            <ArchTreeGraph projectId={currentProjectId} />
+
+            <section>
+              <h3 className="text-sm font-medium text-slate-400 mb-3">📊 Feature 进度图</h3>
+              <InteractiveGraph features={enriched} onDrillDown={() => {}} />
+              <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
+                {Object.entries(STATUS_COLOR).map(([key, sc]) => (
+                  <span key={key} className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
+                    {key === 'todo' ? '待做' : key === 'in_progress' ? '开发中' : key === 'reviewing' ? '审查中' : key === 'passed' ? '已完成' : '失败'}
+                  </span>
+                ))}
+              </div>
+            </section>
+          </>
         )}
 
         {/* ═══════ 导入项目架构展示 (features=0 时展示分析产物) ═══════ */}
         {enriched.length === 0 && !isAnalyzing && (
           <>
-            {/* 模块架构关系图谱 (dagre DAG 可视化) */}
-            <ModuleArchGraph projectId={currentProjectId} />
+            {/* v10.0: 层级架构树图谱 (优先) — 回退到旧版模块图 */}
+            <ArchTreeGraph projectId={currentProjectId} />
 
             {/* 探针报告 + 已知问题 (补充信息) */}
             <ImportAnalysisPanel projectId={currentProjectId} />
