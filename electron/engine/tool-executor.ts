@@ -14,46 +14,31 @@ import path from 'path';
 // execSync removed — v17.1: all shell execution now goes through async sandbox
 import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
-import { readWorkspaceFile, readDirectoryTree } from './file-writer';
-import {
-  codeSearch, codeSearchAsync, formatSearchResult, codeSearchFiles,
-  readManyFiles, formatReadManyResult,
-  streamReadFile, queryCodeGraph, getRepoMap,
-} from './code-search';
-import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment, getIssue, createBranch, switchBranch, deleteBranch, listBranches, getCurrentBranch, gitPull, gitPush, gitFetch, createPR, listPRs, getPR, mergePR } from './git-provider';
-import { execInSandbox, execInSandboxAsync, execInSandboxPromise, isAsyncHandle, registerProcess, getActiveProcess, waitForProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, runTestAsync, runLintAsync, type SandboxConfig } from './sandbox-executor';
+import { readDirectoryTree } from './file-writer';
+import { codeSearch, formatSearchResult, codeSearchFiles, getRepoMap } from './code-search';
+// git-provider, web-tools, browser-tools, visual-tools, deploy-tools, skill-evolution
+// → functions used in async handler (tool-handlers-async.ts), not imported here
+import { getActiveProcess } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
-import { webSearch, fetchUrl, httpRequest } from './web-tools';
-import { webSearchBoost } from './web-tools';
-import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
-import { agentScratchpadWrite, agentScratchpadRead, todoWritePersist, todoReadPersist, type TodoItemPersist } from './scratchpad';
+
+import { think, todoWrite, todoRead, batchEdit, type EditOperation } from './extended-tools';
+import {
+  agentScratchpadWrite,
+  agentScratchpadRead,
+  todoWritePersist,
+  todoReadPersist,
+  type TodoItemPersist,
+} from './scratchpad';
 import { takeScreenshot, mouseMove, mouseClick, keyboardType, keyboardHotkey } from './computer-use';
-import {
-  launchBrowser, closeBrowser, navigate as browserNavigateFn,
-  browserScreenshot, browserSnapshot, browserClick, browserType,
-  browserEvaluate, browserWait, browserNetwork,
-  browserHover, browserSelectOption, browserPressKey, browserFillForm,
-  browserDrag, browserTabs, browserFileUpload, browserConsole,
-} from './browser-tools';
-import {
-  analyzeImage, compareScreenshots, visualAssert,
-  cacheScreenshot, getCachedScreenshot,
-} from './visual-tools';
+import { cacheScreenshot } from './visual-tools';
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
-import type { AppSettings, FileTreeNode } from './types';
+import type { FileTreeNode } from './types';
 import { trimToolResult } from './context-collector';
 import { configureSearch, getAvailableProviders } from './search-provider';
-import { skillEvolution } from './skill-evolution';
-import { configureImageGen, isImageGenAvailable, textToImage, editImage } from './image-gen';
-import {
-  deployWithCompose, composeDown, pm2Start, pm2Status,
-  generateComposeYaml, generateDockerfile, generatePM2Ecosystem, generateNginxConfig,
-  writeNginxConfig, writeDockerfile, healthCheck, findAvailablePort,
-  type ServiceConfig, type ComposeConfig, type PM2AppConfig, type NginxSiteConfig, type DockerfileConfig,
-} from './deploy-tools';
+import { configureImageGen } from './image-gen';
 
-const log = createLogger('tool-executor');
+const _log = createLogger('tool-executor');
 
 // v6.0: 全局工具输出截断限制
 const TOOL_OUTPUT_MAX_TOKENS = 4000;
@@ -73,7 +58,10 @@ function assertSafePath(filePath: string): { ok: true; normalized: string } | { 
 /**
  * v16.0: 写操作路径检查 — 支持绝对路径写入（需要 externalWrite 权限）
  */
-function assertWritePath(filePath: string, ctx: ToolContext): { ok: true; normalized: string; absPath: string } | { ok: false; error: string } {
+function assertWritePath(
+  filePath: string,
+  ctx: ToolContext,
+): { ok: true; normalized: string; absPath: string } | { ok: false; error: string } {
   const normalized = path.normalize(filePath);
   if (path.isAbsolute(normalized)) {
     if (!ctx.permissions?.externalWrite) {
@@ -116,7 +104,6 @@ export function executeTool(call: ToolCall, ctx: ToolContext): ToolResult {
 function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
   try {
     switch (call.name) {
-
       // v17.0: read_file → 已迁移到 executeToolAsyncRaw (async 路径)
       // 此处作为 fallback: 若意外走到同步路径, 仍提供基本读取能力
       case 'read_file': {
@@ -142,9 +129,17 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           const rfSlice = rfLines.slice(rfOffset - 1, rfOffset - 1 + rfLimit);
           const rfOut = rfSlice.map((l, i) => `${rfOffset + i}| ${l}`).join('\n');
           const rfHasMore = rfOffset - 1 + rfLimit < rfLines.length;
-          return { success: true, output: `[${call.arguments.path}] ${rfLines.length} 行, 显示 ${rfOffset}-${Math.min(rfOffset - 1 + rfLimit, rfLines.length)}\n${rfOut}${rfHasMore ? `\n... 还有更多内容 (用 offset=${rfOffset + rfLimit} 继续)` : ''}`, action: 'read' };
+          return {
+            success: true,
+            output: `[${call.arguments.path}] ${rfLines.length} 行, 显示 ${rfOffset}-${Math.min(rfOffset - 1 + rfLimit, rfLines.length)}\n${rfOut}${rfHasMore ? `\n... 还有更多内容 (用 offset=${rfOffset + rfLimit} 继续)` : ''}`,
+            action: 'read',
+          };
         } catch (rfErr: unknown) {
-          return { success: false, output: `读取失败: ${rfErr instanceof Error ? rfErr.message : String(rfErr)}`, action: 'read' };
+          return {
+            success: false,
+            output: `读取失败: ${rfErr instanceof Error ? rfErr.message : String(rfErr)}`,
+            action: 'read',
+          };
         }
       }
 
@@ -155,7 +150,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (ctx.workerId && ctx.featureId) {
           const lock = acquireFileLock(ctx.workspacePath, check.normalized, ctx.workerId, ctx.featureId);
           if (!lock.acquired) {
-            return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'write' };
+            return {
+              success: false,
+              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`,
+              action: 'write',
+            };
           }
         }
         const absPath = check.absPath;
@@ -172,11 +171,16 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (ctx.workerId && ctx.featureId) {
           const lock = acquireFileLock(ctx.workspacePath, check.normalized, ctx.workerId, ctx.featureId);
           if (!lock.acquired) {
-            return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'edit' };
+            return {
+              success: false,
+              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`,
+              action: 'edit',
+            };
           }
         }
         const editAbsPath = check.absPath;
-        if (!fs.existsSync(editAbsPath)) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'edit' };
+        if (!fs.existsSync(editAbsPath))
+          return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'edit' };
         let content = fs.readFileSync(editAbsPath, 'utf-8');
         const oldStr: string | undefined | null = call.arguments.old_string;
         const newStr: string = call.arguments.new_string;
@@ -186,22 +190,40 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (oldStr === '') {
           content = content + newStr;
           fs.writeFileSync(editAbsPath, content, 'utf-8');
-          return { success: true, output: `已追加到 ${check.normalized} (${Buffer.byteLength(newStr, 'utf-8')} bytes added)`, action: 'edit' };
+          return {
+            success: true,
+            output: `已追加到 ${check.normalized} (${Buffer.byteLength(newStr, 'utf-8')} bytes added)`,
+            action: 'edit',
+          };
         }
         const occurrences = content.split(oldStr).length - 1;
         if (occurrences === 0) {
-          const trimmedOld = oldStr.split('\n').map((l: string) => l.trimEnd()).join('\n');
-          const trimmedContent = content.split('\n').map((l: string) => l.trimEnd()).join('\n');
+          const trimmedOld = oldStr
+            .split('\n')
+            .map((l: string) => l.trimEnd())
+            .join('\n');
+          const trimmedContent = content
+            .split('\n')
+            .map((l: string) => l.trimEnd())
+            .join('\n');
           const trimOccurrences = trimmedContent.split(trimmedOld).length - 1;
           if (trimOccurrences === 0) {
-            return { success: false, output: `未找到匹配的文本 (0 occurrences)。请确保 old_string 精确匹配文件内容（包含缩进和空白）。`, action: 'edit' };
+            return {
+              success: false,
+              output: `未找到匹配的文本 (0 occurrences)。请确保 old_string 精确匹配文件内容（包含缩进和空白）。`,
+              action: 'edit',
+            };
           }
           const newTrimmedContent = trimmedContent.replace(trimmedOld, newStr);
           fs.writeFileSync(editAbsPath, newTrimmedContent, 'utf-8');
           return { success: true, output: `已编辑 ${check.normalized} (1 处替换, trimmed match)`, action: 'edit' };
         }
         if (occurrences > 1) {
-          return { success: false, output: `old_string 匹配了 ${occurrences} 处，需要更精确的上下文使其唯一。`, action: 'edit' };
+          return {
+            success: false,
+            output: `old_string 匹配了 ${occurrences} 处，需要更精确的上下文使其唯一。`,
+            action: 'edit',
+          };
         }
         content = content.replace(oldStr, newStr);
         fs.writeFileSync(editAbsPath, content, 'utf-8');
@@ -222,12 +244,14 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           tree = readDirectoryTree(ctx.workspacePath, dir, maxDepth);
         }
         const formatTree = (nodes: FileTreeNode[], indent: string = ''): string => {
-          return nodes.map(n => {
-            if (n.type === 'dir') {
-              return `${indent}${n.name}/\n${n.children ? formatTree(n.children, indent + '  ') : ''}`;
-            }
-            return `${indent}${n.name}`;
-          }).join('\n');
+          return nodes
+            .map(n => {
+              if (n.type === 'dir') {
+                return `${indent}${n.name}/\n${n.children ? formatTree(n.children, indent + '  ') : ''}`;
+              }
+              return `${indent}${n.name}`;
+            })
+            .join('\n');
         };
         return { success: true, output: formatTree(tree) || '(空目录)', action: 'read' };
       }
@@ -252,8 +276,16 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       // v17.0: 新工具 code_search — 高级代码搜索
       case 'code_search': {
         const csPattern = call.arguments.pattern;
-        const csInclude = call.arguments.include ? (Array.isArray(call.arguments.include) ? call.arguments.include : [call.arguments.include]) : undefined;
-        const csExclude = call.arguments.exclude ? (Array.isArray(call.arguments.exclude) ? call.arguments.exclude : [call.arguments.exclude]) : undefined;
+        const csInclude = call.arguments.include
+          ? Array.isArray(call.arguments.include)
+            ? call.arguments.include
+            : [call.arguments.include]
+          : undefined;
+        const csExclude = call.arguments.exclude
+          ? Array.isArray(call.arguments.exclude)
+            ? call.arguments.exclude
+            : [call.arguments.exclude]
+          : undefined;
         const csResult = codeSearch(ctx.workspacePath, csPattern, {
           include: csInclude,
           exclude: csExclude,
@@ -324,7 +356,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         const role = call.arguments.role || 'developer';
         if (layer === 'role') {
           appendRoleMemory(ctx.workspacePath, role, call.arguments.entry);
-          return { success: true, output: `已写入 ${role} 角色记忆: ${call.arguments.entry.slice(0, 100)}`, action: 'write' };
+          return {
+            success: true,
+            output: `已写入 ${role} 角色记忆: ${call.arguments.entry.slice(0, 100)}`,
+            action: 'write',
+          };
         }
         appendProjectMemory(ctx.workspacePath, call.arguments.entry);
         return { success: true, output: `已写入项目记忆: ${call.arguments.entry.slice(0, 100)}`, action: 'write' };
@@ -386,21 +422,22 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           `## 影响范围: ${impact}`,
           affectedFeatures.length > 0 ? `受影响的 Features: ${affectedFeatures.join(', ')}` : '',
           '',
-          `> 提出者: ${call.arguments._agentId as string || 'agent'}`,
+          `> 提出者: ${(call.arguments._agentId as string) || 'agent'}`,
           `> 时间: ${new Date().toISOString()}`,
-        ].filter(Boolean).join('\n');
+        ]
+          .filter(Boolean)
+          .join('\n');
 
         // 如果有 projectId, 写入 change_requests 表
         if (ctx.projectId) {
           try {
             const db = getDb();
             const rfcId = `rfc-${Date.now().toString(36)}`;
-            db.prepare(`INSERT INTO change_requests (id, project_id, description, status, affected_features)
-              VALUES (?, ?, ?, 'pending', ?)`).run(
-              rfcId, ctx.projectId, rfcDescription,
-              JSON.stringify(affectedFeatures),
-            );
-          } catch (err) {
+            db.prepare(
+              `INSERT INTO change_requests (id, project_id, description, status, affected_features)
+              VALUES (?, ?, ?, 'pending', ?)`,
+            ).run(rfcId, ctx.projectId, rfcDescription, JSON.stringify(affectedFeatures));
+          } catch (_err) {
             // DB write failure is non-fatal
           }
         }
@@ -463,7 +500,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           if (batchCheck.ok) {
             const lock = acquireFileLock(ctx.workspacePath, batchCheck.normalized, ctx.workerId, ctx.featureId);
             if (!lock.acquired) {
-              return { success: false, output: `🔒 文件被锁定: ${call.arguments.path} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试。`, action: 'edit' };
+              return {
+                success: false,
+                output: `🔒 文件被锁定: ${call.arguments.path} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试。`,
+                action: 'edit',
+              };
             }
           }
         }
@@ -484,23 +525,48 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'mouse_click': {
-        const result = mouseClick(call.arguments.x, call.arguments.y, call.arguments.button || 'left', call.arguments.double_click || false);
-        return { success: result.success, output: result.success ? `鼠标${call.arguments.double_click ? '双' : ''}点击 (${call.arguments.x}, ${call.arguments.y}) [${call.arguments.button || 'left'}]` : `点击失败: ${result.error}`, action: 'computer' };
+        const result = mouseClick(
+          call.arguments.x,
+          call.arguments.y,
+          call.arguments.button || 'left',
+          call.arguments.double_click || false,
+        );
+        return {
+          success: result.success,
+          output: result.success
+            ? `鼠标${call.arguments.double_click ? '双' : ''}点击 (${call.arguments.x}, ${call.arguments.y}) [${call.arguments.button || 'left'}]`
+            : `点击失败: ${result.error}`,
+          action: 'computer',
+        };
       }
 
       case 'mouse_move': {
         const result = mouseMove(call.arguments.x, call.arguments.y);
-        return { success: result.success, output: result.success ? `鼠标移动到 (${call.arguments.x}, ${call.arguments.y})` : `移动失败: ${result.error}`, action: 'computer' };
+        return {
+          success: result.success,
+          output: result.success
+            ? `鼠标移动到 (${call.arguments.x}, ${call.arguments.y})`
+            : `移动失败: ${result.error}`,
+          action: 'computer',
+        };
       }
 
       case 'keyboard_type': {
         const result = keyboardType(call.arguments.text);
-        return { success: result.success, output: result.success ? `已键入 ${call.arguments.text.length} 字符` : `键入失败: ${result.error}`, action: 'computer' };
+        return {
+          success: result.success,
+          output: result.success ? `已键入 ${call.arguments.text.length} 字符` : `键入失败: ${result.error}`,
+          action: 'computer',
+        };
       }
 
       case 'keyboard_hotkey': {
         const result = keyboardHotkey(call.arguments.combo);
-        return { success: result.success, output: result.success ? `已按下 ${call.arguments.combo}` : `按键失败: ${result.error}`, action: 'computer' };
+        return {
+          success: result.success,
+          output: result.success ? `已按下 ${call.arguments.combo}` : `按键失败: ${result.error}`,
+          action: 'computer',
+        };
       }
 
       // ── Skill Evolution (v5.1) ──
@@ -529,8 +595,8 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'run_blackbox_tests':
       case 'fetch_url':
       case 'http_request':
-      case 'download_file':   // v19.0
-      case 'search_images':   // v19.0
+      case 'download_file': // v19.0
+      case 'search_images': // v19.0
       // v17.0: async file operations
       case 'read_many_files':
       case 'code_graph_query':
@@ -601,7 +667,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       // Sync-only tools
       case 'list_sub_agents': {
         // Lazy import: sub-agent-framework → tool-executor circular dep
-        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework'); // eslint-disable-line
+        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
         const agents = getActiveSubAgents();
         if (agents.length === 0) return { success: true, output: '无活跃子 Agent', action: 'read' };
         const lines = agents.map(a => `${a.id} [${a.preset}] 运行 ${Math.round(a.runningMs / 1000)}s — ${a.task}`);
@@ -610,7 +676,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       case 'cancel_sub_agent': {
         // Lazy import: sub-agent-framework → tool-executor circular dep
-        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework'); // eslint-disable-line
+        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
         const ok = cancelSubAgent(call.arguments.agent_id);
         return ok
           ? { success: true, output: `已取消子 Agent: ${call.arguments.agent_id}`, action: 'write' }
@@ -626,7 +692,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           serperApiKey: call.arguments.serper_api_key,
         });
         const available = getAvailableProviders();
-        return { success: true, output: `搜索引擎配置已更新\n可用引擎: [${available.join(', ')}]\n\n提示: 配置 API Key 后搜索质量将大幅提升。Brave (免费2000次/月): https://brave.com/search/api/`, action: 'web' };
+        return {
+          success: true,
+          output: `搜索引擎配置已更新\n可用引擎: [${available.join(', ')}]\n\n提示: 配置 API Key 后搜索质量将大幅提升。Brave (免费2000次/月): https://brave.com/search/api/`,
+          action: 'web',
+        };
       }
 
       // v9.0: 图像生成配置 (同步)
@@ -637,7 +707,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           baseUrl: call.arguments.base_url || 'https://api.openai.com',
           model: call.arguments.model,
         });
-        return { success: true, output: `图像生成引擎已配置\nProvider: ${call.arguments.provider}\nModel: ${call.arguments.model || 'default'}\n\n现在可以使用 generate_image 和 edit_image 工具了。`, action: 'web' };
+        return {
+          success: true,
+          output: `图像生成引擎已配置\nProvider: ${call.arguments.provider}\nModel: ${call.arguments.model || 'default'}\n\n现在可以使用 generate_image 和 edit_image 工具了。`,
+          action: 'web',
+        };
       }
 
       default: {
@@ -649,7 +723,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
     }
   } catch (err: unknown) {
-    return { success: false, output: `工具执行错误: ${(err instanceof Error ? err.message : String(err))}` };
+    return { success: false, output: `工具执行错误: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -658,9 +732,19 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 // ═══════════════════════════════════════
 
 export { executeMcpTool, executeSkillTool } from './tool-handlers-external';
-export { executeSkillAcquire, executeSkillSearch, executeSkillImprove, executeSkillRecordUsage } from './tool-handlers-external';
+export {
+  executeSkillAcquire,
+  executeSkillSearch,
+  executeSkillImprove,
+  executeSkillRecordUsage,
+} from './tool-handlers-external';
 
-import { executeSkillAcquire, executeSkillSearch, executeSkillImprove, executeSkillRecordUsage } from './tool-handlers-external';
+import {
+  executeSkillAcquire,
+  executeSkillSearch,
+  executeSkillImprove,
+  executeSkillRecordUsage,
+} from './tool-handlers-external';
 import { executeToolAsyncRaw } from './tool-handlers-async';
 
 export async function executeToolAsync(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
