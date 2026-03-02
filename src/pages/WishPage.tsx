@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAppStore, type MetaAgentMessage, type AgentWorkMessage } from '../stores/app-store';
-import type { MetaSessionItem } from '../stores/slices/meta-agent-slice';
+import type { MetaSessionItem, ChatMode } from '../stores/slices/meta-agent-slice';
 import { friendlyErrorMessage } from '../utils/errors';
 import { MetaAgentSettings } from '../components/MetaAgentSettings';
 import { toast, confirm } from '../stores/toast-store';
@@ -47,6 +47,13 @@ const GREETING: MetaAgentMessage = {
 
 const META_AGENT_ID = 'meta-agent';
 
+const CHAT_MODE_INFO: Record<ChatMode, { icon: string; label: string; desc: string; color: string }> = {
+  work: { icon: '🔧', label: '工作', desc: '指挥调度 · 派发任务给团队', color: 'text-amber-400' },
+  chat: { icon: '💬', label: '闲聊', desc: '自由对话 · 不触发工作流', color: 'text-blue-400' },
+  deep: { icon: '🔬', label: '深度', desc: '深入分析 · 可输出文件/派发任务', color: 'text-purple-400' },
+  admin: { icon: '🛠️', label: '管理', desc: '修改团队/工作流/项目配置', color: 'text-rose-400' },
+};
+
 function formatSessionTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -73,6 +80,7 @@ function SessionListPanel() {
   const setMessages = useAppStore(s => s.setMetaAgentMessages);
   const messagesMap = useAppStore(s => s.metaAgentMessages);
   const [loading, setLoading] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -169,8 +177,44 @@ function SessionListPanel() {
       )}
 
       {/* Header */}
-      <div className="px-3 py-2.5 border-b border-slate-800 flex items-center">
-        <span className="text-xs font-medium text-slate-400">会话历史</span>
+      <div className="px-3 py-2.5 border-b border-slate-800 flex items-center gap-2">
+        <span className="text-xs font-medium text-slate-400 flex-1">会话历史</span>
+        <div className="relative">
+          <button
+            onClick={() => setNewChatOpen(!newChatOpen)}
+            className="text-[10px] px-2 py-0.5 rounded-md bg-forge-600/20 text-forge-400 hover:bg-forge-600/30 transition-colors"
+          >
+            + 新对话
+          </button>
+          {newChatOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNewChatOpen(false)} />
+              <div className="absolute right-0 top-7 z-50 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
+                {(['work', 'chat', 'deep'] as ChatMode[]).map(m => {
+                  const info = CHAT_MODE_INFO[m];
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        setCurrentSessionId(null);
+                        // Store the desired mode for next session creation
+                        (window as unknown as Record<string, unknown>).__nextChatMode = m;
+                        setNewChatOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>{info.icon}</span>
+                        <span className={`text-xs font-medium ${info.color}`}>{info.label}模式</span>
+                      </div>
+                      <div className="text-[9px] text-slate-500 ml-6">{info.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Session 列表 */}
@@ -183,6 +227,7 @@ function SessionListPanel() {
           const isSelected = currentSessionId === sess.id;
           const title = sess.title || `会话 #${sess.agentSeq}`;
           const isActive = sess.status === 'active';
+          const modeInfo = CHAT_MODE_INFO[sess.chatMode || 'work'];
 
           return (
             <button
@@ -196,7 +241,8 @@ function SessionListPanel() {
             >
               <div className="flex items-center gap-1.5 mb-0.5">
                 {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
-                <span className="truncate font-medium">{title}</span>
+                <span className="truncate font-medium flex-1">{title}</span>
+                <span className={`text-[8px] ${modeInfo.color} shrink-0`} title={`${modeInfo.label}模式`}>{modeInfo.icon}</span>
               </div>
               <div className="flex items-center gap-1.5 text-[9px] text-slate-600">
                 <span>{formatSessionTime(sess.createdAt)}</span>
@@ -288,9 +334,20 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const updateLastAssistant = useAppStore(s => s.updateLastAssistantMessage);
   const currentSessionId = useAppStore(s => s.currentMetaSessionId);
   const setCurrentSessionId = useAppStore(s => s.setCurrentMetaSessionId);
+  const sessionList = useAppStore(s => s.metaSessionList);
 
   const chatKey = currentSessionId || currentProjectId || '_global';
   const messages = messagesMap.get(chatKey) || [];
+
+  // 当前 session 的模式
+  const currentChatMode: ChatMode = useMemo(() => {
+    if (currentSessionId) {
+      const sess = sessionList.find(s => s.id === currentSessionId);
+      if (sess?.chatMode) return sess.chatMode;
+    }
+    // 新对话: 从临时变量获取
+    return ((window as unknown as Record<string, unknown>).__nextChatMode as ChatMode) || 'work';
+  }, [currentSessionId, sessionList]);
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -374,13 +431,16 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const handleSend = async () => {
     if (!input.trim() || sending) return;
 
-    // 新对话时创建 session
+    // 新对话时创建 session (含 chatMode)
     let sessionId = currentSessionId;
     if (!sessionId) {
       try {
-        const newSession = await window.automater.session.create(currentProjectId, META_AGENT_ID, 'meta-agent');
+        const modeForNew = ((window as unknown as Record<string, unknown>).__nextChatMode as ChatMode) || 'work';
+        const newSession = await window.automater.session.create(currentProjectId, META_AGENT_ID, 'meta-agent', modeForNew);
         sessionId = newSession.id;
         setCurrentSessionId(sessionId);
+        // 清除临时变量
+        delete (window as unknown as Record<string, unknown>).__nextChatMode;
       } catch { sessionId = null; }
     }
 
@@ -425,6 +485,8 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         currentProjectId,
         userMsg.content,
         history,
+        undefined,  // attachments
+        currentChatMode,
       );
 
       updateLastAssistant(activeChatKey, result.reply);
@@ -455,15 +517,9 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     }
   };
 
-  // 查看历史已完成会话
-  const isViewingHistory = currentSessionId !== null && (() => {
-    const sessionList = useAppStore.getState().metaSessionList;
-    const sess = sessionList.find(s => s.id === currentSessionId);
-    return sess?.status === 'completed' || sess?.status === 'archived';
-  })();
-
   const dynamicGreeting: MetaAgentMessage = { ...GREETING, content: greetingText };
   const displayMessages = messages.length === 0 ? [dynamicGreeting] : messages;
+  const modeInfo = CHAT_MODE_INFO[currentChatMode];
 
   return (
     <div className="flex h-full">
@@ -477,7 +533,11 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-forge-500 to-indigo-600 flex items-center justify-center text-sm">🤖</div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-bold text-slate-200">{agentName}</div>
-              <div className="text-[10px] text-slate-500">需求创建 · 项目查询 · 工作流管理</div>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                <span className={`${modeInfo.color}`}>{modeInfo.icon} {modeInfo.label}模式</span>
+                <span className="text-slate-700">·</span>
+                <span>{modeInfo.desc}</span>
+              </div>
             </div>
             <button
               onClick={() => setSettingsOpen(true)}
@@ -550,34 +610,25 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input */}
+        {/* Input — 所有会话均可继续对话 */}
         <div className="shrink-0 px-3 py-2 border-t border-slate-800">
-          {isViewingHistory ? (
-            <div className="flex items-center justify-center gap-2 py-2">
-              <span className="text-xs text-slate-500">历史会话 (只读)</span>
-              <button onClick={() => setCurrentSessionId(null)} className="text-xs text-forge-400 hover:text-forge-300 transition-colors">
-                开始新对话 →
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                placeholder={compact ? '发消息...' : '告诉管家你的需求想法、问题或指令...'}
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
-                disabled={sending}
-              />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || sending}
-                className="px-3 py-2 rounded-xl bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              placeholder={compact ? '发消息...' : `${modeInfo.icon} ${modeInfo.label}模式 — 发消息...`}
+              className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
+              disabled={sending}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || sending}
+              className="px-3 py-2 rounded-xl bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
               >
                 {sending ? '...' : '↑'}
               </button>
             </div>
-          )}
         </div>
 
         {settingsOpen && <MetaAgentSettings onClose={() => setSettingsOpen(false)} />}

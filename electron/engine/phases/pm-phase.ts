@@ -88,14 +88,14 @@ export async function phasePMAnalysis(
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 输出解析失败: ${parseResult.error}\n原始输出: ${parseResult.rawPreview}` });
       addLog(projectId, pmId, 'error', `Parse failed: ${parseResult.error}`);
     }
-    db.prepare("UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ?")
-      .run(pmReactResult.totalInputTokens, pmReactResult.totalOutputTokens, pmReactResult.totalCost, pmId);
+    db.prepare("UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?")
+      .run(pmReactResult.totalInputTokens, pmReactResult.totalOutputTokens, pmReactResult.totalCost, pmId, projectId);
   } catch (err: unknown) {
     if (signal.aborted) return null;
     const errMsg = err instanceof Error ? err.message : String(err);
     addLog(projectId, pmId, 'error', errMsg);
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 分析失败: ${errMsg}` });
-    db.prepare("UPDATE agents SET status = 'error' WHERE id = ?").run(pmId);
+    db.prepare("UPDATE agents SET status = 'error' WHERE id = ? AND project_id = ?").run(pmId, projectId);
     db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
     sendToUI(win, 'project:status', { projectId, status: 'error' });
     return null;
@@ -283,7 +283,7 @@ export async function phasePMAcceptance(
       for (const feature of batch) { db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?").run(`PM 验收异常: ${errMsg}`, feature.id, projectId); sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId }); }
     }
   }
-  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(pmAccId);
+  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(pmAccId, projectId);
   emitEvent({ projectId, agentId: pmAccId, type: 'phase:pm-acceptance:end', data: { reviewed: qaPassed.length } });
   createCheckpoint(projectId, `PM 验收完成 (${qaPassed.length} features)`);
 }

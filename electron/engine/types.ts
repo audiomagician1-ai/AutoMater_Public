@@ -467,6 +467,8 @@ export interface SessionRow {
   message_count: number;
   total_tokens: number;
   total_cost: number;
+  /** v21.0: 管家会话模式 */
+  chat_mode: string;
 }
 
 /** feature_sessions 表原始行 */

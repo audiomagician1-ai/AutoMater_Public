@@ -1209,6 +1209,22 @@ export function setupProjectHandlers() {
     return { success: true, issues: issues || '' };
   });
 
+  // v9.1: 获取导入产物 ARCHITECTURE.md
+  ipcMain.handle('project:get-architecture-doc', (_event, projectId: string) => {
+    assertProjectId('project:get-architecture-doc', projectId);
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const archPath = path.join(project.workspace_path, '.automater/docs/ARCHITECTURE.md');
+    if (!fs.existsSync(archPath)) return { success: false, error: 'Architecture doc not generated yet' };
+    try {
+      const content = fs.readFileSync(archPath, 'utf-8');
+      return { success: true, content };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle('project:get-probe-reports', (_event, projectId: string) => {
     assertProjectId('project:get-probe-reports', projectId);
     const db = getDb();

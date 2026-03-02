@@ -319,6 +319,48 @@ const MIGRATIONS: Migration[] = [
       safeAddColumn('ALTER TABLE features ADD COLUMN summary TEXT');
     },
   },
+  {
+    version: 14,
+    description: 'agents 表改复合主键 (id, project_id)，支持同名 agent 跨项目独立统计',
+    up: () => {
+      db.exec(`
+        -- 1. 重建 agents 表 (SQLite 不支持 ALTER PRIMARY KEY)
+        CREATE TABLE agents_new (
+          id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'idle',
+          current_task TEXT,
+          session_count INTEGER NOT NULL DEFAULT 0,
+          total_input_tokens INTEGER NOT NULL DEFAULT 0,
+          total_output_tokens INTEGER NOT NULL DEFAULT 0,
+          total_cost_usd REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          last_active_at TEXT,
+          PRIMARY KEY (id, project_id),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        -- 2. 迁移旧数据
+        INSERT OR IGNORE INTO agents_new
+          SELECT id, project_id, role, status, current_task,
+                 session_count, total_input_tokens, total_output_tokens, total_cost_usd,
+                 created_at, last_active_at
+          FROM agents;
+
+        -- 3. 替换旧表
+        DROP TABLE agents;
+        ALTER TABLE agents_new RENAME TO agents;
+      `);
+    },
+  },
+  {
+    version: 15,
+    description: 'v21.0: sessions.chat_mode — 管家会话模式 (work/chat/deep)',
+    up: () => {
+      safeAddColumn("ALTER TABLE sessions ADD COLUMN chat_mode TEXT NOT NULL DEFAULT 'work'");
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */
@@ -415,7 +457,7 @@ export async function initDatabase(): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       role TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'idle',
@@ -426,6 +468,7 @@ export async function initDatabase(): Promise<void> {
       total_cost_usd REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       last_active_at TEXT,
+      PRIMARY KEY (id, project_id),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 

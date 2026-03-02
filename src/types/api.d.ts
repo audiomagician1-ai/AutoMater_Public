@@ -30,6 +30,14 @@ interface ModelPricingEntry {
   output: number;
 }
 
+/** v22.0: 单模式参数覆盖 */
+interface ModeConfig {
+  maxReactIterations?: number;
+  contextHistoryLimit?: number;
+  maxResponseTokens?: number;
+  contextTokenLimit?: number;
+}
+
 /** v7.0: 元Agent 管理配置 */
 interface MetaAgentConfig {
   name: string;
@@ -46,6 +54,8 @@ interface MetaAgentConfig {
   autoMemory: boolean;
   memoryInjectLimit: number;
   greeting: string;
+  /** v22.0: 各模式独立参数覆盖 */
+  modeConfigs: Record<string, ModeConfig>;
 }
 
 /** v7.0: 元Agent 记忆记录 */
@@ -348,6 +358,8 @@ interface AutoMaterAPI {
     getKnownIssues(projectId: string): Promise<{ success: boolean; issues?: string; error?: string }>;
     /** v7.0: 获取所有探针报告 */
     getProbeReports(projectId: string): Promise<{ success: boolean; reports?: unknown[]; error?: string }>;
+    /** v9.1: 获取架构文档 (ARCHITECTURE.md) */
+    getArchitectureDoc(projectId: string): Promise<{ success: boolean; content?: string; error?: string }>;
     /** v7.0: 检测增量变更 */
     detectIncrementalChanges(projectId: string): Promise<{ success: boolean; changedFiles?: string[]; affectedProbeTypes?: string[]; needsFullReprobe?: boolean; reason?: string; error?: string }>;
     /** v7.0: 应用用户对模块图的校正 */
@@ -443,6 +455,7 @@ interface AutoMaterAPI {
       message: string,
       history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
       attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
+      chatMode?: string,
     ): Promise<{
       reply: string;
       intent: 'wish' | 'query' | 'workflow' | 'general';
@@ -536,7 +549,7 @@ interface AutoMaterAPI {
 
   /** v8.0: Session 管理 + v8.1: Feature-Session 关联 */
   session: {
-    create(projectId: string | null, agentId: string, agentRole: string): Promise<SessionInfo>;
+    create(projectId: string | null, agentId: string, agentRole: string, chatMode?: string): Promise<SessionInfo>;
     switch(sessionId: string): Promise<SessionInfo | null>;
     getActive(projectId: string | null, agentId: string): Promise<SessionInfo | null>;
     list(projectId: string | null, agentId?: string): Promise<SessionInfo[]>;

@@ -14,7 +14,7 @@ import { toast, confirm as showConfirm } from '../stores/toast-store';
 
 const log = createLogger('MetaAgentSettings');
 
-type Tab = 'config' | 'memory' | 'daemon';
+type Tab = 'config' | 'modes' | 'memory' | 'daemon';
 type MemoryCategory = 'identity' | 'user_profile' | 'lessons' | 'facts' | 'conversation_summary';
 
 const CATEGORY_LABELS: Record<MemoryCategory, { label: string; icon: string; desc: string }> = {
@@ -48,6 +48,12 @@ export function MetaAgentSettings({ onClose }: Props) {
     autoMemory: true,
     memoryInjectLimit: 30,
     greeting: '',
+    modeConfigs: {
+      work: { maxReactIterations: 50, maxResponseTokens: 128000 },
+      chat: { maxReactIterations: 5, maxResponseTokens: 32000, contextHistoryLimit: 30 },
+      deep: { maxReactIterations: 80, maxResponseTokens: 128000, contextHistoryLimit: 40 },
+      admin: { maxReactIterations: 30, maxResponseTokens: 64000, contextHistoryLimit: 20 },
+    },
   });
 
   // ── Memory state ──
@@ -187,6 +193,16 @@ export function MetaAgentSettings({ onClose }: Props) {
             ⚙️ 基本设置
           </button>
           <button
+            onClick={() => setTab('modes')}
+            className={`px-4 py-2 rounded-t-lg text-xs font-medium transition-all ${
+              tab === 'modes'
+                ? 'bg-slate-800 text-forge-400 border-b-2 border-forge-500'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+            }`}
+          >
+            🎛️ 模式参数
+          </button>
+          <button
             onClick={() => setTab('memory')}
             className={`px-4 py-2 rounded-t-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
               tab === 'memory'
@@ -215,6 +231,8 @@ export function MetaAgentSettings({ onClose }: Props) {
         <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
           {tab === 'config' ? (
             <ConfigTab config={config} setConfig={setConfig} onSave={handleSaveConfig} saving={saving} saved={saved} />
+          ) : tab === 'modes' ? (
+            <ModeConfigTab config={config} setConfig={setConfig} onSave={handleSaveConfig} saving={saving} saved={saved} />
           ) : tab === 'memory' ? (
             <MemoryTab
               memories={memories}
@@ -395,6 +413,126 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
           </Field>
         </div>
       </section>
+
+      {/* Save Button */}
+      <div className="flex justify-end pt-2">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+            saved
+              ? 'bg-emerald-600 text-white'
+              : 'bg-forge-600 hover:bg-forge-500 text-white disabled:bg-slate-700 disabled:text-slate-500'
+          }`}
+        >
+          {saved ? '✓ 已保存' : saving ? '保存中...' : '保存设置'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
+// Mode Config Tab — 每模式独立参数
+// ═══════════════════════════════════════
+
+const MODE_DEFS: Array<{ key: string; icon: string; label: string; desc: string; color: string }> = [
+  { key: 'work',  icon: '🔧', label: '工作模式',     desc: '指挥调度 · 派发任务给团队', color: 'border-amber-500/40' },
+  { key: 'chat',  icon: '💬', label: '闲聊模式',     desc: '自由对话 · 不触发工作流', color: 'border-blue-500/40' },
+  { key: 'deep',  icon: '🔬', label: '深度讨论模式', desc: '深入分析 · 可输出文件/派发任务', color: 'border-purple-500/40' },
+  { key: 'admin', icon: '🛠️', label: '管理模式',     desc: '修改团队/工作流/项目配置', color: 'border-rose-500/40' },
+];
+
+function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
+  config: MetaAgentConfig;
+  setConfig: (c: MetaAgentConfig) => void;
+  onSave: () => void;
+  saving: boolean;
+  saved: boolean;
+}) {
+  const modeConfigs = config.modeConfigs || {};
+
+  const updateMode = (mode: string, key: string, value: number | undefined) => {
+    const cur = modeConfigs[mode] || {};
+    const updated = { ...cur, [key]: value };
+    // 如果值为 undefined 或 NaN，删除该键
+    if (value === undefined || Number.isNaN(value)) {
+      delete (updated as Record<string, unknown>)[key];
+    }
+    setConfig({
+      ...config,
+      modeConfigs: { ...modeConfigs, [mode]: updated },
+    });
+  };
+
+  const getVal = (mode: string, key: string, fallback: number): number => {
+    const v = (modeConfigs[mode] as Record<string, unknown> | undefined)?.[key];
+    return typeof v === 'number' ? v : fallback;
+  };
+
+  // 全局默认值 (用于 placeholder)
+  const globalDefaults = {
+    maxReactIterations: config.maxReactIterations || 50,
+    contextHistoryLimit: config.contextHistoryLimit || 20,
+    maxResponseTokens: config.maxResponseTokens || 128000,
+    contextTokenLimit: config.contextTokenLimit || 512000,
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-slate-800/30 rounded-lg px-4 py-3">
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          每个对话模式可以有独立的 ReAct 迭代、上下文和输出限制。未设置的参数将使用「基本设置」中的全局默认值。
+        </p>
+      </div>
+
+      {MODE_DEFS.map(({ key, icon, label, desc, color }) => (
+        <section key={key} className={`border-l-2 ${color} pl-4`}>
+          <h3 className="text-xs font-semibold text-slate-200 mb-1 flex items-center gap-2">
+            <span>{icon}</span> {label}
+          </h3>
+          <p className="text-[10px] text-slate-600 mb-3">{desc}</p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="ReAct 迭代轮数" desc={`全局默认: ${globalDefaults.maxReactIterations}`}>
+              <input
+                type="number"
+                value={getVal(key, 'maxReactIterations', key === 'work' ? 50 : key === 'chat' ? 5 : key === 'deep' ? 80 : 30)}
+                onChange={e => updateMode(key, 'maxReactIterations', parseInt(e.target.value) || undefined)}
+                min={1} max={200}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              />
+            </Field>
+            <Field label="最大回复 Token" desc={`全局默认: ${globalDefaults.maxResponseTokens.toLocaleString()}`}>
+              <input
+                type="number"
+                value={getVal(key, 'maxResponseTokens', key === 'chat' ? 32000 : key === 'admin' ? 64000 : 128000)}
+                onChange={e => updateMode(key, 'maxResponseTokens', parseInt(e.target.value) || undefined)}
+                min={1024} max={256000} step={1024}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              />
+            </Field>
+            <Field label="历史消息条数" desc={`全局默认: ${globalDefaults.contextHistoryLimit}`}>
+              <input
+                type="number"
+                value={getVal(key, 'contextHistoryLimit', key === 'deep' ? 40 : key === 'chat' ? 30 : 20)}
+                onChange={e => updateMode(key, 'contextHistoryLimit', parseInt(e.target.value) || undefined)}
+                min={2} max={200}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              />
+            </Field>
+            <Field label="上下文 Token 上限" desc={`全局默认: ${globalDefaults.contextTokenLimit.toLocaleString()}`}>
+              <input
+                type="number"
+                value={getVal(key, 'contextTokenLimit', globalDefaults.contextTokenLimit)}
+                onChange={e => updateMode(key, 'contextTokenLimit', parseInt(e.target.value) || undefined)}
+                min={4096} max={2000000} step={1024}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              />
+            </Field>
+          </div>
+        </section>
+      ))}
 
       {/* Save Button */}
       <div className="flex justify-end pt-2">

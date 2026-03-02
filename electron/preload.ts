@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('project:get-module-graph', projectId),
     getKnownIssues: (projectId: string) =>
       ipcRenderer.invoke('project:get-known-issues', projectId),
+    getArchitectureDoc: (projectId: string) =>
+      ipcRenderer.invoke('project:get-architecture-doc', projectId),
     getProbeReports: (projectId: string) =>
       ipcRenderer.invoke('project:get-probe-reports', projectId),
     detectIncrementalChanges: (projectId: string) =>
@@ -208,8 +210,9 @@ contextBridge.exposeInMainWorld('automater', {
       message: string,
       history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
       attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
+      chatMode?: string,
     ) =>
-      ipcRenderer.invoke('meta-agent:chat', projectId, message, history, attachments),
+      ipcRenderer.invoke('meta-agent:chat', projectId, message, history, attachments, chatMode),
     // Config
     getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
     saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:config:save', config),
@@ -267,8 +270,8 @@ contextBridge.exposeInMainWorld('automater', {
 
   // ── Session / Backup 管理 (v8.0) + Feature-Session 关联 (v8.1) ──
   session: {
-    create: (projectId: string | null, agentId: string, agentRole: string) =>
-      ipcRenderer.invoke('session:create', projectId, agentId, agentRole),
+    create: (projectId: string | null, agentId: string, agentRole: string, chatMode?: string) =>
+      ipcRenderer.invoke('session:create', projectId, agentId, agentRole, chatMode),
     switch: (sessionId: string) =>
       ipcRenderer.invoke('session:switch', sessionId),
     getActive: (projectId: string | null, agentId: string) =>

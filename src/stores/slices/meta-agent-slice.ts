@@ -10,6 +10,8 @@
 import type { StateCreator } from 'zustand';
 import type { MetaAgentMessage } from '../app-store';
 
+export type ChatMode = 'work' | 'chat' | 'deep' | 'admin';
+
 /** Session 列表项 (与 conversation-backup.ts SessionInfo 对齐) */
 export interface MetaSessionItem {
   id: string;
@@ -25,6 +27,8 @@ export interface MetaSessionItem {
   totalCost: number;
   /** 第一条用户消息摘要 — 用作会话标题 */
   title?: string;
+  /** v21.0: 会话模式 */
+  chatMode?: ChatMode;
 }
 
 export interface MetaAgentSlice {

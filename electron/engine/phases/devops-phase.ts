@@ -68,7 +68,7 @@ export async function phaseDevOpsBuild(
 
   if (buildSteps.length === 0) {
     sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: '  ↳ 未检测到已知构建系统，跳过' });
-    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
     sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
     return;
   }
@@ -104,7 +104,7 @@ export async function phaseDevOpsBuild(
   sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: summary });
   addLog(projectId, devopsId, 'log', summary);
 
-  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
   sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
   emitEvent({ projectId, agentId: devopsId, type: 'phase:dev:end', data: { devops: true, allPassed, steps: results.length, passed: passedCount } });
 

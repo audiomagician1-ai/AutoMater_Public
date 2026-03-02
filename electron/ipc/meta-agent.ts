@@ -31,7 +31,7 @@ import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolC
 import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
-import type { LLMToolCall, ProjectRow } from '../engine/types';
+import type { LLMToolCall, ProjectRow, WorkflowPresetRow, WorkflowStage } from '../engine/types';
 import type { DaemonConfig } from '../engine/meta-agent-daemon';
 
 const log = createLogger('ipc:meta-agent');
@@ -40,6 +40,14 @@ import { toErrorMessage, createLogger } from '../engine/logger';
 // ═══════════════════════════════════════
 // Types
 // ═══════════════════════════════════════
+
+/** 单模式参数覆盖 */
+export interface ModeConfig {
+  maxReactIterations?: number;   // ReAct 最大迭代轮数
+  contextHistoryLimit?: number;  // 对话历史保留条数
+  maxResponseTokens?: number;    // 回复最大 token
+  contextTokenLimit?: number;    // 上下文 token 上限
+}
 
 export interface MetaAgentConfig {
   name: string;               // 管家名字 (默认 "元Agent管家")
@@ -54,6 +62,8 @@ export interface MetaAgentConfig {
   autoMemory: boolean;        // 是否自动积累记忆 (默认 true)
   memoryInjectLimit: number;  // 每次对话注入记忆条数上限 (默认 30)
   greeting: string;           // 自定义开场白
+  /** v22.0: 各模式独立参数覆盖 (未设置的字段取全局值) */
+  modeConfigs: Record<string, ModeConfig>;
 }
 
 export interface MetaAgentMemory {
@@ -83,7 +93,29 @@ const DEFAULT_CONFIG: MetaAgentConfig = {
   autoMemory: true,
   memoryInjectLimit: 30,
   greeting: '',  // 空 = 使用内置默认
+  modeConfigs: {
+    work: { maxReactIterations: 50, maxResponseTokens: 128000 },
+    chat: { maxReactIterations: 5, maxResponseTokens: 32000, contextHistoryLimit: 30 },
+    deep: { maxReactIterations: 80, maxResponseTokens: 128000, contextHistoryLimit: 40 },
+    admin: { maxReactIterations: 30, maxResponseTokens: 64000, contextHistoryLimit: 20 },
+  },
 };
+
+/** 根据模式取合并后的参数 */
+function getModeParam(config: MetaAgentConfig, mode: string, key: keyof ModeConfig): number {
+  const modeOverride = config.modeConfigs?.[mode];
+  if (modeOverride && modeOverride[key] !== undefined && modeOverride[key] !== null) {
+    return modeOverride[key]!;
+  }
+  // 回退到全局值
+  switch (key) {
+    case 'maxReactIterations': return config.maxReactIterations;
+    case 'contextHistoryLimit': return config.contextHistoryLimit;
+    case 'maxResponseTokens': return config.maxResponseTokens;
+    case 'contextTokenLimit': return config.contextTokenLimit;
+    default: return config[key as keyof MetaAgentConfig] as number ?? 50;
+  }
+}
 
 // ═══════════════════════════════════════
 // Config Management
@@ -189,50 +221,114 @@ function getMemoryStats(): { total: number; byCategory: Record<string, number> }
 // Build System Prompt (dynamic, config-aware)
 // ═══════════════════════════════════════
 
-function buildSystemPrompt(config: MetaAgentConfig, memories: MetaAgentMemory[]): string {
+function buildSystemPrompt(config: MetaAgentConfig, memories: MetaAgentMemory[], mode: 'work' | 'chat' | 'deep' | 'admin' = 'work'): string {
   // If user has custom system prompt, use it as base
   if (config.systemPrompt.trim()) {
-    // Still inject memory context even with custom prompt
     const memoryBlock = formatMemoriesForContext(memories);
-    return config.systemPrompt + (memoryBlock ? `\n\n${memoryBlock}` : '');
+    return config.systemPrompt + (memoryBlock ? `\n\n${memoryBlock}` : '') + `\n\n[当前会话模式: ${mode}]`;
   }
 
-  // Build default system prompt with config values
   const userName = config.userNickname ? `称呼用户为"${config.userNickname}"` : '用正常方式称呼用户';
   const personality = config.personality || '专业、友好、高效';
+  const basePreamble = `你是"${config.name}"，一个AI软件开发平台的智能管家。性格: ${personality}。${userName}。`;
 
-  let prompt = `你是"${config.name}"，一个AI软件开发平台的智能管家。性格: ${personality}。${userName}。
+  let prompt = '';
 
-你的核心职责是**指挥和协调**，而不是亲自执行开发/分析任务。
+  if (mode === 'work') {
+    // ── 工作模式: 管家指挥调度, 快速派发 ──
+    prompt = `${basePreamble}
+
+**当前模式: 🔧 工作模式** — 你的核心职责是**指挥和协调**，把具体工作交给团队执行。
 
 ## 职责
-
-1. **需求派发**: 当用户表达产品需求、功能想法、审查请求、改进方案时，使用 \`create_wish\` 工具将任务派发给项目开发团队。团队有 PM、架构师、开发、QA 等角色，会自动执行完整流水线。
-2. **快速查询**: 当用户只是简单询问项目状态、某个文件内容、架构概况时，可以使用读取/搜索工具快速回答。
+1. **需求派发**: 当用户表达产品需求、功能想法、审查请求、改进方案时，使用 \`create_wish\` 工具将任务派发给项目开发团队。
+2. **快速查询**: 简单的项目状态、文件内容查询可以用读取工具回答。
 3. **对话交流**: 其他问题友好回答。
 
-## 工具能力
-
-### 任务派发 (最重要)
-- \`create_wish\`: **将需求/任务派发给开发团队**。任何涉及代码编写、深度审查、架构重构、功能开发的请求都应通过此工具派发。
-
-### 信息查询 (辅助)
+## 工具
+- \`create_wish\`: **将需求/任务派发给开发团队**（最重要）
 - read_file / list_files / search_files / glob_files: 快速查看项目文件
-- web_search / fetch_url: 搜索互联网信息
-- git_log: 查看 Git 提交历史
+- web_search / fetch_url: 搜索互联网
 - think: 组织思路
 
-## 重要规则
+## 规则
+1. **不要自己做深度代码分析/审查** — 使用 \`create_wish\` 派发给团队。
+2. **轻量查询可以自己做** — "某文件在哪"、"项目用了什么框架"等。
+3. **wish 内容要精炼** — 清晰任务描述，建议500字以内。
+4. **回复格式**: JSON: {"intent": "wish|query|workflow|general", "reply": "回复文本", "wishContent": "", "memoryNotes": "可选"}
+5. **回复简洁友好**，中文。`;
 
-1. **不要自己做深度代码分析/审查**: 当用户要求"分析项目"、"审查代码质量"、"提出改进方案"等任务时，你应该用 \`create_wish\` 把任务描述清楚后派发给团队，而不是自己花几十轮去读文件分析。
-2. **可以做轻量查询**: 如果用户只是问"某个文件在哪"、"项目用了什么框架"这类简单问题，你可以用工具快速查看后回答。
-3. **wish 内容要精炼**: create_wish 的内容应该是清晰的任务描述（建议500字以内），不要把你的全部分析过程塞进去。团队成员会自行深入分析。
-4. **回复格式**: 最终回复使用 JSON: {"intent": "wish|query|workflow|general", "reply": "回复文本", "wishContent": "", "memoryNotes": "可选"}
-   - intent=wish: 已通过 create_wish 工具派发了任务
-   - intent=query: 信息查询
-   - intent=workflow: 工作流调整
-   - intent=general: 闲聊
-5. **回复要简洁友好**，中文。`;
+  } else if (mode === 'chat') {
+    // ── 闲聊模式: 纯对话, 极少工具 ──
+    prompt = `${basePreamble}
+
+**当前模式: 💬 闲聊模式** — 轻松、自由的对话。不涉及项目工作。
+
+## 行为准则
+1. 自由交流任何话题 — 技术讨论、头脑风暴、闲聊、问答。
+2. 不主动读取项目文件或触发开发流程。
+3. 如果用户提出了明确的开发/修改需求，提醒他切换到「工作模式」来派发任务。
+4. 可以搜索网络获取信息。
+5. 回复要自然友好，不需要 JSON 格式 — 直接回复纯文本。
+6. 可以深入讨论技术方案、架构理念、最佳实践等，但仅作为讨论，不执行。`;
+
+  } else if (mode === 'deep') {
+    // ── 深度讨论模式: 管家亲自深入分析项目 + 可输出文件/派发任务 ──
+    prompt = `${basePreamble}
+
+**当前模式: 🔬 深度讨论模式** — 你将亲自深入分析项目代码和架构，与用户进行深度技术讨论。
+
+## 行为准则
+1. **亲自使用工具深入分析** — 在此模式下你应当大量使用 read_file / search_files / code_search 等工具，深入阅读代码。
+2. **输出详尽的分析报告** — 你的回复应该有深度、有洞察力，包含具体的代码引用和详细建议。
+3. **可以直接输出文件** — 使用 write_file / edit_file 将分析结果、方案文档、代码片段直接写入项目。
+4. **可以派发任务** — 如果讨论中产生了明确的开发需求，可以使用 create_wish 将任务派发给团队执行，不需要切换模式。
+5. 回复不需要 JSON 格式 — 直接输出分析内容。使用 Markdown 格式化。
+6. 你拥有完整的项目读取能力（read_file, list_files, search_files, glob_files, code_search, git_log 等），请充分利用。
+
+## 可用工具
+- 读取工具: read_file, list_files, search_files, glob_files, code_search, code_search_files, read_many_files, repo_map, code_graph_query, git_log
+- 写入工具: write_file, edit_file, batch_edit (输出分析文档/方案/代码)
+- 任务派发: create_wish (将讨论结论转为开发任务)
+- 搜索: web_search, fetch_url, web_search_boost, deep_research
+- 思考: think`;
+
+  } else if (mode === 'admin') {
+    // ── 管理模式: 修改项目配置/成员/工作流 ──
+    prompt = `${basePreamble}
+
+**当前模式: 🛠️ 管理模式** — 你将帮助用户管理和调整项目的团队构成、工作流配置和项目设置。
+
+## ⚠️ 安全准则 (最重要)
+1. **先查后改** — 任何修改操作前，必须先用 admin_list_members / admin_list_workflows 查看当前配置。
+2. **确认意图** — 在执行删除/大幅修改操作前，向用户确认变更内容（用 diff 格式展示"当前→修改后"）。
+3. **最小变更** — 只修改用户明确要求的部分，不擅自改动其他配置。
+4. **解释影响** — 每次修改后，简述此变更对项目开发流程的影响。
+
+## 可用工具
+### 团队管理
+- \`admin_list_members\` — 查看所有成员（必须先调用了解当前团队）
+- \`admin_add_member\` — 添加新成员
+- \`admin_update_member\` — 修改成员配置（角色/名字/模型/提示词/上下文限制等）
+- \`admin_remove_member\` — 删除成员（⚠️ 不可撤销）
+
+### 工作流管理
+- \`admin_list_workflows\` — 查看所有工作流预设
+- \`admin_activate_workflow\` — 切换活跃工作流
+- \`admin_update_workflow\` — 修改工作流阶段（增删/重排/改名）
+- \`admin_get_available_stages\` — 查看所有可用阶段
+
+### 项目配置
+- \`admin_update_project\` — 修改项目名称/需求/权限
+
+### 辅助
+- read_file, list_files, search_files 等只读工具用于查看项目文件
+- think — 思考和规划
+- web_search — 搜索最佳实践
+
+## 回复格式
+不需要 JSON — 直接用 Markdown 输出：列出变更摘要、操作结果和影响说明。`;
+  }
 
   // Inject memory context
   const memoryBlock = formatMemoriesForContext(memories);
@@ -335,6 +431,224 @@ function autoExtractMemory(memoryNotes: string): void {
 }
 
 // ═══════════════════════════════════════
+// v22.0: Admin Tool Executor
+// ═══════════════════════════════════════
+
+interface AdminToolResult { success: boolean; output: string; }
+
+function executeAdminTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  projectId: string,
+  _win: BrowserWindow | null,
+): AdminToolResult {
+  const db = getDb();
+
+  try {
+    switch (toolName) {
+
+      case 'admin_list_members': {
+        const rows = db.prepare('SELECT * FROM team_members WHERE project_id = ? ORDER BY created_at ASC').all(projectId) as Array<Record<string, unknown>>;
+        if (rows.length === 0) return { success: true, output: '当前项目没有团队成员。可以使用 admin_add_member 添加。' };
+        const lines = rows.map((r, i) => {
+          const caps = (() => { try { return JSON.parse(r.capabilities as string || '[]'); } catch { return []; } })();
+          return [
+            `### ${i + 1}. ${r.name} (${r.role})`,
+            `- **ID**: \`${r.id}\``,
+            `- **模型**: ${r.model || '(项目默认)'}`,
+            `- **能力**: ${caps.length > 0 ? caps.join(', ') : '(未设置)'}`,
+            `- **上下文限制**: ${r.max_context_tokens || 256000} tokens`,
+            r.max_iterations ? `- **最大迭代**: ${r.max_iterations} 轮` : '',
+            `- **提示词**: ${r.system_prompt ? `${(r.system_prompt as string).slice(0, 80)}...` : '(角色默认)'}`,
+          ].filter(Boolean).join('\n');
+        });
+        return { success: true, output: `## 团队成员 (${rows.length} 人)\n\n${lines.join('\n\n')}` };
+      }
+
+      case 'admin_add_member': {
+        const role = args.role as string;
+        const name = args.name as string;
+        if (!role || !name) return { success: false, output: '错误: role 和 name 为必填。' };
+        const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+        db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          id, projectId, role, name,
+          (args.model as string) || null,
+          JSON.stringify(args.capabilities || []),
+          (args.system_prompt as string) || null,
+          JSON.stringify([]),
+          (args.max_context_tokens as number) || 256000,
+        );
+        if (args.max_iterations) {
+          db.prepare('UPDATE team_members SET max_iterations = ? WHERE id = ?').run(args.max_iterations as number, id);
+        }
+        return { success: true, output: `✅ 已添加成员: **${name}** (${role})，ID: \`${id}\`` };
+      }
+
+      case 'admin_update_member': {
+        const memberId = args.member_id as string;
+        if (!memberId) return { success: false, output: '错误: member_id 为必填。' };
+        // 先查当前值
+        const current = db.prepare('SELECT * FROM team_members WHERE id = ?').get(memberId) as Record<string, unknown> | undefined;
+        if (!current) return { success: false, output: `错误: 成员 ${memberId} 不存在。` };
+
+        const sets: string[] = [];
+        const vals: Array<string | number | null> = [];
+        const changes: string[] = [];
+
+        if (args.name !== undefined) { sets.push('name = ?'); vals.push(args.name as string); changes.push(`名字: ${current.name} → ${args.name}`); }
+        if (args.role !== undefined) { sets.push('role = ?'); vals.push(args.role as string); changes.push(`角色: ${current.role} → ${args.role}`); }
+        if (args.model !== undefined) { sets.push('model = ?'); vals.push(args.model as string); changes.push(`模型: ${current.model || '默认'} → ${args.model || '默认'}`); }
+        if (args.system_prompt !== undefined) { sets.push('system_prompt = ?'); vals.push(args.system_prompt as string); changes.push('提示词: 已更新'); }
+        if (args.capabilities !== undefined) { sets.push('capabilities = ?'); vals.push(JSON.stringify(args.capabilities)); changes.push('能力标签: 已更新'); }
+        if (args.max_context_tokens !== undefined) { sets.push('max_context_tokens = ?'); vals.push(args.max_context_tokens as number); changes.push(`上下文限制: ${current.max_context_tokens} → ${args.max_context_tokens}`); }
+        if (args.max_iterations !== undefined) { sets.push('max_iterations = ?'); vals.push(args.max_iterations as number); changes.push(`最大迭代: → ${args.max_iterations}`); }
+
+        if (sets.length === 0) return { success: true, output: '未提供任何修改字段。' };
+        vals.push(memberId);
+        db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+        return { success: true, output: `✅ 已更新成员 **${current.name}** (\`${memberId}\`):\n${changes.map(c => `- ${c}`).join('\n')}` };
+      }
+
+      case 'admin_remove_member': {
+        const memberId = args.member_id as string;
+        if (!memberId) return { success: false, output: '错误: member_id 为必填。' };
+        const target = db.prepare('SELECT name, role FROM team_members WHERE id = ?').get(memberId) as { name: string; role: string } | undefined;
+        if (!target) return { success: false, output: `错误: 成员 ${memberId} 不存在。` };
+        db.prepare('DELETE FROM team_members WHERE id = ?').run(memberId);
+        return { success: true, output: `✅ 已移除成员: **${target.name}** (${target.role})，ID: \`${memberId}\`。⚠️ 此操作不可撤销。` };
+      }
+
+      case 'admin_list_workflows': {
+        // 确保内置预设存在
+        const existing = db.prepare('SELECT id FROM workflow_presets WHERE project_id = ? AND is_builtin = 1').all(projectId) as Array<{ id: string }>;
+        if (existing.length === 0) {
+          // 触发 ensureBuiltinPresets — 简单 INSERT
+          const builtinPresets = [
+            { id: 'builtin-full-dev', name: '完整开发', icon: '🚀' },
+            { id: 'builtin-fast-iterate', name: '快速迭代', icon: '⚡' },
+            { id: 'builtin-quality-hardening', name: '质量加固', icon: '🔬' },
+          ];
+          for (const bp of builtinPresets) {
+            const pid = `${bp.id}-${projectId}`;
+            db.prepare('INSERT OR IGNORE INTO workflow_presets (id, project_id, name, description, icon, stages, is_active, is_builtin) VALUES (?, ?, ?, ?, ?, ?, 0, 1)')
+              .run(pid, projectId, bp.name, '', bp.icon, '[]');
+          }
+        }
+        const rows = db.prepare('SELECT * FROM workflow_presets WHERE project_id = ? ORDER BY is_builtin DESC, created_at ASC')
+          .all(projectId) as WorkflowPresetRow[];
+        if (rows.length === 0) return { success: true, output: '当前项目没有工作流预设。' };
+
+        const lines = rows.map(r => {
+          let stages: WorkflowStage[] = [];
+          try { stages = JSON.parse(r.stages); } catch { stages = []; }
+          const active = r.is_active === 1 ? ' ⭐ **当前激活**' : '';
+          const builtin = r.is_builtin === 1 ? ' (内置)' : ' (自定义)';
+          const stageList = stages.length > 0
+            ? stages.map(s => `  ${s.icon || '·'} ${s.label}${s.skippable ? ' (可跳过)' : ''}`).join('\n')
+            : '  (无阶段)';
+          return `### ${r.icon || '📋'} ${r.name}${builtin}${active}\n- **ID**: \`${r.id}\`\n- **描述**: ${r.description || '(无)'}\n- **阶段** (${stages.length}):\n${stageList}`;
+        });
+        return { success: true, output: `## 工作流预设 (${rows.length} 个)\n\n${lines.join('\n\n')}` };
+      }
+
+      case 'admin_activate_workflow': {
+        const presetId = args.preset_id as string;
+        if (!presetId) return { success: false, output: '错误: preset_id 为必填。' };
+        const target = db.prepare('SELECT name FROM workflow_presets WHERE id = ? AND project_id = ?').get(presetId, projectId) as { name: string } | undefined;
+        if (!target) return { success: false, output: `错误: 工作流 ${presetId} 不存在于当前项目。` };
+        db.prepare("UPDATE workflow_presets SET is_active = 0, updated_at = datetime('now') WHERE project_id = ?").run(projectId);
+        db.prepare("UPDATE workflow_presets SET is_active = 1, updated_at = datetime('now') WHERE id = ? AND project_id = ?").run(presetId, projectId);
+        return { success: true, output: `✅ 已激活工作流: **${target.name}** (\`${presetId}\`)` };
+      }
+
+      case 'admin_update_workflow': {
+        const presetId = args.preset_id as string;
+        if (!presetId) return { success: false, output: '错误: preset_id 为必填。' };
+        const current = db.prepare('SELECT * FROM workflow_presets WHERE id = ?').get(presetId) as WorkflowPresetRow | undefined;
+        if (!current) return { success: false, output: `错误: 工作流 ${presetId} 不存在。` };
+
+        const sets: string[] = [];
+        const vals: Array<string | number | null> = [];
+        const changes: string[] = [];
+
+        if (args.name !== undefined) { sets.push('name = ?'); vals.push(args.name as string); changes.push(`名称: ${current.name} → ${args.name}`); }
+        if (args.description !== undefined) { sets.push('description = ?'); vals.push(args.description as string); changes.push('描述: 已更新'); }
+        if (args.icon !== undefined) { sets.push('icon = ?'); vals.push(args.icon as string); changes.push(`图标: ${current.icon} → ${args.icon}`); }
+        if (args.stages !== undefined) {
+          const newStages = args.stages as WorkflowStage[];
+          sets.push('stages = ?'); vals.push(JSON.stringify(newStages));
+          let oldStages: WorkflowStage[] = [];
+          try { oldStages = JSON.parse(current.stages); } catch { /* empty */ }
+          changes.push(`阶段: ${oldStages.length} → ${newStages.length} 个`);
+        }
+        sets.push("updated_at = datetime('now')");
+        vals.push(presetId);
+
+        if (changes.length === 0) return { success: true, output: '未提供任何修改字段。' };
+        db.prepare(`UPDATE workflow_presets SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+        return { success: true, output: `✅ 已更新工作流 **${current.name}** (\`${presetId}\`):\n${changes.map(c => `- ${c}`).join('\n')}` };
+      }
+
+      case 'admin_update_project': {
+        const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Record<string, unknown> | undefined;
+        if (!project) return { success: false, output: '错误: 项目不存在。' };
+
+        const changes: string[] = [];
+        if (args.name !== undefined) {
+          db.prepare("UPDATE projects SET name = ?, updated_at = datetime('now') WHERE id = ?").run(args.name as string, projectId);
+          changes.push(`名称: ${project.name} → ${args.name}`);
+        }
+        if (args.wish !== undefined) {
+          db.prepare("UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?").run(args.wish as string, projectId);
+          changes.push('需求描述: 已更新');
+        }
+        if (args.permissions) {
+          const perms = args.permissions as Record<string, boolean>;
+          const sets: string[] = [];
+          const vals: Array<number | string> = [];
+          if (perms.externalRead !== undefined) { sets.push('allow_external_read = ?'); vals.push(perms.externalRead ? 1 : 0); changes.push(`外部读取: ${perms.externalRead ? '允许' : '禁止'}`); }
+          if (perms.externalWrite !== undefined) { sets.push('allow_external_write = ?'); vals.push(perms.externalWrite ? 1 : 0); changes.push(`外部写入: ${perms.externalWrite ? '允许' : '禁止'}`); }
+          if (perms.shellExec !== undefined) { sets.push('allow_shell_exec = ?'); vals.push(perms.shellExec ? 1 : 0); changes.push(`Shell 执行: ${perms.shellExec ? '允许' : '禁止'}`); }
+          if (sets.length > 0) {
+            vals.push(projectId);
+            db.prepare(`UPDATE projects SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals);
+          }
+        }
+        if (changes.length === 0) return { success: true, output: '未提供任何修改字段。' };
+        return { success: true, output: `✅ 项目配置已更新:\n${changes.map(c => `- ${c}`).join('\n')}` };
+      }
+
+      case 'admin_get_available_stages': {
+        const stages = [
+          { id: 'pm_analysis', label: 'PM 需求分析', icon: '🧠' },
+          { id: 'pm_triage', label: 'PM 分诊', icon: '🔀' },
+          { id: 'architect', label: '架构 + 设计', icon: '🏗️' },
+          { id: 'docs_gen', label: '文档生成', icon: '📋' },
+          { id: 'dev_implement', label: '开发实现', icon: '💻' },
+          { id: 'qa_review', label: 'QA 审查', icon: '🧪' },
+          { id: 'pm_acceptance', label: 'PM 验收', icon: '📝', skippable: true },
+          { id: 'devops_build', label: 'DevOps 构建', icon: '🚀', skippable: true },
+          { id: 'incremental_doc_sync', label: '增量文档同步', icon: '📄', skippable: true },
+          { id: 'static_analysis', label: '静态分析', icon: '🔍' },
+          { id: 'security_audit', label: '安全审计', icon: '🔒' },
+          { id: 'perf_benchmark', label: '性能基准', icon: '⚡' },
+          { id: 'finalize', label: '交付 / 报告', icon: '🎯' },
+        ];
+        const lines = stages.map(s => `- \`${s.id}\` — ${s.icon} ${s.label}${s.skippable ? ' (可跳过)' : ''}`);
+        return { success: true, output: `## 可用工作流阶段\n\n${lines.join('\n')}` };
+      }
+
+      default:
+        return { success: false, output: `未知的管理工具: ${toolName}` };
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: `管理工具执行错误: ${errMsg}` };
+  }
+}
+
+// ═══════════════════════════════════════
 // IPC Handler Registration
 // ═══════════════════════════════════════
 
@@ -412,6 +726,7 @@ export function setupMetaAgentHandlers() {
     message: string,
     history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
     attachments?: ChatAttachment[],
+    chatMode?: string,
   ) => {
     assertNonEmptyString('meta-agent:chat', 'message', message);
     const settings = getSettings();
@@ -422,10 +737,11 @@ export function setupMetaAgentHandlers() {
     const config = getMetaAgentConfig();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     const agentId = 'meta-agent';
+    const mode = (chatMode as 'work' | 'chat' | 'deep' | 'admin') || 'work';
 
     const memories = getMemories(undefined, config.memoryInjectLimit);
 
-    const systemPrompt = buildSystemPrompt(config, memories);
+    const systemPrompt = buildSystemPrompt(config, memories, mode);
     const messages: Array<{ role: string; content: string | Array<Record<string, unknown>>; tool_calls?: LLMToolCall[]; tool_call_id?: string }> = [
       { role: 'system', content: systemPrompt },
     ];
@@ -436,7 +752,8 @@ export function setupMetaAgentHandlers() {
     }
 
     if (history?.length) {
-      const recent = history.slice(-(config.contextHistoryLimit || 20));
+      const modeHistoryLimit = getModeParam(config, mode, 'contextHistoryLimit');
+      const recent = history.slice(-modeHistoryLimit);
       for (const h of recent) {
         messages.push({ role: h.role, content: h.content });
       }
@@ -472,14 +789,48 @@ export function setupMetaAgentHandlers() {
       messages.push({ role: 'user', content: message });
     }
 
-    // ── v6.1: ReAct Tool Loop ──
-    const MAX_REACT_ITERATIONS = config.maxReactIterations || 50;
+    // ── v6.1: ReAct Tool Loop (v22.0: mode-specific config) ──
+    const MAX_REACT_ITERATIONS = getModeParam(config, mode, 'maxReactIterations');
+    const modeMaxResponseTokens = getModeParam(config, mode, 'maxResponseTokens');
     const model = settings.strongModel || settings.workerModel || settings.fastModel || 'gpt-4o';
 
-    // 获取 meta-agent 角色的工具集
+    // 获取 meta-agent 角色的工具集 — 按模式裁剪
     const project = projectId ? (getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined) : null;
     const workspacePath = project?.workspace_path || '';
-    const tools = getToolsForRole('meta-agent', 'local');
+    let tools = getToolsForRole('meta-agent', 'local');
+
+    if (mode === 'chat') {
+      // 闲聊模式: 仅 think + web_search + fetch_url (无项目工具, 无 create_wish)
+      const chatAllowed = new Set(['think', 'task_complete', 'web_search', 'fetch_url', 'memory_read', 'memory_append']);
+      tools = tools.filter(t => chatAllowed.has((t.function as Record<string, unknown>).name as string));
+    } else if (mode === 'deep') {
+      // 深度讨论模式: 全部只读工具 + 写入工具 + create_wish (管家亲自深入分析 + 可输出/派发)
+      //   移除 admin_* 工具
+      tools = tools.filter(t => {
+        const name = (t.function as Record<string, unknown>).name as string;
+        return !name.startsWith('admin_');
+      });
+    } else if (mode === 'admin') {
+      // 管理模式: admin_* 工具 + 只读工具 + think (无 create_wish, 无写入工具)
+      const adminAllowed = new Set([
+        'think', 'task_complete',
+        'read_file', 'list_files', 'search_files', 'glob_files',
+        'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',
+        'web_search', 'fetch_url', 'memory_read', 'memory_append', 'git_log',
+        'admin_list_members', 'admin_add_member', 'admin_update_member', 'admin_remove_member',
+        'admin_list_workflows', 'admin_activate_workflow', 'admin_update_workflow',
+        'admin_update_project', 'admin_get_available_stages',
+      ]);
+      tools = tools.filter(t => adminAllowed.has((t.function as Record<string, unknown>).name as string));
+    }
+    // work 模式: 全部工具 (含 create_wish, 不含 admin_*, 不含 write/edit)
+    if (mode === 'work') {
+      tools = tools.filter(t => {
+        const name = (t.function as Record<string, unknown>).name as string;
+        return !name.startsWith('admin_') && name !== 'write_file' && name !== 'edit_file' && name !== 'batch_edit';
+      });
+    }
+
     const toolCtx: ToolContext = {
       workspacePath,
       projectId: projectId || '',
@@ -504,7 +855,7 @@ export function setupMetaAgentHandlers() {
       for (let iter = 1; iter <= MAX_REACT_ITERATIONS; iter++) {
 const result = await callLLMWithTools(
             settings, model, messages, tools, undefined,
-          config.maxResponseTokens || 128000,
+          modeMaxResponseTokens,
         );
         const cost = calcCost(model, result.inputTokens, result.outputTokens);
         totalIn += result.inputTokens;
@@ -607,6 +958,21 @@ const result = await callLLMWithTools(
             continue;
           }
 
+          // ── v22.0: Admin tools (管理模式专用) ──
+          if (tc.function.name.startsWith('admin_')) {
+            if (!projectId) {
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: '错误: 当前没有选中项目，无法执行管理操作。' });
+              continue;
+            }
+            const adminResult = executeAdminTool(tc.function.name, toolArgs, projectId, win);
+            sendToUI(win, 'agent:log', {
+              projectId, agentId,
+              content: `🛠️ ${tc.function.name} → ${adminResult.success ? '✅' : '❌'} ${adminResult.output.slice(0, 120)}`,
+            });
+            messages.push({ role: 'tool', tool_call_id: tc.id, content: adminResult.output.slice(0, 6000) });
+            continue;
+          }
+
           // Guard check
           const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
           if (!guard.allowed) {
@@ -675,19 +1041,28 @@ const result = await callLLMWithTools(
     let wishContent = '';
     let memoryNotes = '';
 
-    try {
-      const jsonMatch = finalReply.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        intent = parsed.intent || 'general';
-        reply = parsed.reply || finalReply;
-        wishContent = parsed.wishContent || '';
-        memoryNotes = parsed.memoryNotes || '';
+    if (mode === 'work') {
+      // 工作模式: 期望 JSON 格式回复
+      try {
+        const jsonMatch = finalReply.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          intent = parsed.intent || 'general';
+          reply = parsed.reply || finalReply;
+          wishContent = parsed.wishContent || '';
+          memoryNotes = parsed.memoryNotes || '';
+        }
+      } catch {
+        reply = finalReply.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || finalReply;
       }
-    } catch { /* silent: 意图/记忆解析失败,使用原始回复 */
-      // 非JSON输出 → 当作纯文本回复
-      reply = finalReply.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || finalReply;
+    } else {
+      // 闲聊/深度讨论/管理模式: 纯文本回复
+      reply = finalReply;
+      intent = mode === 'deep' ? 'query' : mode === 'admin' ? 'admin' : 'general';
     }
+
+    // 如果通过 create_wish 工具已创建需求, 更新 intent
+    if (wishCreatedViaTool) intent = 'wish';
 
     // Auto-memory: extract and store notable info from conversation
     if (config.autoMemory && memoryNotes) {
@@ -892,6 +1267,7 @@ const result = await callLLMWithTools(
         totalTokens: r.total_tokens as number,
         totalCost: r.total_cost as number,
         title: firstMsg ? (firstMsg.length > 40 ? firstMsg.slice(0, 40) + '…' : firstMsg) : null,
+        chatMode: (r.chat_mode as string) || 'work',
       };
     });
   });

@@ -20,6 +20,7 @@ import { SessionManager } from './components/SessionManager';
 import { GuidePage } from './pages/GuidePage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, ConfirmDialog } from './components/Toast';
+import { ProjectBar } from './components/ProjectBar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { toast } from './stores/toast-store';
 
@@ -241,9 +242,16 @@ export function App() {
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100">
       <div className="flex flex-1 min-h-0">
         <Sidebar />
-        <main className="flex-1 overflow-hidden">
-          {renderContent()}
-        </main>
+        {/* 右侧区域: 顶部项目栏 + 页面内容 */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* 项目切换栏 — 始终可见 */}
+          <div className="h-10 shrink-0 flex items-center bg-slate-900/80 border-b border-slate-800/60">
+            <ProjectBar />
+          </div>
+          <main className="flex-1 overflow-hidden">
+            {renderContent()}
+          </main>
+        </div>
         {insideProject && <MetaAgentPanel />}
       </div>
       {insideProject && <StatusBar stats={stats} />}

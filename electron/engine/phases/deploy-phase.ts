@@ -348,7 +348,7 @@ export async function phaseDeployPipeline(
   sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: summary });
   addLog(projectId, devopsId, 'log', summary);
 
-  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
   sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
   emitEvent({
     projectId, agentId: devopsId, type: 'phase:deploy:end',
@@ -413,7 +413,7 @@ async function quickBuildVerify(
       projectId, agentId: devopsId,
       content: '  ↳ 未检测到已知构建系统，跳过构建验证',
     });
-    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
     sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
     return;
   }
@@ -482,7 +482,7 @@ async function quickBuildVerify(
   sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: summary });
   addLog(projectId, devopsId, 'log', summary);
 
-  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(devopsId);
+  db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
   sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
   emitEvent({
     projectId, agentId: devopsId, type: 'phase:deploy:end',

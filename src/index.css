@@ -34,6 +34,15 @@ body {
   background: #64748b;
 }
 
+/* 隐藏滚动条 (用于项目栏横向滚动) */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* ═══════════════════════════════════════
    全局动效系统
    ═══════════════════════════════════════ */

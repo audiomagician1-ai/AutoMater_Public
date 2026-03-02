@@ -23,7 +23,7 @@ import { ActivityCharts } from '../components/ActivityCharts';
 import {
   InteractiveGraph, ProgressRing, StatCard,
   DocCompletionBar,
-  AgentActivityPanel, ImportAnalysisPanel,
+  AgentActivityPanel, ImportAnalysisPanel, ArchitectureDocPanel,
   STATUS_COLOR, CATEGORY_BADGE, PROJECT_STATUS,
   type Feature,
 } from './overview';
@@ -200,22 +200,33 @@ export function OverviewPage() {
           </section>
         )}
 
-        {/* Skeleton: 架构图占位 (无 features 时始终显示) */}
-        {enriched.length === 0 && (
+        {/* ═══════ 导入项目架构展示 (features=0 时展示分析产物) ═══════ */}
+        {enriched.length === 0 && !isAnalyzing && (
+          <>
+            {/* 模块架构图 + 探针报告 + 已知问题 */}
+            <ImportAnalysisPanel projectId={currentProjectId} />
+
+            {/* ARCHITECTURE.md 文档 */}
+            <ArchitectureDocPanel projectId={currentProjectId} />
+          </>
+        )}
+
+        {/* Skeleton: 分析进行中占位 */}
+        {enriched.length === 0 && isAnalyzing && (
           <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
-              <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
+              <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
               <span className="text-xs text-slate-600 uppercase tracking-wider">🗺️ 系统架构图</span>
-              {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待 Agent 生成…</span>}
+              <span className="text-[10px] text-cyan-500/60 ml-1">Agent 正在分析项目结构…</span>
             </div>
             <div className="h-36 flex items-center justify-center">
               <div className="text-center text-slate-700 space-y-2">
                 <div className="flex items-center justify-center gap-4">
                   {['模块A', '模块B', '模块C'].map(m => (
-                    <div key={m} className={`w-24 h-12 rounded-lg border bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700 ${isActive ? 'border-cyan-800/30 animate-pulse' : 'border-slate-800/50'}`}>{m}</div>
+                    <div key={m} className="w-24 h-12 rounded-lg border bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700 border-cyan-800/30 animate-pulse">{m}</div>
                   ))}
                 </div>
-                <div className="text-[10px]">{isActive ? 'Agent 正在分析项目结构…' : 'PM 分析后自动生成'}</div>
+                <div className="text-[10px]">Agent 正在分析项目结构…</div>
               </div>
             </div>
           </section>
@@ -390,8 +401,8 @@ export function OverviewPage() {
           </section>
         )}
 
-        {/* Skeleton: 进度 + 状态占位 (无 features 时始终显示) */}
-        {enriched.length === 0 && (
+        {/* Skeleton: 进度 + 状态占位 (仅分析中时显示) */}
+        {enriched.length === 0 && isAnalyzing && (
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -544,8 +555,8 @@ export function OverviewPage() {
         {/* ═══════ Agent 实时活动面板 (v6.1) ═══════ */}
         <AgentActivityPanel />
 
-        {/* ═══════ v7.0: 导入分析报告 ═══════ */}
-        <ImportAnalysisPanel projectId={currentProjectId} />
+        {/* ═══════ v7.0: 导入分析报告 (features 存在时作为补充信息) ═══════ */}
+        {enriched.length > 0 && <ImportAnalysisPanel projectId={currentProjectId} />}
 
         {/* Feature roadmap */}
         {enriched.length > 0 && (

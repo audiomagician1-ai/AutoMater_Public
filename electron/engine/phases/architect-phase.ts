@@ -64,7 +64,7 @@ export async function phaseArchitect(
     updateAgentStats(archId, projectId, archResult.inputTokens, archResult.outputTokens, archCost);
     backupConversation({ projectId, agentId: archId, agentRole: 'architect', messages: [{ role: 'system', content: archPrompt }, { role: 'user', content: `架构+产品设计 (${features.length} features)` }, { role: 'assistant', content: archResult.content.slice(0, 50000) }], totalInputTokens: archResult.inputTokens, totalOutputTokens: archResult.outputTokens, totalCost: archCost, model: settings.strongModel, completed: true });
 
-    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(archId);
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(archId, projectId);
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
     emitEvent({ projectId, agentId: archId, type: 'phase:architect:end', data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost }, inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost });
     createCheckpoint(projectId, '架构 + 产品设计完成');
@@ -72,6 +72,6 @@ export async function phaseArchitect(
     if (signal.aborted) return;
     const errMsg = err instanceof Error ? err.message : String(err);
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `⚠️ 架构设计失败 (非致命): ${errMsg}` });
-    db.prepare("UPDATE agents SET status = 'error' WHERE id = ?").run(archId);
+    db.prepare("UPDATE agents SET status = 'error' WHERE id = ? AND project_id = ?").run(archId, projectId);
   }
 }

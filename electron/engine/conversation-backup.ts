@@ -79,6 +79,8 @@ export interface ConversationBackup {
   metadata?: Record<string, unknown>;
 }
 
+export type ChatMode = 'work' | 'chat' | 'deep';
+
 export interface SessionInfo {
   id: string;
   projectId: string | null;
@@ -93,6 +95,8 @@ export interface SessionInfo {
   messageCount: number;
   totalTokens: number;
   totalCost: number;
+  /** v21.0: 管家会话模式 */
+  chatMode: ChatMode;
 }
 
 // ═══════════════════════════════════════
@@ -232,6 +236,7 @@ export function createSession(
   projectId: string | null,
   agentId: string,
   agentRole: string,
+  chatMode: ChatMode = 'work',
 ): SessionInfo {
   const db = getDb();
   const id = `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -239,16 +244,17 @@ export function createSession(
   const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO sessions (id, project_id, agent_id, agent_role, agent_seq, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?)
-  `).run(id, projectId, agentId, agentRole, seq, now);
+    INSERT INTO sessions (id, project_id, agent_id, agent_role, agent_seq, status, chat_mode, created_at)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+  `).run(id, projectId, agentId, agentRole, seq, chatMode, now);
 
-  log.info('Session created', { id, projectId, agentId, agentRole, seq });
+  log.info('Session created', { id, projectId, agentId, agentRole, seq, chatMode });
 
   return {
     id, projectId, agentId, agentRole, agentSeq: seq,
     status: 'active', backupPath: null, createdAt: now,
     completedAt: null, messageCount: 0, totalTokens: 0, totalCost: 0,
+    chatMode,
   };
 }
 
@@ -337,6 +343,7 @@ function mapSessionRow(row: SessionRow): SessionInfo {
     messageCount: row.message_count,
     totalTokens: row.total_tokens,
     totalCost: row.total_cost,
+    chatMode: (row.chat_mode as ChatMode) || 'work',
   };
 }
 

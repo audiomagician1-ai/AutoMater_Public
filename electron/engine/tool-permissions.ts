@@ -164,6 +164,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'download_file', 'search_images',  // v19.0
   ],
   // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询 + 需求派发
+  //   模式裁剪在 meta-agent.ts 中按 mode 动态过滤
   'meta-agent': [
     'think', 'task_complete',
     'read_file', 'list_files', 'search_files', 'glob_files',
@@ -174,6 +175,12 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'memory_read', 'memory_append',
     'git_log',
     'create_wish',  // v21.0: 派发任务给团队
+    // v22.0: 深度讨论模式 — 可输出文件 + 派发任务
+    'write_file', 'edit_file', 'batch_edit',
+    // v22.0: 管理模式 — 项目配置/成员/工作流管理
+    'admin_list_members', 'admin_add_member', 'admin_update_member', 'admin_remove_member',
+    'admin_list_workflows', 'admin_activate_workflow', 'admin_update_workflow',
+    'admin_update_project', 'admin_get_available_stages',
   ],
 };
 

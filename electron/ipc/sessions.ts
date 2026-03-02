@@ -26,10 +26,10 @@ export function setupSessionHandlers() {
   // ── Session CRUD ──
 
   /** 创建新 Session */
-  ipcMain.handle('session:create', (_event, projectId: string | null, agentId: string, agentRole: string) => {
+  ipcMain.handle('session:create', (_event, projectId: string | null, agentId: string, agentRole: string, chatMode?: string) => {
     assertNonEmptyString('session:create', 'agentId', agentId);
     assertNonEmptyString('session:create', 'agentRole', agentRole);
-    return createSession(projectId, agentId, agentRole);
+    return createSession(projectId, agentId, agentRole, (chatMode as 'work' | 'chat' | 'deep') || 'work');
   });
 
   /** 切换到指定 Session */
