@@ -26,6 +26,7 @@ import {
   createBranch, switchBranch, gitPush, createPR, addIssueComment, closeIssue, getCurrentBranch,
 } from '../git-provider';
 import { harvestPostFeature } from '../experience-harvester';
+import { addInstance, compactProjectMemory } from '../experience-library';
 
 const log = createLogger('phase:worker');
 
@@ -233,6 +234,19 @@ export async function workerLoop(
             if (qaAttempt > 1 && qaFeedback && workspacePath) {
               await extractLessons(projectId, localQaId, feature, qaFeedback, reactResult.filesWritten, qaResult.score, qaAttempt, settings, signal, workspacePath);
             }
+            // v22.0: 录入经验实例到分层经验库
+            if (workspacePath) {
+              try {
+                if (qaAttempt > 1) {
+                  addInstance(workspacePath, 'qa_fail',
+                    `${feature.id} 经过 ${qaAttempt} 轮 QA 后通过 (${qaResult.score}分): 初始问题 "${(qaFeedback || '').slice(0, 100)}"`,
+                    undefined);
+                }
+                addInstance(workspacePath, 'feature_done',
+                  `${feature.id} 完成: ${(feature.title || '').slice(0, 80)} — ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代`,
+                  undefined);
+              } catch { /* non-critical */ }
+            }
             broadcastFilesCreated(workerId, feature.id, reactResult.filesWritten);
             break;
           } else {
@@ -248,6 +262,10 @@ export async function workerLoop(
                 const { extractExperience } = await import('../scratchpad');
                 extractExperience(workspacePath, workerId, 'qa_reject',
                   `${feature.id} QA 未通过 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`);
+                // v22.0: 同时录入分层经验库
+                addInstance(workspacePath, 'qa_fail',
+                  `${feature.id} QA 驳回 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`,
+                  undefined);
               } catch { /* silent */ }
             }
           }
@@ -303,6 +321,9 @@ export async function workerLoop(
         workspacePath, projectName: projRow?.name || projectId,
         settings, signal,
       }).catch(() => {}); // non-blocking
+
+      // v22.0: project-memory.md 容量自治 — 每完成一个 feature 检查并压缩
+      try { compactProjectMemory(workspacePath, 8000); } catch { /* silent */ }
     }
 
     // v14.0: Post-completion GitHub automation (push → PR → Issue comment/close)

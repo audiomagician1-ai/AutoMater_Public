@@ -26,6 +26,7 @@ import {
 import { gateArchitectToDeveloper } from './guards';
 import { commitWorkspace } from './workspace-git';
 import { ensureGlobalMemory, ensureProjectMemory } from './memory-system';
+import { injectGlobalExperience } from './experience-library';
 import { emitEvent } from './event-store';
 import { cleanupDecisionLog } from './decision-log';
 import { cleanExpiredLocks } from './file-lock';
@@ -272,6 +273,18 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (workspacePath) ensureProjectMemory(workspacePath);
   if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
   cleanExpiredLocks(); // v6.1 (构想A): 清理僵尸文件锁
+
+  // v22.0: 从全局经验库注入相关经验到项目
+  if (workspacePath && project.wish) {
+    try {
+      const { inferTags } = await import('./cross-project');
+      const tags = inferTags(project.wish);
+      const injected = injectGlobalExperience(workspacePath, tags);
+      if (injected > 0) {
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📚 已从全局经验库注入 ${injected} 条相关经验` });
+      }
+    } catch { /* silent: non-critical path */ }
+  }
 
   // ═══════════════════════════════════════
   // Phase 0: 环境初始化 (v13.0)

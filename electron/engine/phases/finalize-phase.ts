@@ -12,6 +12,7 @@ import {
   extractFromProjectMemory,
   type AppSettings,
 } from './shared';
+import { contributeToGlobal } from '../experience-library';
 
 const log = createLogger('phase:finalize');
 
@@ -73,6 +74,16 @@ export async function phaseFinalize(
       }
     } catch (err) {
       log.warn('Cross-project experience extraction failed', { error: String(err) });
+    }
+
+    // v22.0: 分层经验库 — 将高频使用的 patterns 贡献到全局
+    try {
+      const contributed = contributeToGlobal(workspacePath, projectName);
+      if (contributed > 0) {
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📚 已将 ${contributed} 条分层经验贡献到全局经验库` });
+      }
+    } catch (err) {
+      log.warn('Experience library global contribution failed', { error: String(err) });
     }
   }
 }

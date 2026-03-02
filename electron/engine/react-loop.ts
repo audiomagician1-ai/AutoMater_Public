@@ -44,6 +44,7 @@ import {
   buildScratchpadAnchor, maskOldToolOutputs,
   recordProgress, extractExperience, getOtherWorkersChanges,
 } from './scratchpad';
+import { getProjectExperienceContext } from './experience-library';
 import { compressSubAgentResult } from './sub-agent-compressor';
 import { harvestPostSession } from './experience-harvester';
 import { summarizeToolResult } from './tool-result-summarizer';
@@ -346,6 +347,15 @@ export async function reactDeveloperLoop(
     }
   }
 
+  // v22.0: 分层经验库注入 — principles 全量 + patterns 按 domain 过滤
+  let experienceText = '';
+  if (workspacePath) {
+    try {
+      const domains = inferDomainsFromFeature(feature);
+      experienceText = getProjectExperienceContext(workspacePath, domains, 2000);
+    } catch { /* silent: experience library non-critical */ }
+  }
+
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const baseDevPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
   // v20.0: 按 feature category 注入特定指导
@@ -356,7 +366,7 @@ export async function reactDeveloperLoop(
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${experienceText ? experienceText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 
@@ -947,6 +957,28 @@ export async function reactDeveloperLoop(
     iterations: reactState.iterations.length,
     terminationReason,
   };
+}
+
+// ═══════════════════════════════════════
+// Feature Domain Inference (for Experience Library)
+// ═══════════════════════════════════════
+
+/** 从 feature 的标题/描述/分类推断相关领域 */
+function inferDomainsFromFeature(feature: EnrichedFeature): string[] {
+  const text = `${feature.title || ''} ${feature.description || ''} ${feature.category || ''} ${feature.acceptance_criteria || ''}`.toLowerCase();
+  const domains: string[] = [];
+  if (/typescript|tsx?|type|interface/.test(text)) domains.push('typescript');
+  if (/react|component|hook|state|jsx|页面|组件/.test(text)) domains.push('react');
+  if (/css|style|tailwind|布局|样式/.test(text)) domains.push('css');
+  if (/api|endpoint|fetch|request|接口/.test(text)) domains.push('api');
+  if (/test|spec|assert|mock|测试/.test(text)) domains.push('testing');
+  if (/git|commit|branch/.test(text)) domains.push('git');
+  if (/security|auth|token|权限|认证/.test(text)) domains.push('security');
+  if (/sql|database|migration|表|数据库/.test(text)) domains.push('database');
+  if (/electron|ipc|preload/.test(text)) domains.push('electron');
+  if (/deploy|build|ci|cd|部署/.test(text)) domains.push('deploy');
+  if (domains.length === 0) domains.push('general');
+  return domains;
 }
 
 // ═══════════════════════════════════════
