@@ -474,13 +474,15 @@ export async function detectImplicitChanges(
 
   // 收集现有上下文
   const existingFeatures = db.prepare(
-    "SELECT id, title, description, status, acceptance_criteria FROM features WHERE project_id = ? ORDER BY priority ASC"
-  ).all(projectId) as Array<{ id: string; title: string; description: string; status: string; acceptance_criteria: string }>;
+    "SELECT id, title, description, summary, status, acceptance_criteria FROM features WHERE project_id = ? ORDER BY priority ASC"
+  ).all(projectId) as Array<{ id: string; title: string; description: string; summary: string | null; status: string; acceptance_criteria: string }>;
 
   const featureList = existingFeatures.map(f => {
     let criteria = '';
     try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch { /* silent: acceptance_criteria JSON parse */ }
-    return `- **${f.id}** [${f.status}]: ${f.title}\n  描述: ${f.description}\n  验收: ${criteria}`;
+    // D3: 优先使用 summary 减少 token，fallback 到 description
+    const desc = f.summary || f.description;
+    return `- **${f.id}** [${f.status}]: ${f.title}\n  摘要: ${desc}\n  验收: ${criteria}`;
   }).join('\n');
 
   const designContext = buildDesignContext(workspacePath, 4000);

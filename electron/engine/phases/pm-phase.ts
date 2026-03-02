@@ -115,7 +115,7 @@ export async function phasePMAnalysis(
     return null;
   }
 
-  const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
+  const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, summary, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
   db.transaction((items: ParsedFeature[]) => {
     for (let i = 0; i < items.length; i++) {
       const f = items[i];
@@ -125,6 +125,7 @@ export async function phasePMAnalysis(
         f.category || 'core', f.priority ?? 1,
         f.group_name || f.category || '', f.sub_group || '',
         f.title || f.description || '', f.description || '',
+        f.summary || null,
         JSON.stringify(f.dependsOn || f.depends_on || []),
         JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []),
         f.notes || '',
@@ -183,12 +184,12 @@ export async function phaseIncrementalPM(
     const newFeatures = parseResult.data;
     if (newFeatures.length === 0) { sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ 增量分析未产生新 Feature' }); return null; }
 
-    const insertFeature = db.prepare(`INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
+    const insertFeature = db.prepare(`INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, summary, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
     db.transaction((items: ParsedFeature[]) => {
       for (let i = 0; i < items.length; i++) {
         const f = items[i];
         const groupId = f.group_name || f.category || 'default';
-        insertFeature.run(f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId, f.category || 'core', f.priority ?? 1, f.group_name || f.category || '', f.sub_group || '', f.title || f.description || '', f.description || '', JSON.stringify(f.dependsOn || f.depends_on || []), JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []), f.notes || '', groupId);
+        insertFeature.run(f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId, f.category || 'core', f.priority ?? 1, f.group_name || f.category || '', f.sub_group || '', f.title || f.description || '', f.description || '', f.summary || null, JSON.stringify(f.dependsOn || f.depends_on || []), JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []), f.notes || '', groupId);
       }
     })(newFeatures);
 

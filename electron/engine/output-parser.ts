@@ -401,6 +401,7 @@ export const PM_FEATURE_SCHEMA: SchemaSpec = {
     group_name:  { type: 'string',  required: false, default: '' },
     sub_group:   { type: 'string',  required: false, default: '' },
     title:       { type: 'string',  required: true },
+    summary:     { type: 'string',  required: false, default: '' },
     description: { type: 'string',  required: true },
     dependsOn:   { type: 'array',   required: false, default: [] },
     acceptance_criteria: { type: 'array', required: false, default: [] },

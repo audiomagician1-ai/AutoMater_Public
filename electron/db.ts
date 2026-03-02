@@ -312,6 +312,13 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 13,
+    description: 'D3: features.summary — PM 一句话摘要用于索引层',
+    up: () => {
+      safeAddColumn('ALTER TABLE features ADD COLUMN summary TEXT');
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */

@@ -85,6 +85,8 @@ export interface FeatureRow {
   group_name: string | null;
   title: string;
   description: string;
+  /** D3: PM 一句话摘要 (<80字), 用于 Agent 上下文中的索引层 */
+  summary: string | null;
   depends_on: string;       // JSON array of feature IDs
   status: FeatureStatus;
   locked_by: string | null;
@@ -278,6 +280,7 @@ export interface ParsedFeature {
   sub_group: string;
   title: string;
   description: string;
+  summary?: string;              // D3: PM 一句话摘要
   dependsOn: string[];          // LLM 倾向 camelCase
   depends_on?: string[];        // DB 使用 snake_case, 向后兼容
   acceptance_criteria: string[];
