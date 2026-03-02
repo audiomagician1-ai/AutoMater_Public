@@ -65,15 +65,33 @@ function assertSafePath(filePath: string): { ok: true; normalized: string } | { 
 }
 
 /**
- * v16.0: 解析只读路径 — 支持绝对路径（仅用于 read_file / list_files / search_files 等只读操作）
- * 如果传入的是绝对路径且存在，直接返回；否则拼接 workspacePath。
+ * v16.0: 写操作路径检查 — 支持绝对路径写入（需要 externalWrite 权限）
  */
-function resolveReadPath(workspacePath: string, inputPath: string): string {
-  const normalized = path.normalize(inputPath || '');
-  if (path.isAbsolute(normalized) && fs.existsSync(normalized)) {
-    return normalized;
+function assertWritePath(filePath: string, ctx: ToolContext): { ok: true; normalized: string; absPath: string } | { ok: false; error: string } {
+  const normalized = path.normalize(filePath);
+  if (path.isAbsolute(normalized)) {
+    if (!ctx.permissions?.externalWrite) {
+      return { ok: false, error: `写入外部路径被拒绝: ${filePath}。请在全景页开启「写外部文件」权限。` };
+    }
+    return { ok: true, normalized, absPath: normalized };
   }
-  return path.join(workspacePath, normalized);
+  if (normalized.startsWith('..')) {
+    return { ok: false, error: `路径不安全: ${filePath}` };
+  }
+  return { ok: true, normalized, absPath: path.join(ctx.workspacePath, normalized) };
+}
+
+/**
+ * v16.0: 检查是否为绝对路径的只读请求，需要 externalRead 权限
+ */
+function checkExternalReadPermission(inputPath: string, ctx: ToolContext): { allowed: boolean; error?: string } {
+  const normalized = path.normalize(inputPath || '');
+  if (path.isAbsolute(normalized)) {
+    if (!ctx.permissions?.externalRead) {
+      return { allowed: false, error: `读取外部路径被拒绝: ${inputPath}。请在全景页开启「读外部文件」权限。` };
+    }
+  }
+  return { allowed: true };
 }
 
 // ═══════════════════════════════════════
@@ -186,16 +204,22 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
     switch (call.name) {
 
       case 'read_file': {
-        // v16.0: 支持绝对路径只读访问（PM 分析外部工程时需要）
+        // v16.0: 支持绝对路径只读访问（需要 externalRead 权限）
         const inputPath = call.arguments.path || '';
         const normalizedInput = path.normalize(inputPath);
         let content: string | null;
-        if (path.isAbsolute(normalizedInput) && fs.existsSync(normalizedInput) && fs.statSync(normalizedInput).isFile()) {
-          const stat = fs.statSync(normalizedInput);
-          if (stat.size > 1024 * 1024) {
-            content = `[文件过大: ${(stat.size / 1024).toFixed(0)} KB, 超过 1MB 限制]`;
+        if (path.isAbsolute(normalizedInput)) {
+          const perm = checkExternalReadPermission(inputPath, ctx);
+          if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+          if (fs.existsSync(normalizedInput) && fs.statSync(normalizedInput).isFile()) {
+            const stat = fs.statSync(normalizedInput);
+            if (stat.size > 1024 * 1024) {
+              content = `[文件过大: ${(stat.size / 1024).toFixed(0)} KB, 超过 1MB 限制]`;
+            } else {
+              content = fs.readFileSync(normalizedInput, 'utf-8');
+            }
           } else {
-            content = fs.readFileSync(normalizedInput, 'utf-8');
+            content = null;
           }
         } else {
           content = readWorkspaceFile(ctx.workspacePath, inputPath);
@@ -277,7 +301,16 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'list_files': {
         const dir = call.arguments.directory || '';
         const maxDepth = call.arguments.max_depth ?? 3;
-        const tree = readDirectoryTree(ctx.workspacePath, dir, maxDepth);
+        const normalizedDir = path.normalize(dir || '.');
+        let tree: FileTreeNode[];
+        if (path.isAbsolute(normalizedDir)) {
+          // v16.0: 绝对路径 — 需要 externalRead 权限
+          const perm = checkExternalReadPermission(dir, ctx);
+          if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+          tree = readDirectoryTree(normalizedDir, '', maxDepth);
+        } else {
+          tree = readDirectoryTree(ctx.workspacePath, dir, maxDepth);
+        }
         const formatTree = (nodes: FileTreeNode[], indent: string = ''): string => {
           return nodes.map(n => {
             if (n.type === 'dir') {

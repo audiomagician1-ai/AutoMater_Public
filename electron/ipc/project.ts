@@ -226,12 +226,20 @@ function initDefaultTeam(db: { prepare(sql: string): { run(...args: unknown[]): 
   return { success: true, count: DEFAULT_TEAM.length };
 }
 
-function getGitConfig(project: { git_mode?: string; workspace_path: string; github_repo?: string; github_token?: string }): GitProviderConfig {
+function getGitConfig(project: { id?: string; git_mode?: string; workspace_path: string; github_repo?: string; github_token?: string }): GitProviderConfig {
+  // v13.0: Prefer encrypted token from secret-manager, fallback to legacy plaintext column
+  let token = project.github_token || undefined;
+  if (project.id) {
+    try {
+      const encrypted = getSecretFn(project.id, 'github_token');
+      if (encrypted) token = encrypted;
+    } catch { /* secret-manager not available, use legacy */ }
+  }
   return {
     mode: (project.git_mode || 'local') as import('../engine/git-provider').GitMode,
     workspacePath: project.workspace_path,
     githubRepo: project.github_repo || undefined,
-    githubToken: project.github_token || undefined,
+    githubToken: token,
   };
 }
 
@@ -291,9 +299,19 @@ export function setupProjectHandlers() {
     const configJson = isImport ? JSON.stringify({ importExisting: true }) : '{}';
 
     db.prepare(`
-      INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo, github_token)
-      VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)
-    `).run(id, displayName, initialStatus, workspacePath, configJson, gitMode, githubRepo, githubToken);
+      INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo)
+      VALUES (?, ?, '', ?, ?, ?, ?, ?)
+    `).run(id, displayName, initialStatus, workspacePath, configJson, gitMode, githubRepo);
+
+    // v13.0: Store github_token via secret-manager (encrypted) instead of plaintext in projects table
+    if (githubToken) {
+      try {
+        setSecretFn(id, 'github_token', githubToken, 'github');
+      } catch (err) {
+        log.warn('Failed to store github_token in secret-manager, falling back to projects table', { error: String(err) });
+        db.prepare('UPDATE projects SET github_token = ? WHERE id = ?').run(githubToken, id);
+      }
+    }
 
     // ── 自动创建默认团队 ──
     try {

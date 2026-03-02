@@ -32,6 +32,16 @@ export interface ToolResult {
   action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer';
 }
 
+/** v16.0: 项目级 Agent 权限开关 */
+export interface AgentPermissions {
+  /** 允许读取沙箱外（绝对路径）文件/目录 */
+  externalRead?: boolean;
+  /** 允许写入沙箱外（绝对路径）文件 */
+  externalWrite?: boolean;
+  /** 允许执行 shell 命令（run_command / sandbox_exec） */
+  shellExec?: boolean;
+}
+
 /** 工具执行上下文 (由 orchestrator 注入) */
 export interface ToolContext {
   workspacePath: string;
@@ -43,6 +53,8 @@ export interface ToolContext {
   workerId?: string;
   /** 当前 Feature ID — 用于文件级写锁 (构想A) */
   featureId?: string;
+  /** v16.0: 项目级权限开关 */
+  permissions?: AgentPermissions;
 }
 
 // ═══════════════════════════════════════
