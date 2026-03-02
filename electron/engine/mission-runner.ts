@@ -19,6 +19,7 @@ import type { MissionRow, MissionTaskRow, ProjectRow } from './types';
 import { BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { safeJsonParse } from './safe-json';
 
 const log = createLogger('mission-runner');
 
@@ -211,7 +212,7 @@ export async function runMission(
 
   const projectId = mission.project_id;
   const type = mission.type as MissionType;
-  const config: MissionConfig = JSON.parse(mission.config || '{}');
+  const config: MissionConfig = safeJsonParse<MissionConfig>(mission.config || '{}', {} as MissionConfig, 'mission-config');
   const prompts = MISSION_PROMPTS[type] || MISSION_PROMPTS.custom;
 
   // Get project context

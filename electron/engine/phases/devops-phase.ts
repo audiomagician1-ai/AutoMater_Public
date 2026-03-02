@@ -12,6 +12,7 @@ import {
   commitWorkspace,
   type AppSettings,
 } from './shared';
+import { safeJsonParse } from '../safe-json';
 
 const log = createLogger('phase:devops');
 
@@ -38,7 +39,7 @@ export async function phaseDevOpsBuild(
 
   if (hasPackageJson) {
     buildSteps.push({ name: '安装依赖', cmd: 'npm install --prefer-offline 2>&1', critical: true });
-    const pkg = JSON.parse(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf-8'));
+    const pkg = safeJsonParse<Record<string, Record<string, unknown>>>(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf-8'), {});
     const hasTsc = pkg.devDependencies?.typescript || pkg.dependencies?.typescript;
     if (hasTsc || fs.existsSync(path.join(workspacePath, 'tsconfig.json'))) {
       buildSteps.push({ name: '类型检查', cmd: 'npx tsc --noEmit 2>&1', critical: false });

@@ -37,6 +37,7 @@ import {
 } from './browser-tools';
 import { analyzeImage, compareScreenshots, visualAssert, cacheScreenshot, getCachedScreenshot } from './visual-tools';
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
+import { safeJsonParse } from './safe-json';
 import type { AppSettings } from './types';
 import { getDb } from '../db';
 import { textToImage, editImage } from './image-gen';
@@ -48,6 +49,7 @@ import {
 } from './deploy-tools';
 import { executeTool, checkExternalReadPermission } from './tool-executor';
 import { executeMcpTool, executeSkillTool } from './tool-handlers-external';
+import { compressSubAgentResult, compressParallelResults, compressWithLLM } from './sub-agent-compressor';
 
 const log = createLogger('tool-handlers-async');
 
@@ -154,7 +156,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     const { deepResearch } = await import('./research-engine');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+    const settings: AppSettings = settingsRow ? safeJsonParse<AppSettings>(settingsRow.value, {} as AppSettings) : {} as AppSettings;
 
     const abortController = new AbortController();
     const result = await deepResearch(
@@ -188,7 +190,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     const { runBlackboxTests } = await import('./blackbox-test-runner');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+    const settings: AppSettings = settingsRow ? safeJsonParse<AppSettings>(settingsRow.value, {} as AppSettings) : {} as AppSettings;
 
     const abortController = new AbortController();
     const result = await runBlackboxTests(
@@ -438,7 +440,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     const { spawnSubAgent } = await import('./sub-agent-framework');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+    const settings: AppSettings = settingsRow ? safeJsonParse<AppSettings>(settingsRow.value, {} as AppSettings) : {} as AppSettings;
 
     const result = await spawnSubAgent(
       call.arguments.task,
@@ -452,26 +454,32 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
       (msg: string) => log.info(msg),
     );
 
-    const summary = [
-      `子Agent [${call.arguments.preset}] ${result.success ? '✅ 完成' : '❌ 失败'}`,
-      `轮次: ${result.iterations} | 耗时: ${Math.round(result.durationMs / 1000)}s | 成本: $${result.cost.toFixed(4)}`,
-      result.filesCreated.length > 0 ? `创建: ${result.filesCreated.join(', ')}` : '',
-      result.filesModified.length > 0 ? `修改: ${result.filesModified.join(', ')}` : '',
-      '',
-      '=== 结论 ===',
-      result.conclusion,
-      '',
-      result.actionSummary ? `=== 操作日志 ===\n${result.actionSummary}` : '',
-    ].filter(Boolean).join('\n');
+    // v19.0: 压缩子 Agent 结果 — 只返回精华给父 Agent
+    const compressed = compressSubAgentResult(
+      {
+        success: result.success,
+        conclusion: result.conclusion,
+        filesCreated: result.filesCreated,
+        filesModified: result.filesModified,
+        iterations: result.iterations,
+        cost: result.cost,
+        durationMs: result.durationMs,
+      },
+      {
+        maxChars: 3000,
+        role: call.arguments.preset || '子Agent',
+        originalTask: call.arguments.task,
+      },
+    );
 
-    return { success: result.success, output: summary.slice(0, 8000), action: 'shell' };
+    return { success: result.success, output: compressed, action: 'shell' };
   }
 
   if (call.name === 'spawn_parallel') {
     const { spawnParallel } = await import('./sub-agent-framework');
     const db = getDb();
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+    const settings: AppSettings = settingsRow ? safeJsonParse<AppSettings>(settingsRow.value, {} as AppSettings) : {} as AppSettings;
 
     const tasks = (call.arguments.tasks || []).map((t: Record<string, unknown>) => ({
       id: t.id as string,
@@ -481,18 +489,25 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
 
     const results = await spawnParallel(tasks, ctx, settings, (msg: string) => log.info(msg));
 
-    const summary = results.map(r => {
-      const res = r.result;
-      return [
-        `[${r.id}] ${res.success ? '✅' : '❌'} ${res.iterations}轮 ${Math.round(res.durationMs / 1000)}s $${res.cost.toFixed(4)}`,
-        `  结论: ${res.conclusion.slice(0, 200)}`,
-        res.filesCreated.length > 0 ? `  创建: ${res.filesCreated.join(', ')}` : '',
-        res.filesModified.length > 0 ? `  修改: ${res.filesModified.join(', ')}` : '',
-      ].filter(Boolean).join('\n');
-    }).join('\n\n');
+    // v19.0: 批量压缩并行结果
+    const compressed = compressParallelResults(
+      results.map(r => ({
+        id: r.id,
+        result: {
+          success: r.result.success,
+          conclusion: r.result.conclusion,
+          filesCreated: r.result.filesCreated,
+          filesModified: r.result.filesModified,
+          iterations: r.result.iterations,
+          cost: r.result.cost,
+          durationMs: r.result.durationMs,
+        },
+      })),
+      4000,
+    );
 
     const allSuccess = results.every(r => r.result.success);
-    return { success: allSuccess, output: `并行执行完成 (${results.length} 个任务):\n\n${summary}`.slice(0, 8000), action: 'shell' };
+    return { success: allSuccess, output: compressed, action: 'shell' };
   }
 
   // ── v9.0: Image Generation ──

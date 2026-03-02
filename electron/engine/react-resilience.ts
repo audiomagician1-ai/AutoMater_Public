@@ -29,6 +29,7 @@ export function isRetryableTool(toolName: string): boolean {
     // 读操作 — 无副作用
     'read_file', 'list_files', 'search_files', 'glob_files',
     'memory_read', 'todo_read',
+    'scratchpad_read',  // v19.0
     // 浏览器读操作 — 无副作用
     'browser_screenshot', 'browser_snapshot', 'browser_network', 'browser_console',
     // Docker 读操作

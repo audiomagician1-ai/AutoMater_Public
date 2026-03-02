@@ -5,7 +5,7 @@
  */
 
 import {
-  BrowserWindow, getDb, createLogger, execSync, fs, path,
+  BrowserWindow, getDb, createLogger, execSync, execAsync, fs, path,
   callLLM, calcCost, sendToUI,
   spawnAgent, updateAgentStats, resolveMemberModel,
   writeDoc, readDoc, buildDesignContext, checkConsistency,
@@ -234,12 +234,12 @@ export async function phaseIncrementalDocSync(
 
     let changedFiles: string[] = [];
     try {
-      const diffOutput = execSync('git diff --name-only HEAD~5 HEAD', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 }).trim();
-      if (diffOutput) { changedFiles = diffOutput.split('\n').filter(Boolean); }
+      const { stdout: diffOutput } = await execAsync('git diff --name-only HEAD~5 HEAD', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 });
+      if (diffOutput.trim()) { changedFiles = diffOutput.trim().split('\n').filter(Boolean); }
     } catch { /* silent: git log parse failed */
       try {
-        const statusOutput = execSync('git diff --name-only --cached', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 }).trim();
-        if (statusOutput) { changedFiles = statusOutput.split('\n').filter(Boolean); }
+        const { stdout: statusOutput } = await execAsync('git diff --name-only --cached', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 });
+        if (statusOutput.trim()) { changedFiles = statusOutput.trim().split('\n').filter(Boolean); }
       } catch { /* no git available */ }
     }
 

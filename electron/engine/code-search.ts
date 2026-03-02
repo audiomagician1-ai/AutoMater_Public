@@ -309,25 +309,51 @@ function fallbackSearch(
   }
 }
 
+/**
+ * 转义 PowerShell 单引号字符串内的特殊字符
+ * 阻止 $(...) / `...` / ${} 等元字符注入
+ */
+function escapePowerShellSingleQuote(s: string): string {
+  // PowerShell 单引号内唯一转义: ' → ''
+  return s.replace(/'/g, "''");
+}
+
+/**
+ * 转义 Unix shell 双引号字符串内的特殊字符
+ */
+function escapeShellDoubleQuote(s: string): string {
+  return s.replace(/[\\"$`!]/g, '\\$&');
+}
+
 /** 构建 fallback 搜索命令 (PowerShell / grep) */
 function buildFallbackCmd(
   pattern: string,
   options: { include?: string[]; context: number; maxResults: number; caseSensitive?: boolean },
 ): string {
-  const escapedPattern = pattern.replace(/'/g, "''");
+  // 限制 pattern 长度防止超长命令行攻击
+  const safePattern = pattern.slice(0, 500);
 
   if (process.platform === 'win32') {
+    const escapedPattern = escapePowerShellSingleQuote(safePattern);
+    // include globs 也需要转义
     const includeFilter = options.include && options.include.length > 0
-      ? ` -Include ${options.include.map(i => `'${i}'`).join(',')}`
+      ? ` -Include ${options.include.map(i => `'${escapePowerShellSingleQuote(i)}'`).join(',')}`
       : '';
     const caseFlag = options.caseSensitive ? '' : ' -CaseSensitive:$false';
-    return `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}'${caseFlag} -Context ${options.context},${options.context} | Select-Object -First ${options.maxResults} | Out-String -Width 300"`;
+    const ctx = Math.min(Math.max(0, options.context), 10); // clamp context 0-10
+    const maxRes = Math.min(Math.max(1, options.maxResults), 200); // clamp results 1-200
+    // 使用 -EncodedCommand 或确保单引号包裹防止 $() 注入
+    // PowerShell 单引号内不会展开变量，所以 '$(...)'、'${...}' 是安全的
+    return `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}'${caseFlag} -Context ${ctx},${ctx} | Select-Object -First ${maxRes} | Out-String -Width 300"`;
   } else {
+    const escapedPattern = escapeShellDoubleQuote(safePattern);
     const includeFlag = options.include && options.include.length > 0
-      ? options.include.map(i => `--include="${i}"`).join(' ')
+      ? options.include.map(i => `--include="${escapeShellDoubleQuote(i)}"`).join(' ')
       : '';
     const caseFlag = options.caseSensitive ? '' : '-i';
-    return `grep -rn ${caseFlag} ${includeFlag} -C ${options.context} "${pattern.replace(/"/g, '\\"')}" . | grep -v node_modules | grep -v '.git/' | head -${options.maxResults * 5}`;
+    const ctx = Math.min(Math.max(0, options.context), 10);
+    const maxRes = Math.min(Math.max(1, options.maxResults), 200);
+    return `grep -rn ${caseFlag} ${includeFlag} -C ${ctx} "${escapedPattern}" . | grep -v node_modules | grep -v '.git/' | head -${maxRes * 5}`;
   }
 }
 

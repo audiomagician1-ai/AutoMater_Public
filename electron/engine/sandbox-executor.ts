@@ -196,6 +196,7 @@ export interface SandboxResult {
   duration: number;
 }
 
+// SYNC-OK: 向后兼容保留, 新代码应使用 execInSandboxPromise (async)
 export function execInSandbox(command: string, config: SandboxConfig): SandboxResult {
   const start = Date.now();
 

@@ -142,9 +142,9 @@ function detectDeployContext(
   ctx.hasNginxConf = fs.existsSync(path.join(workspacePath, 'nginx.conf'))
     || fs.existsSync(path.join(workspacePath, 'nginx'));
 
-  // Git 分支
+  // Git 分支 — SYNC-OK: git rev-parse <50ms, 同步上下文检测函数
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: workspacePath, encoding: 'utf-8' })
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: workspacePath, encoding: 'utf-8', timeout: 5000 })
       .toString().trim();
     ctx.currentBranch = branch;
     ctx.isFeatureBranch = branch !== 'main' && branch !== 'master' && branch !== 'develop';
@@ -460,7 +460,7 @@ async function quickBuildVerify(
       sendToUI(win, 'agent:log', {
         projectId, agentId: devopsId, content: '  📦 已提交并准备推送',
       });
-      execSync('git push origin HEAD 2>&1', { cwd: workspacePath, encoding: 'utf-8', timeout: 30_000 });
+      await execAsync('git push origin HEAD 2>&1', { cwd: workspacePath, encoding: 'utf-8', timeout: 30_000 });
       sendToUI(win, 'agent:log', {
         projectId, agentId: devopsId, content: '  🚀 已推送到远程仓库',
       });

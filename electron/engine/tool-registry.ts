@@ -8,6 +8,7 @@
 import type { OpenAIFunctionTool } from './types';
 import { TOOL_DEFINITIONS } from './tool-definitions';
 import { type AgentRole, ROLE_TOOLS } from './tool-permissions';
+import { safeParseToolArgs } from './safe-json';
 
 // Re-export for backward compatibility
 export { TOOL_DEFINITIONS } from './tool-definitions';
@@ -178,7 +179,7 @@ export function parseToolCalls(message: { tool_calls?: Array<{ function: { name:
   return message.tool_calls.map((tc) => ({
     name: tc.function.name,
     arguments: typeof tc.function.arguments === 'string'
-      ? JSON.parse(tc.function.arguments)
+      ? safeParseToolArgs(tc.function.arguments)
       : tc.function.arguments,
   }));
 }

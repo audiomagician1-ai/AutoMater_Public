@@ -10,6 +10,7 @@ import { getDb } from '../db';
 import type { AppSettings } from '../engine/types';
 import { toErrorMessage } from '../engine/logger';
 import { assertObject, assertString } from './ipc-validator';
+import { safeJsonParse } from '../engine/safe-json';
 
 interface LLMProvider {
   type: 'openai' | 'anthropic' | 'custom';
@@ -39,7 +40,7 @@ function normalizeBaseUrl(url: string): string {
 function getSettings() {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  return row ? JSON.parse(row.value) : {};
+  return row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings) : {} as AppSettings;
 }
 
 export function setupLLMHandlers() {

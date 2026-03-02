@@ -16,6 +16,7 @@ import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig, g
 import type { AppSettings, EnrichedFeature, LLMMessage, LLMToolCall } from './types';
 import { collectDeveloperContext, collectLightContext, loadKnownIssues, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
+import { safeJsonParse, safeParseToolArgs } from './safe-json';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
 import { DEVELOPER_REACT_PROMPT } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
@@ -40,6 +41,7 @@ import {
   recordFileChange, recordToolError, recordErrorResolved,
   buildScratchpadAnchor, maskOldToolOutputs,
 } from './scratchpad';
+import { compressSubAgentResult } from './sub-agent-compressor';
 import { summarizeToolResult } from './tool-result-summarizer';
 import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
@@ -510,9 +512,21 @@ export async function reactDeveloperLoop(
               content: `🔬 ${feature.id} 研究子 Agent 完成 (读取 ${researchResult.filesRead.length} 文件, $${resCost.toFixed(4)})`,
             });
 
+            // v19.0: 压缩研究子 Agent 结果 — 只返回精华给父 Agent
             toolResult = {
               success: researchResult.success,
-              output: `研究结论:\n${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(', ') || '无'}`,
+              output: compressSubAgentResult(
+                {
+                  success: researchResult.success,
+                  conclusion: researchResult.conclusion,
+                  filesRead: researchResult.filesRead,
+                },
+                {
+                  maxChars: 2500,
+                  role: '研究员',
+                  originalTask: toolArgs.question,
+                },
+              ),
               action: 'read',
             };
           } catch (resErr: unknown) {
@@ -601,8 +615,8 @@ export async function reactDeveloperLoop(
         if (!toolResult.success && workspacePath) {
           recordToolError(workspacePath, workerId, tc.function.name, toolResult.output.slice(0, 300));
         }
-        if (toolResult.success && workspacePath && learningState.recentFailures.length > 0) {
-          const lastFail = learningState.recentFailures[learningState.recentFailures.length - 1];
+        if (toolResult.success && workspacePath && learningState.failures.length > 0) {
+          const lastFail = learningState.failures[learningState.failures.length - 1];
           if (lastFail && lastFail.toolName === tc.function.name) {
             recordErrorResolved(workspacePath, workerId, tc.function.name, `重试后成功`);
           }
@@ -740,7 +754,7 @@ export async function reactDeveloperLoop(
 
   // 更新 feature 的 affected_files
   if (filesWritten.size > 0) {
-    const existingFiles = JSON.parse(feature.affected_files || '[]') as string[];
+    const existingFiles = safeJsonParse<string[]>(feature.affected_files || '[]', []) as string[];
     const allFiles = [...new Set([...existingFiles, ...filesWritten])];
     db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?")
       .run(JSON.stringify(allFiles), feature.id, projectId);
@@ -1133,6 +1147,10 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
           if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && result.success) {
             filesWritten.add(toolArgs.path);
             sendToUI(win, 'workspace:changed', { projectId });
+            // v19.0: Harness 自动收集文件变更到 scratchpad
+            if (workspacePath) {
+              recordFileChange(workspacePath, agentId, toolArgs.path, tc.function.name === 'write_file' ? 'created' : 'modified');
+            }
           }
 
           // v18.0: 迭代间学习 — 记录失败
@@ -1143,6 +1161,10 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
               arguments: toolArgs,
               timestamp: Date.now(),
             });
+            // v19.0: Harness 自动收集工具错误到 scratchpad
+            if (workspacePath) {
+              recordToolError(workspacePath, agentId, tc.function.name, result.output.slice(0, 300));
+            }
           }
 
           // v18.0: 智能摘要
@@ -1167,14 +1189,29 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         break;
       }
 
-      // v8.0: Token 预算感知压缩
+      // v19.0: Token 预算感知压缩 (Observation Masking + Scratchpad Anchor)
       const { total: ctxTokens } = computeMessageBreakdown(messages);
       const budget = checkContextBudget(ctxTokens, model);
-      if (budget.status === 'overflow' || budget.status === 'critical') {
-        compressToolOutputs(messages, budget.status);
+      const needsCompress = budget.status === 'overflow' || budget.status === 'critical' || messages.length > 20;
+
+      if (needsCompress) {
+        // Step 1: Observation Masking
+        maskOldToolOutputs(messages, 10);
+
+        // Step 2: 传统压缩
+        if (budget.status === 'overflow' || budget.status === 'critical') {
+          compressToolOutputs(messages, budget.status);
+        }
         await compressMessageHistorySmart(messages, settings, signal);
-      } else if (messages.length > 20) {
-        await compressMessageHistorySmart(messages, settings, signal);
+
+        // Step 3: 注入 Scratchpad 锚点
+        if (workspacePath) {
+          const anchor = buildScratchpadAnchor(workspacePath, agentId);
+          if (anchor) {
+            const insertIdx = Math.min(2, messages.length);
+            messages.splice(insertIdx, 0, anchor);
+          }
+        }
       }
 
     } catch (err: unknown) {

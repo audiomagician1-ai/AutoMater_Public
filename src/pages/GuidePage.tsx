@@ -496,12 +496,23 @@ function renderGuideMarkdown(md: string): string {
     }
   };
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const SAFE_URL_RE = /^(?:https?|mailto|tel|ftp):/i;
+  const isSafeUrl = (url: string): boolean => {
+    const t = url.replace(/&amp;/g, '&').trim();
+    if (t.startsWith('/') || t.startsWith('#') || t.startsWith('.')) return true;
+    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(t)) return SAFE_URL_RE.test(t);
+    return true;
+  };
   const inline = (text: string) => {
     let r = esc(text);
     r = r.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-300 text-xs font-mono">$1</code>');
     r = r.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>');
     r = r.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-forge-400 underline hover:text-forge-300" target="_blank">$1</a>');
+    r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m: string, label: string, url: string) =>
+      isSafeUrl(url)
+        ? `<a href="${url}" class="text-forge-400 underline hover:text-forge-300" target="_blank" rel="noopener noreferrer">${label}</a>`
+        : `<span class="text-forge-400">${label}</span>`
+    );
     return r;
   };
 

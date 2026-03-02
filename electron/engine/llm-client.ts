@@ -13,6 +13,7 @@ import type { AppSettings, AnthropicContentBlock, OpenAIFunctionTool } from './t
 import { NetworkError } from './types';
 import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TIMEOUT_MS } from './constants';
 import { createLogger } from './logger';
+import { safeJsonParse, safeParseToolArgs } from './safe-json';
 
 const log = createLogger('llm-client');
 
@@ -142,7 +143,7 @@ export function calcCost(model: string, inputTokens: number, outputTokens: numbe
 export function getSettings(): AppSettings | null {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  return row ? JSON.parse(row.value) as AppSettings : null;
+  return row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings, 'getSettings') : null;
 }
 
 // ═══════════════════════════════════════
@@ -521,7 +522,7 @@ async function _callAnthropicWithTools(
           id: tc.id,
           name: tc.function.name,
           input: typeof tc.function.arguments === 'string'
-            ? JSON.parse(tc.function.arguments)
+            ? safeParseToolArgs(tc.function.arguments)
             : tc.function.arguments,
         });
       }

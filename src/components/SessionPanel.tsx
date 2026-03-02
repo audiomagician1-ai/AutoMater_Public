@@ -9,6 +9,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppStore, type AgentWorkMessage } from '../stores/app-store';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('SessionPanel');
 
 // ═══════════════════════════════════════
 // Types
@@ -136,7 +139,7 @@ export function SessionPanel({ agentId, projectId }: SessionPanelProps) {
       }
       setFeatureLinks(linkMap);
     } catch (err) {
-      console.error('Failed to load sessions:', err);
+      log.error('Failed to load sessions:', err);
     }
   }, [projectId, agentId]);
 
@@ -157,7 +160,7 @@ export function SessionPanel({ agentId, projectId }: SessionPanelProps) {
       const backup = await window.automater.session.readBackup(sessionId);
       setBackupMessages(backup?.messages || []);
     } catch (err) {
-      console.error('Failed to read backup:', err);
+      log.error('Failed to read backup:', err);
       setBackupMessages([]);
     } finally {
       setLoadingBackup(false);

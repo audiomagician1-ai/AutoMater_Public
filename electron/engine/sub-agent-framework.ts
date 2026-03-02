@@ -21,6 +21,7 @@ import { resolveModel } from './model-selector';
 import { acquireFileLock, releaseWorkerLocks } from './file-lock';
 import { sendToUI, addLog } from './ui-bridge';
 import { createLogger } from './logger';
+import { maskOldToolOutputs } from './scratchpad';
 import type { AppSettings, LLMMessage } from './types';
 
 const log = createLogger('sub-agent');
@@ -472,6 +473,12 @@ export async function spawnSubAgent(
             tool_call_id: tc.id,
             content: (toolResult.output || '').slice(0, 4000),
           });
+        }
+
+        // v19.0: 子 Agent 内部 Observation Masking — 保持自身上下文精简
+        // 每 4 轮迭代 mask 一次旧 tool 输出, 避免子 Agent 上下文膨胀
+        if ((iter + 1) % 4 === 0 && messages.length > 12) {
+          maskOldToolOutputs(messages, 6);
         }
       }
 

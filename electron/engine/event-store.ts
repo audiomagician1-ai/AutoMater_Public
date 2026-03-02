@@ -16,6 +16,7 @@
 import { getDb } from '../db';
 import { createLogger } from './logger';
 import type { SqliteStatement, EventRow } from './types';
+import { safeJsonParse } from './safe-json';
 
 const log = createLogger('event-store');
 
@@ -201,7 +202,7 @@ function rowToEvent(row: EventRow): AgentEvent {
     agentId: row.agent_id,
     featureId: row.feature_id || undefined,
     type: row.type as EventType,
-    data: JSON.parse(row.data || '{}'),
+    data: safeJsonParse(row.data || '{}', {}),
     durationMs: row.duration_ms ?? undefined,
     inputTokens: row.input_tokens ?? undefined,
     outputTokens: row.output_tokens ?? undefined,

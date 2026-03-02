@@ -26,6 +26,7 @@ import {
   deleteSecret as deleteSecretFn,
   type SecretProvider,
 } from '../engine/secret-manager';
+import { safeJsonParse } from '../engine/safe-json';
 
 // 导入进程的 AbortController 映射（用于取消正在运行的导入）
 const importAbortControllers = new Map<string, AbortController>();
@@ -1039,8 +1040,8 @@ export function setupProjectHandlers() {
     if (!row) return null;
     return {
       ...row,
-      impactAnalysis: row.impact_analysis ? JSON.parse(row.impact_analysis) : null,
-      affectedFeatures: row.affected_features ? JSON.parse(row.affected_features) : [],
+      impactAnalysis: row.impact_analysis ? safeJsonParse(row.impact_analysis, null) : null,
+      affectedFeatures: row.affected_features ? safeJsonParse<string[]>(row.affected_features, []) : [],
     };
   });
 

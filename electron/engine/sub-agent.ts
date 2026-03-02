@@ -15,6 +15,7 @@ import { execInSandbox, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole } from './memory-system';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { maskOldToolOutputs } from './scratchpad';
 
 const execAsync = promisify(exec);
 import type { ToolContext } from './tool-system';
@@ -267,6 +268,11 @@ export async function runResearcher(
           tool_call_id: tc.id,
           content: output.slice(0, 3000),
         });
+      }
+
+      // v19.0: Observation Masking — 子 Agent 每 3 轮清理旧 tool 输出
+      if ((iter + 1) % 3 === 0 && messages.length > 10) {
+        maskOldToolOutputs(messages, 4);
       }
     } catch (err: unknown) {
       if (signal?.aborted) break;

@@ -6,6 +6,19 @@
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/** 安全链接协议白名单 — 阻止 javascript: / data: / vbscript: XSS */
+const SAFE_URL_PROTOCOLS = /^(?:https?|mailto|tel|ftp):/i;
+const isSafeUrl = (url: string): boolean => {
+  const decoded = url.replace(/&amp;/g, '&');
+  const trimmed = decoded.trim();
+  // 相对路径 / 锚点 / 纯 ASCII 路径允许
+  if (trimmed.startsWith('/') || trimmed.startsWith('#') || trimmed.startsWith('.')) return true;
+  // 有协议前缀时只允许白名单
+  if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(trimmed)) return SAFE_URL_PROTOCOLS.test(trimmed);
+  // 无协议的普通文本（如 example.com）允许
+  return true;
+};
+
 const inlineFormat = (text: string) => {
   let result = escapeHtml(text);
   // inline code
@@ -14,8 +27,14 @@ const inlineFormat = (text: string) => {
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>');
   // italic
   result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // links
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-forge-400 underline">$1</a>');
+  // links — sanitize href to block javascript:/data:/vbscript: XSS
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, url) => {
+    if (isSafeUrl(url)) {
+      return `<a href="${url}" class="text-forge-400 underline" rel="noopener noreferrer">${text}</a>`;
+    }
+    // 不安全的协议：仅渲染文本，不生成链接
+    return `<span class="text-forge-400">${text}</span>`;
+  });
   return result;
 };
 

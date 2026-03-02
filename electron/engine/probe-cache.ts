@@ -18,6 +18,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { createLogger } from './logger';
 import type { ProbeReport, ProbeConfig, ModuleGraph, ModuleGraphNode, ModuleGraphEdge } from './probe-types';
+import { safeJsonParse } from './safe-json';
 
 const log = createLogger('probe-cache');
 
@@ -420,16 +421,16 @@ export function applyUserCorrection(
       graph.nodes[nodeIndex].responsibility = correction.newValue;
       break;
     case 'publicAPI':
-      graph.nodes[nodeIndex].publicAPI = JSON.parse(correction.newValue);
+      graph.nodes[nodeIndex].publicAPI = safeJsonParse<string[]>(correction.newValue, []);
       break;
     case 'keyTypes':
-      graph.nodes[nodeIndex].keyTypes = JSON.parse(correction.newValue);
+      graph.nodes[nodeIndex].keyTypes = safeJsonParse<string[]>(correction.newValue, []);
       break;
     case 'type':
       graph.nodes[nodeIndex].type = correction.newValue as ModuleGraphNode['type'];
       break;
     case 'issues':
-      graph.nodes[nodeIndex].issues = JSON.parse(correction.newValue);
+      graph.nodes[nodeIndex].issues = safeJsonParse<string[]>(correction.newValue, []);
       break;
     case 'merge': {
       // Merge two modules: correction.moduleId = source, correction.newValue = target
@@ -456,7 +457,7 @@ export function applyUserCorrection(
     }
     case 'split': {
       // Split a module: correction.newValue = JSON of new node definitions
-      const newNodes: ModuleGraphNode[] = JSON.parse(correction.newValue);
+      const newNodes: ModuleGraphNode[] = safeJsonParse<ModuleGraphNode[]>(correction.newValue, []);
       // Remove the original node
       graph.nodes = graph.nodes.filter(n => n.id !== correction.moduleId);
       // Add new nodes

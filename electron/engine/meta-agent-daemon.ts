@@ -18,6 +18,7 @@ import { getDb } from '../db';
 import { callLLM, getSettings } from './llm-client';
 import { sendToUI } from './ui-bridge';
 import { createLogger } from './logger';
+import { safeJsonParse } from './safe-json';
 
 const log = createLogger('meta-daemon');
 
@@ -248,7 +249,9 @@ async function runAgentCheck(type: HeartbeatLog['type'], trigger: string, custom
   // Load meta-agent config for name/personality
   const db = getDb();
   const metaRow = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('config') as { value: string } | undefined;
-  const metaConfig = metaRow ? JSON.parse(metaRow.value) : {};
+  const metaConfig = metaRow
+    ? safeJsonParse<Record<string, string>>(metaRow.value, {}, 'meta-agent-config')
+    : {} as Record<string, string>;
   const agentName = metaConfig.name || '元Agent管家';
   const personality = metaConfig.personality || '专业、友好、高效';
   const userNickname = metaConfig.userNickname ? `称呼用户为"${metaConfig.userNickname}"` : '';
@@ -360,14 +363,14 @@ function checkEventHooks(): void {
 
     for (const evt of events) {
       if (config.hooks.onFeatureFailed && evt.type === 'feature:failed') {
-        const data = JSON.parse(evt.data || '{}');
+        const data = safeJsonParse<Record<string, string>>(evt.data || '{}', {}, 'hook-feature-failed');
         triggers.push(`Feature 失败: ${data.title || data.featureId || evt.project_id}`);
       }
       if (config.hooks.onProjectComplete && evt.type === 'project:complete') {
         triggers.push(`项目完成: ${evt.project_id}`);
       }
       if (config.hooks.onError && evt.type === 'error') {
-        const data = JSON.parse(evt.data || '{}');
+        const data = safeJsonParse<Record<string, string>>(evt.data || '{}', {}, 'hook-error');
         triggers.push(`错误: ${data.message?.slice(0, 80) || 'unknown'}`);
       }
     }
