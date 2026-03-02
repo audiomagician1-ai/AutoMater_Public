@@ -1,0 +1,56 @@
+name: 💡 功能建议
+description: 提出一个新功能或改进建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: 相关模块
+      options:
+        - APP — 应用启动与基础设施
+        - SET — 设置与配置
+        - PRJ — 项目管理
+        - IMP — 项目导入
+        - WSH — 许愿与需求
+        - PIP — 流水线编排
+        - DEV — Developer ReAct
+        - QA — QA 审查
+        - NAV — 导航与布局
+        - OVW — 全景仪表盘
+        - WKF — 工作流预设
+        - TEM — 团队管理
+        - META — 元 Agent
+        - LLM — LLM 调用层
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 你遇到了什么问题或不便？
+      placeholder: "例: 每次启动项目都不知道会花多少 Token"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议的解决方案
+      description: 你希望怎样改进？
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 你考虑过的其他方案
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 截图、竞品参考等

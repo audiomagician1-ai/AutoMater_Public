@@ -1,0 +1,118 @@
+name: 🐛 Bug 报告
+description: 报告一个 AutoMater 中发现的问题
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: 所属模块
+      description: Bug 出现在哪个功能模块
+      options:
+        - APP — 应用启动与基础设施
+        - SET — 设置与配置
+        - PRJ — 项目管理
+        - IMP — 项目导入
+        - WSH — 许愿与需求
+        - PIP — 流水线编排
+        - DEV — Developer ReAct
+        - QA — QA 审查
+        - NAV — 导航与布局
+        - OVW — 全景仪表盘
+        - BRD — 看板视图
+        - DOC — 文档管理
+        - OUT — 代码产出
+        - LOG — 日志系统
+        - WKF — 工作流预设
+        - TEM — 团队管理
+        - META — 元 Agent
+        - MSN — 临时工作流
+        - CTX — 上下文管理
+        - TML — 时间线与分析
+        - GIT — Git 集成
+        - LLM — LLM 调用层
+        - SBX — 沙箱执行
+        - MEM — 持久记忆
+        - SKL — 技能系统
+        - MCP — MCP 协议
+        - GDE — 新手教程
+        - SES — 会话管理
+        - MON — 系统监控
+        - ERR — 错误处理与韧性
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 严重程度
+      options:
+        - P0 — 阻断性 (应用崩溃/数据丢失/核心流程中断)
+        - P1 — 严重 (主要功能不可用/严重体验问题)
+        - P2 — 一般 (次要功能异常/体验损伤)
+        - P3 — 轻微 (美化/优化)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 简要描述问题是什么
+      placeholder: "例: 双击启动按钮后流水线启动了两次"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 详细的操作步骤
+      placeholder: |
+        1. 打开 AutoMater
+        2. 进入某个项目的 OverviewPage
+        3. 快速双击"启动"按钮
+        4. 观察日志页
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你认为正确的行为是什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: 系统环境和配置
+      placeholder: |
+        - OS: Windows 11
+        - AutoMater 版本: v6.0
+        - LLM Provider: OpenAI
+        - 模型: gpt-4o
+      render: markdown
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图 / 日志
+      description: 相关截图或错误日志
+
+  - type: input
+    id: related_tc
+    attributes:
+      label: 关联 TC
+      description: 如果是测试中发现的，填写 TC 编号
+      placeholder: "TC-ERR-001"

@@ -1,0 +1,103 @@
+name: ✅ 测试验收报告
+description: 记录一轮黑盒测试的验收结果
+title: "[Test] TC-{模块} — "
+labels: ["testing", "verification"]
+body:
+  - type: dropdown
+    id: round
+    attributes:
+      label: 测试轮次
+      options:
+        - R1 — 冒烟测试 (APP + SET + PRJ)
+        - R2 — 核心流程 (WSH + PIP + DEV + QA + LLM)
+        - R3 — 辅助功能 (IMP + META + WKF + TEM)
+        - R4 — 浏览与展示 (NAV + OVW + BRD + DOC + OUT + LOG)
+        - R5 — 韧性与边界 (ERR + SBX + GIT + MEM + SES + CTX + TML)
+        - R6 — 体验打磨 (GDE + MON + 回归)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: 测试模块
+      options:
+        - APP — 应用启动与基础设施
+        - SET — 设置与配置
+        - PRJ — 项目管理
+        - IMP — 项目导入
+        - WSH — 许愿与需求
+        - PIP — 流水线编排
+        - DEV — Developer ReAct
+        - QA — QA 审查
+        - NAV — 导航与布局
+        - OVW — 全景仪表盘
+        - BRD — 看板视图
+        - DOC — 文档管理
+        - OUT — 代码产出
+        - LOG — 日志系统
+        - WKF — 工作流预设
+        - TEM — 团队管理
+        - META — 元 Agent
+        - MSN — 临时工作流
+        - CTX — 上下文管理
+        - TML — 时间线与分析
+        - GIT — Git 集成
+        - LLM — LLM 调用层
+        - SBX — 沙箱执行
+        - MEM — 持久记忆
+        - ERR — 错误处理与韧性
+        - SES — 会话管理
+        - MON — 系统监控
+        - GDE — 新手教程
+    validations:
+      required: true
+
+  - type: textarea
+    id: results
+    attributes:
+      label: 测试结果
+      description: |
+        逐条填写每个 TC 的结果。格式：
+        ✅ 通过 | ❌ 失败 | ⚠️ 有问题 | ⏭️ 跳过
+      placeholder: |
+        | TC | 用例名 | 结果 | 备注 |
+        |----|--------|------|------|
+        | TC-APP-001 | 应用首次启动 | ✅ | 正常 |
+        | TC-APP-002 | DB迁移正确执行 | ❌ | schema_version表不存在 |
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: bugs
+    attributes:
+      label: 关联 Bug Issues
+      description: 列出本轮测试发现的 Bug Issue 编号
+      placeholder: |
+        - #12 DB迁移schema_version表缺失
+        - #13 品牌Logo仍为"F"
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 总结评估
+      description: 通过率、关键发现、整体评估
+      placeholder: |
+        - 通过率: 8/10 (80%)
+        - P0 通过率: 4/5 (80%)
+        - 关键发现: DB迁移系统未在首次启动时正确执行
+        - 总体评估: 需修复DB迁移后重测
+    validations:
+      required: true
+
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: 验收结论
+      options:
+        - test-pass — 全部通过
+        - test-partial — 部分通过
+        - test-fail — 未通过
+    validations:
+      required: true
