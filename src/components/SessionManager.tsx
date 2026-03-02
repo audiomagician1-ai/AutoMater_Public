@@ -12,6 +12,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('SessionManager');
 
 interface SessionInfo {
   id: string;
@@ -59,7 +62,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       const list = await (window as any).automater.session.list(projectId, agentId);
       setSessions(list || []);
     } catch (err) {
-      console.error('Failed to load sessions:', err);
+      log.error('Failed to load sessions:', err);
     }
     setLoading(false);
   }, [projectId, agentId]);
@@ -69,7 +72,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       const s = await (window as any).automater.session.backupStats();
       setStats(s);
     } catch (err) {
-      console.error('Failed to load backup stats:', err);
+      log.error('Failed to load backup stats:', err);
     }
   }, []);
 
@@ -85,7 +88,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       await (window as any).automater.session.create(projectId, aId, role);
       await loadSessions();
     } catch (err) {
-      console.error('Failed to create session:', err);
+      log.error('Failed to create session:', err);
     }
   };
 
@@ -94,7 +97,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       await (window as any).automater.session.switch(sessionId);
       await loadSessions();
     } catch (err) {
-      console.error('Failed to switch session:', err);
+      log.error('Failed to switch session:', err);
     }
   };
 
@@ -104,7 +107,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       const backup = await (window as any).automater.session.readBackup(sessionId);
       setBackupContent(backup);
     } catch (err) {
-      console.error('Failed to read backup:', err);
+      log.error('Failed to read backup:', err);
       setBackupContent(null);
     }
   };
@@ -116,7 +119,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
       alert(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
       await loadStats();
     } catch (err) {
-      console.error('Cleanup failed:', err);
+      log.error('Cleanup failed:', err);
     }
   };
 

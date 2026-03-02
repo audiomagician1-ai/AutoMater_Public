@@ -300,6 +300,218 @@ export function graphSummary(graph: CodeGraph): string {
 }
 
 // ═══════════════════════════════════════
+// Community Detection (Label Propagation)
+// ═══════════════════════════════════════
+
+export interface CommunityInfo {
+  /** Community label → files in this community */
+  communities: Map<string, string[]>;
+  /** File → community label */
+  fileToCommunity: Map<string, string>;
+  /** Number of communities */
+  count: number;
+}
+
+/**
+ * 基于 Label Propagation 的社区检测 — 识别文件级模块聚类。
+ *
+ * 算法: 每个节点初始标签 = 自身目录前缀; 迭代时取邻居 (import + importedBy)
+ * 中频率最高的标签; 收敛后输出社区。
+ *
+ * 时间: O(iter * E), 通常 5-10 次迭代收敛。
+ */
+export function detectCommunities(graph: CodeGraph, maxIterations = 10): CommunityInfo {
+  const fileToCommunity = new Map<string, string>();
+
+  // 初始标签 = 第一级有意义的目录 (src/components → 'src/components')
+  for (const file of graph.nodes.keys()) {
+    const parts = file.split('/');
+    let label: string;
+    if (parts.length >= 3 && ['src', 'lib', 'app', 'packages', 'electron'].includes(parts[0])) {
+      label = `${parts[0]}/${parts[1]}`;
+    } else if (parts.length >= 2) {
+      label = parts[0];
+    } else {
+      label = '_root';
+    }
+    fileToCommunity.set(file, label);
+  }
+
+  // Label propagation iterations
+  for (let iter = 0; iter < maxIterations; iter++) {
+    let changed = 0;
+    for (const [file, node] of graph.nodes) {
+      // Collect neighbor labels (imports + importedBy)
+      const labelCounts = new Map<string, number>();
+      for (const imp of node.imports) {
+        const lbl = fileToCommunity.get(imp);
+        if (lbl) labelCounts.set(lbl, (labelCounts.get(lbl) || 0) + 1);
+      }
+      for (const dep of node.importedBy) {
+        const lbl = fileToCommunity.get(dep);
+        if (lbl) labelCounts.set(lbl, (labelCounts.get(lbl) || 0) + 1);
+      }
+      if (labelCounts.size === 0) continue;
+
+      // Pick most frequent label (tie-break: keep current)
+      const currentLabel = fileToCommunity.get(file)!;
+      let bestLabel = currentLabel;
+      let bestCount = labelCounts.get(currentLabel) || 0;
+      for (const [lbl, cnt] of labelCounts) {
+        if (cnt > bestCount) { bestLabel = lbl; bestCount = cnt; }
+      }
+      if (bestLabel !== currentLabel) {
+        fileToCommunity.set(file, bestLabel);
+        changed++;
+      }
+    }
+    if (changed === 0) break; // Converged
+  }
+
+  // Build community map
+  const communities = new Map<string, string[]>();
+  for (const [file, label] of fileToCommunity) {
+    if (!communities.has(label)) communities.set(label, []);
+    communities.get(label)!.push(file);
+  }
+
+  return { communities, fileToCommunity, count: communities.size };
+}
+
+// ═══════════════════════════════════════
+// Hub Files Detection
+// ═══════════════════════════════════════
+
+export interface HubFile {
+  file: string;
+  /** Number of files that import this file */
+  importedByCount: number;
+  /** Number of files this file imports */
+  importCount: number;
+  /** Centrality score (importedBy * 2 + imports) */
+  centrality: number;
+  /** Which community this hub belongs to */
+  community?: string;
+}
+
+/**
+ * 识别 Hub 文件 — 被大量文件 import 或 import 大量文件的关键节点。
+ * Hub 文件是理解项目架构的关键入口，探针应优先探索。
+ */
+export function getHubFiles(
+  graph: CodeGraph,
+  communityInfo?: CommunityInfo,
+  topN = 20,
+): HubFile[] {
+  const hubs: HubFile[] = [];
+
+  for (const [file, node] of graph.nodes) {
+    const importedByCount = node.importedBy.length;
+    const importCount = node.imports.length;
+    // Only include files that are actually hubs (at least 2 connections)
+    if (importedByCount + importCount < 2) continue;
+    const centrality = importedByCount * 2 + importCount;
+    hubs.push({
+      file,
+      importedByCount,
+      importCount,
+      centrality,
+      community: communityInfo?.fileToCommunity.get(file),
+    });
+  }
+
+  hubs.sort((a, b) => b.centrality - a.centrality);
+  return hubs.slice(0, topN);
+}
+
+// ═══════════════════════════════════════
+// Project Profile Builder
+// ═══════════════════════════════════════
+
+export interface ProjectProfile {
+  scale: 'medium' | 'large' | 'massive';
+  graphDensity: number;
+  languageCount: number;
+  hasCircularDeps: boolean;
+  nestingDepth: number;
+  readmeQuality: 'good' | 'poor' | 'none';
+  entryPointCount: number;
+  hubFileCount: number;
+  communityCount: number;
+}
+
+/**
+ * 根据 Code Graph + 文件统计构建项目特征画像，驱动探针策略。
+ */
+export function buildProjectProfile(
+  graph: CodeGraph,
+  fileCount: number,
+  locByExtension: Record<string, number>,
+  communityInfo: CommunityInfo,
+  hubFiles: HubFile[],
+  readmeExists: boolean,
+  readmeLength: number,
+  entryFiles: string[],
+): ProjectProfile {
+  // Scale
+  const scale: ProjectProfile['scale'] =
+    fileCount > 2000 ? 'massive' : fileCount > 500 ? 'large' : 'medium';
+
+  // Graph density
+  const graphDensity = graph.fileCount > 0
+    ? graph.edgeCount / graph.fileCount
+    : 0;
+
+  // Language count (by extension families)
+  const langFamilies = new Set<string>();
+  for (const ext of Object.keys(locByExtension)) {
+    if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) langFamilies.add('js/ts');
+    else if (ext === '.py') langFamilies.add('python');
+    else if (ext === '.go') langFamilies.add('go');
+    else if (ext === '.rs') langFamilies.add('rust');
+    else if (['.java', '.kt'].includes(ext)) langFamilies.add('jvm');
+    else if (['.c', '.cpp', '.h', '.hpp'].includes(ext)) langFamilies.add('c/cpp');
+    else langFamilies.add(ext);
+  }
+
+  // Circular dependency detection (simple: A→B and B→A)
+  let hasCircularDeps = false;
+  for (const [file, node] of graph.nodes) {
+    for (const imp of node.imports) {
+      const target = graph.nodes.get(imp);
+      if (target?.imports.includes(file)) {
+        hasCircularDeps = true;
+        break;
+      }
+    }
+    if (hasCircularDeps) break;
+  }
+
+  // Nesting depth (max directory depth among all files)
+  let nestingDepth = 0;
+  for (const file of graph.nodes.keys()) {
+    const depth = file.split('/').length;
+    if (depth > nestingDepth) nestingDepth = depth;
+  }
+
+  // README quality
+  const readmeQuality: ProjectProfile['readmeQuality'] =
+    !readmeExists ? 'none' : readmeLength > 500 ? 'good' : 'poor';
+
+  return {
+    scale,
+    graphDensity: Math.round(graphDensity * 100) / 100,
+    languageCount: langFamilies.size,
+    hasCircularDeps,
+    nestingDepth,
+    readmeQuality,
+    entryPointCount: entryFiles.length,
+    hubFileCount: hubFiles.length,
+    communityCount: communityInfo.count,
+  };
+}
+
+// ═══════════════════════════════════════
 // Internal — File Collection
 // ═══════════════════════════════════════
 

@@ -39,7 +39,7 @@ function MiniAgentCard({ agent, isSelected, onClick }: {
 }) {
   const reactState = useAppStore(s => s.agentReactStates.get(agent.id));
   const liveStatus = useAppStore(s => s.agentStatuses.get(agent.id));
-  const msgCount = useAppStore(s => (s.agentWorkMessages.get(agent.id) || []).length);
+  const msgCount = useAppStore(s => s.agentWorkMessages.get(agent.id)?.length ?? 0);
   const info = ROLE_INFO[agent.role] || { icon: '🤖', title: agent.role };
   const isWorking = agent.status === 'working' || liveStatus?.status === 'working';
   const latestIter = reactState?.iterations?.length ? reactState.iterations[reactState.iterations.length - 1] : undefined;

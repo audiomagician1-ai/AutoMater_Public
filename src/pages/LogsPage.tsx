@@ -11,6 +11,9 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('LogsPage');
 
 const PAGE_SIZE = 200;
 
@@ -283,7 +286,7 @@ export function LogsPage() {
       }
       setTotalCount(result.total);
     } catch (err) {
-      console.error('[LogsPage] Failed to load logs:', err);
+      log.error('Failed to load logs:', err);
     } finally {
       setLoading(false);
       setInitialLoaded(true);

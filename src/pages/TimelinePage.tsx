@@ -12,6 +12,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('TimelinePage');
 
 type TabId = 'timeline' | 'replay' | 'analytics' | 'checkpoints' | 'knowledge';
 
@@ -78,7 +81,7 @@ export default function TimelinePage() {
       setCheckpoints(cps);
       setMissionStatus(ms);
     } catch (err) {
-      console.error('Failed to load timeline data:', err);
+      log.error('Failed to load timeline data:', err);
     }
     setLoading(false);
   }, [projectId]);

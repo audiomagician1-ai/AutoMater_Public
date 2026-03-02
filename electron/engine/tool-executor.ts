@@ -662,6 +662,33 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     return { success: true, output: list, action: 'github' };
   }
 
+  // v13.0: GitHub 扩展
+  if (call.name === 'github_close_issue') {
+    const ok = await closeIssue(ctx.gitConfig, call.arguments.issue_number);
+    return ok
+      ? { success: true, output: `Issue #${call.arguments.issue_number} 已关闭`, action: 'github' }
+      : { success: false, output: `关闭 Issue #${call.arguments.issue_number} 失败 (可能未配置 GitHub 模式)`, action: 'github' };
+  }
+
+  if (call.name === 'github_add_comment') {
+    const ok = await addIssueComment(ctx.gitConfig, call.arguments.issue_number, call.arguments.body);
+    return ok
+      ? { success: true, output: `已在 Issue #${call.arguments.issue_number} 添加评论`, action: 'github' }
+      : { success: false, output: `评论 Issue #${call.arguments.issue_number} 失败`, action: 'github' };
+  }
+
+  if (call.name === 'github_get_issue') {
+    // 复用 listIssues 的数据并过滤 — git-provider 暂无 getIssue，用 list + filter
+    const issues = await listIssues(ctx.gitConfig, 'all');
+    const issue = issues.find(i => i.number === call.arguments.issue_number);
+    if (!issue) return { success: false, output: `Issue #${call.arguments.issue_number} 未找到`, action: 'github' };
+    return {
+      success: true,
+      output: `#${issue.number} [${issue.state}] ${issue.title}\n标签: ${issue.labels.join(', ') || '无'}\nURL: ${issue.html_url}\n\n${issue.body || '(无描述)'}`,
+      action: 'github',
+    };
+  }
+
   // ── Web ──
   if (call.name === 'web_search') {
     const result = await webSearch(call.arguments.query, call.arguments.max_results ?? 8);

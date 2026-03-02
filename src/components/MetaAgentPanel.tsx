@@ -8,11 +8,13 @@
  * v7.0: 名字后加管理入口按钮 + 动态名字/开场白
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
 import { MetaAgentSettings } from './MetaAgentSettings';
 import { AgentWorkFeed } from './AgentWorkFeed';
 import { toErrorMessage } from '../utils/errors';
+
+const EMPTY_WORK_MSGS: readonly any[] = [];
 
 export function MetaAgentPanel() {
   const open = useAppStore(s => s.metaAgentPanelOpen);
@@ -33,7 +35,8 @@ export function MetaAgentPanel() {
   const [greeting, setGreeting] = useState('你好！我是元Agent管家。告诉我你的需求，或问我任何项目相关的问题。');
   const [showToolActivity, setShowToolActivity] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const metaAgentWorkMsgs = useAppStore(s => s.agentWorkMessages.get('meta-agent') || []);
+  const metaAgentWorkMsgsRaw = useAppStore(s => s.agentWorkMessages.get('meta-agent'));
+  const metaAgentWorkMsgs = metaAgentWorkMsgsRaw ?? EMPTY_WORK_MSGS;
 
   // Load config to get agent name and greeting
   useEffect(() => {

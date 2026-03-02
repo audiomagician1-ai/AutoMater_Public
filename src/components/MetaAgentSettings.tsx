@@ -9,6 +9,9 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('MetaAgentSettings');
 
 type Tab = 'config' | 'memory';
 type MemoryCategory = 'identity' | 'user_profile' | 'lessons' | 'facts' | 'conversation_summary';
@@ -55,9 +58,9 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   // Load config on mount
   useEffect(() => {
-    window.automater.metaAgent.getConfig().then(setConfig).catch(console.error);
+    window.automater.metaAgent.getConfig().then(setConfig).catch(e => log.error('init fetch failed', e));
     loadMemories();
-    window.automater.metaAgent.getMemoryStats().then(setMemoryStats).catch(console.error);
+    window.automater.metaAgent.getMemoryStats().then(setMemoryStats).catch(e => log.error('init fetch failed', e));
   }, []);
 
   const loadMemories = async () => {
@@ -72,7 +75,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       }
       setMemories(mems);
     } catch (err) {
-      console.error('Failed to load memories:', err);
+      log.error('Failed to load memories:', err);
     }
   };
 
@@ -87,7 +90,7 @@ export function MetaAgentSettings({ onClose }: Props) {
         setTimeout(() => setSaved(false), 2000);
       }
     } catch (err) {
-      console.error('Save config failed:', err);
+      log.error('Save config failed:', err);
     } finally {
       setSaving(false);
     }
@@ -107,7 +110,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       loadMemories();
       window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
-      console.error('Add memory failed:', err);
+      log.error('Add memory failed:', err);
     }
   };
 
@@ -121,7 +124,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       setEditingMemory(null);
       loadMemories();
     } catch (err) {
-      console.error('Update memory failed:', err);
+      log.error('Update memory failed:', err);
     }
   };
 
@@ -131,7 +134,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       loadMemories();
       window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
-      console.error('Delete memory failed:', err);
+      log.error('Delete memory failed:', err);
     }
   };
 
@@ -141,7 +144,7 @@ export function MetaAgentSettings({ onClose }: Props) {
       loadMemories();
       window.automater.metaAgent.getMemoryStats().then(setMemoryStats);
     } catch (err) {
-      console.error('Clear memories failed:', err);
+      log.error('Clear memories failed:', err);
     }
   };
 

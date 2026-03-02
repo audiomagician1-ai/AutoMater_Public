@@ -10,6 +10,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore, type AgentWorkMessage } from '../stores/app-store';
 
+const EMPTY_MSGS: readonly AgentWorkMessage[] = [];
+
 // ═══════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════
@@ -53,7 +55,8 @@ export interface AgentWorkFeedProps {
 }
 
 export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWorkFeedProps) {
-  const messages = useAppStore(s => s.agentWorkMessages.get(agentId) || []);
+  const messagesRaw = useAppStore(s => s.agentWorkMessages.get(agentId));
+  const messages = messagesRaw ?? EMPTY_MSGS;
   const reactState = useAppStore(s => s.agentReactStates.get(agentId));
   const activeStream = useAppStore(s => s.activeStreams.get(agentId));
   const feedRef = useRef<HTMLDivElement>(null);
