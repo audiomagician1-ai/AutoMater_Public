@@ -249,14 +249,14 @@ Agent Role Memory          {workspace}/.AutoMater/      对应角色 agent      
 
 ### 3.3 Phase C: 高级特性
 
-| 编号 | 改进项 | 对标 | 优先级 | 预估 |
-|---|---|---|---|---|
-| C1 | **Summarizer 模型** — 专用小模型/prompt 压缩长对话历史，替代暴力截断 | Cognition | P1 | 1 版本 |
-| C2 | **Code Graph** — import/call graph 分析，替代关键词匹配查找相关文件 | Factory | P2 | 2 版本 |
-| C3 | **TDD 模式** — Developer 先写测试，再写实现，QA 直接跑测试而非纯文本审查 | Factory, OpenHands | P1 | 1 版本 |
-| C4 | **Sub-agent 能力** — Developer 可以 spawn 只读子 agent 做调研/查询，不写代码 | Claude Code Task | P2 | 1 版本 |
-| C5 | **Dynamic Model Selection** — 按任务复杂度自动选模型（简单格式化 → mini，复杂架构 → strong） | Cursor 2.0 | P2 | 0.5 版本 |
-| C6 | **Event Stream + Replay** — 所有操作记录为可重放事件流，支持调试和审计 | OpenHands | P2 | 2 版本 |
+| 编号 | 改进项 | 对标 | 优先级 | 预估 | 状态 |
+|---|---|---|---|---|---|
+| C1 | **Summarizer 模型** — 专用小模型/prompt 压缩长对话历史，替代暴力截断 | Cognition | P1 | 1 版本 | ✅ v3.0 context-compaction.ts |
+| C2 | **Code Graph** — import/call graph 分析，替代关键词匹配查找相关文件 | Factory | P2 | 2 版本 | ✅ v3.0 code-graph.ts |
+| C3 | **TDD 模式** — Developer 先写测试，再写实现，QA 直接跑测试而非纯文本审查 | Factory, OpenHands | P1 | 1 版本 | ✅ v6.0 G14 |
+| C4 | **Sub-agent 能力** — Developer 可以 spawn 只读子 agent 做调研/查询，不写代码 | Claude Code Task | P2 | 1 版本 | ✅ v3.0 sub-agent.ts + spawn_researcher |
+| C5 | **Dynamic Model Selection** — 按任务复杂度自动选模型（简单格式化 → mini，复杂架构 → strong） | Cursor 2.0 | P2 | 0.5 版本 | ✅ v3.0 model-selector.ts (strong/worker/fast) |
+| C6 | **Event Stream + Replay** — 所有操作记录为可重放事件流，支持调试和审计 | OpenHands | P2 | 2 版本 | ✅ v6.0 event-store.ts + TimelinePage |
 
 ### 3.4 建议执行顺序
 

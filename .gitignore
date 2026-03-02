@@ -1,31 +1,36 @@
 node_modules/
 dist/
+dist-electron/
 target/
+release/
+
+# Environment
 .env
 .env.local
+*.local
+
+# Logs
 *.log
+
+# OS
 .DS_Store
 Thumbs.db
-
-# Tauri
-apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/WixTools/
-apps/desktop/src-tauri/icons/generated/
-
-# Vite
-*.local
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-release/
-electron-debug.log
-release-test.log
-dist/
-dist-electron/
-.bak
 
 # Test coverage
 coverage/
+coverage-out*.txt
+
+# Debug artifacts — do not commit
+debug-*.js
+cdp-*.js
+cdp-*.log
+check-db.js
+
+# Backup
+.bak

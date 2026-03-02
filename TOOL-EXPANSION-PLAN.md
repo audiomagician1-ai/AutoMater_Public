@@ -87,7 +87,7 @@ GitHub:    github_create_issue, github_list_issues
 
 ---
 
-### Tier 2: v2.2 — Computer Use 基础（5 个新工具，依赖 PowerShell/.NET）
+### Tier 2: v2.2 — Computer Use 基础（5 个新工具，依赖 PowerShell/.NET） ✅ 已完成
 
 **目标**: Agent 能看到屏幕、操控鼠标键盘 — 黑盒测试的基础
 
@@ -178,7 +178,7 @@ Agent ReAct Loop:
 
 ---
 
-### Tier 5: v3.0 — 游戏引擎集成（可插拔架构）
+### Tier 5: v3.0 — 游戏引擎集成（可插拔架构） ⬜ 未启动
 
 **目标**: Agent 能操控 Unity/Unreal Editor，创建场景、放置对象、运行测试
 

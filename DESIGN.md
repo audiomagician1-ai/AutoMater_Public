@@ -3,8 +3,8 @@
 > Agent 版软件开发公司：用户许愿，虚拟团队交付。
 
 > ⚠️ **注意**: 本文档为项目初始设计方案（Tauri + Monorepo 架构）。实际实现已迁移为 **Electron 33 单体架构**。
-> 最新架构请参见 [`CLAUDE.md`](./CLAUDE.md)（v6.0 项目大脑）和 [`docs/IMPLEMENTATION-AUDIT-2026-03.md`](./docs/IMPLEMENTATION-AUDIT-2026-03.md)（规划 vs 现实差距分析）。
-> 本文档保留作为产品愿景和角色体系的参考。
+> 最新架构请参见 [`CLAUDE.md`](./CLAUDE.md)（**v13.0 项目大脑，单一事实源**）。
+> 本文档保留作为产品愿景和角色体系的历史参考，不再维护。
 
 ## 1. 产品愿景
 
