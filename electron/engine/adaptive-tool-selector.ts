@@ -10,7 +10,7 @@
  * v1.0 — 2026-03-02
  */
 
-import type { OpenAIFunctionTool } from './tool-registry';
+import type { OpenAIFunctionTool } from './types';
 
 // ═══════════════════════════════════════
 // Types

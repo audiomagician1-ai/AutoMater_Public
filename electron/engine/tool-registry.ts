@@ -29,7 +29,7 @@ export interface ToolResult {
   success: boolean;
   output: string;
   /** 操作类型 (用于 UI 展示) */
-  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer';
+  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer' | 'complete' | 'blocked';
   /** 附带图片 Base64 (截图/浏览器截图等) */
   _imageBase64?: string;
 }

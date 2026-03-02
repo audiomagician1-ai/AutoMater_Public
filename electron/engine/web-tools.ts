@@ -25,8 +25,10 @@ import {
 
 export { configureSearch, getAvailableProviders, type SearchProviderConfig };
 
+import { getResearchCache } from './research-cache';
+
 // ═══════════════════════════════════════
-// web_search — 委托给 search-provider
+// web_search — 委托给 search-provider (with cache)
 // ═══════════════════════════════════════
 
 export interface SearchResult {
@@ -43,6 +45,17 @@ export async function webSearch(
   query: string,
   maxResults: number = 8,
 ): Promise<{ success: boolean; content: string; results: SearchResult[]; error?: string }> {
+  // v18.0: 缓存查询
+  const cache = getResearchCache();
+  const cached = cache.lookup(query);
+  if (cached.hit && cached.entry) {
+    return {
+      success: true,
+      content: `[缓存命中 ${cached.matchType}, 相似度 ${(cached.similarity ?? 1).toFixed(2)}]\n${cached.entry.result}`,
+      results: [],
+    };
+  }
+
   const resp = await providerSearch(query, maxResults);
 
   const results: SearchResult[] = resp.results.map(r => ({
@@ -50,6 +63,11 @@ export async function webSearch(
     url: r.url,
     snippet: r.snippet,
   }));
+
+  // v18.0: 缓存成功结果
+  if (resp.success && resp.content.length > 50) {
+    cache.store(query, resp.content.slice(0, 12000), 'web_search');
+  }
 
   return {
     success: resp.success,

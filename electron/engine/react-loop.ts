@@ -38,6 +38,7 @@ import {
 } from './react-resilience';
 import { summarizeToolResult } from './tool-result-summarizer';
 import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
+import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
 import type { GitProviderConfig } from './git-provider';
 
 const log = createLogger('react-loop');
@@ -178,6 +179,9 @@ export async function reactDeveloperLoop(
     taskCompleted: false,
     filesWritten: new Set<string>(),
   };
+
+  // v18.0: 迭代间学习
+  const learningState: LearningState = createLearningState();
 
   // v11.0: 从 workerId 提取 worker 索引 (用于成员级配置)
   const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
@@ -349,6 +353,9 @@ export async function reactDeveloperLoop(
     if (!budget.ok) break;
 
     try {
+      // v18.0: 注入从失败中学到的教训
+      injectLessons(messages, learningState);
+
       const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
       totalCost += cost;
@@ -527,6 +534,22 @@ export async function reactDeveloperLoop(
             sendToUI(win, 'agent:log', {
               projectId, agentId: workerId,
               content: `🔄 ${tc.function.name} 自动重试成功`,
+            });
+          }
+        }
+
+        // v18.0: 迭代间学习 — 记录失败并提取教训
+        if (!toolResult.success) {
+          const lesson = recordFailure(learningState, {
+            toolName: tc.function.name,
+            errorOutput: toolResult.output.slice(0, 500),
+            arguments: toolArgs,
+            timestamp: Date.now(),
+          });
+          if (lesson) {
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `📚 学到教训: ${lesson.description}`,
             });
           }
         }
@@ -859,6 +882,9 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     filesWritten: new Set<string>(),
   };
 
+  // v18.0: 迭代间学习
+  const learningState: LearningState = createLearningState();
+
   const messages: LLMMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
@@ -884,6 +910,9 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     }
 
     try {
+      // v18.0: 注入从失败中学到的教训
+      injectLessons(messages, learningState);
+
       const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
       totalCost += cost; totalIn += result.inputTokens; totalOut += result.outputTokens;

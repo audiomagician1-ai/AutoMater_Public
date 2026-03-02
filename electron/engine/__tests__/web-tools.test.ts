@@ -20,6 +20,14 @@ vi.mock('../search-provider', () => ({
   getAvailableProviders: vi.fn(() => ['brave', 'searxng']),
 }));
 
+// Mock research-cache to prevent cache interference in tests
+vi.mock('../research-cache', () => ({
+  getResearchCache: () => ({
+    lookup: () => ({ hit: false }),
+    store: vi.fn(),
+  }),
+}));
+
 import { webSearch, webSearchBoost, fetchUrl, httpRequest, configureSearch, getAvailableProviders } from '../web-tools';
 
 describe('webSearch', () => {
