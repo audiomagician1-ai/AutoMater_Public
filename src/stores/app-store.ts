@@ -1,135 +1,21 @@
 /**
- * 全局应用状态 (Zustand)
- * v0.7: 双层导航 — 外层 (项目列表/设置) → 内层 (项目子页)
- * v1.1: 上下文快照 + Context 页面
+ * 全局应用状态 (Zustand) — Composed from slices
+ *
+ * Slices:
+ *   NavigationSlice — dual-layer nav (global + project pages)
+ *   LogSlice        — real-time logs and streaming
+ *   AgentSlice      — agent statuses, react states, context, work messages
+ *   MetaAgentSlice  — meta agent panel and conversations
  */
 
 import { create } from 'zustand';
+import { createNavigationSlice, type NavigationSlice, type GlobalPageId, type ProjectPageId } from './slices/navigation-slice';
+import { createLogSlice, type LogSlice } from './slices/log-slice';
+import { createAgentSlice, type AgentSlice } from './slices/agent-slice';
+import { createMetaAgentSlice, type MetaAgentSlice } from './slices/meta-agent-slice';
 
-// Types used by store
-// ContextSnapshot and AgentReactState are defined globally in src/types/api.d.ts
-// Store uses compatible subtypes for internal state management
-
-/** Agent ReAct 状态 — 使用 api.d.ts 中的全局 AgentReactState 接口 */
-// Store 兼容两种来源：
-//  1. 后端 project:getReactStates → api.d.ts 版 (有 iterations 数组)
-//  2. 前端轻量更新 agent:react-state 事件 → 只有 iteration 数字
-// 这里用联合类型兼容两者
-interface StoreAgentReactState {
-  agentId: string;
-  featureId?: string;
-  iteration?: number;
-  iterations?: ReactIterationState[];
-  maxContextWindow?: number;
-  phase?: string;
-  toolCalls?: Array<{ name: string; args: string; success?: boolean }>;
-  lastUpdated?: number;
-}
-
-/** 外层页面 (无需选中项目) */
-export type GlobalPageId = 'projects' | 'settings' | 'guide';
-/** 项目内子页面 (需要 currentProjectId) */
-export type ProjectPageId = 'overview' | 'wish' | 'board' | 'team' | 'docs' | 'workflow' | 'output' | 'logs' | 'context' | 'timeline' | 'sessions' | 'guide';
-
-interface LogEntry {
-  id: number;
-  projectId: string;
-  agentId: string;
-  content: string;
-  timestamp: number;
-  streaming?: boolean;
-}
-
-interface StreamSession {
-  agentId: string;
-  label: string;
-  content: string;
-  startedAt: number;
-}
-
-interface AppState {
-  // ── 双层导航 ──
-  /** 是否处于项目内部视图 */
-  insideProject: boolean;
-  /** 外层当前页 */
-  globalPage: GlobalPageId;
-  /** 项目内当前子页 */
-  projectPage: ProjectPageId;
-  /** 进入项目 */
-  enterProject: (projectId: string, page?: ProjectPageId) => void;
-  /** 返回项目列表 */
-  exitProject: () => void;
-  /** 外层切页 */
-  setGlobalPage: (page: GlobalPageId) => void;
-  /** 项目内切页 */
-  setProjectPage: (page: ProjectPageId) => void;
-
-  // 当前项目
-  currentProjectId: string | null;
-  setCurrentProject: (id: string | null) => void;
-
-  // 实时日志
-  logs: LogEntry[];
-  addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
-  clearLogs: () => void;
-
-  // 流式日志
-  activeStreams: Map<string, StreamSession>;
-  startStream: (agentId: string, label: string) => void;
-  appendStream: (agentId: string, chunk: string) => void;
-  endStream: (agentId: string) => void;
-
-  // Features 实时状态
-  featureStatuses: Map<string, string>;
-  updateFeatureStatus: (featureId: string, status: string) => void;
-
-  // Agent 实时状态
-  agentStatuses: Map<string, { status: string; currentTask: string | null; featureTitle?: string }>;
-  updateAgentStatus: (agentId: string, status: string, currentTask: string | null, featureTitle?: string) => void;
-
-  // 设置已配置
-  settingsConfigured: boolean;
-  setSettingsConfigured: (v: boolean) => void;
-
-  // v1.1: 上下文快照
-  contextSnapshots: Map<string, ContextSnapshot>;
-  updateContextSnapshot: (snapshot: ContextSnapshot) => void;
-  clearContextSnapshots: () => void;
-
-  // v1.1: Agent ReAct 实时状态
-  agentReactStates: Map<string, StoreAgentReactState>;
-  updateAgentReactState: (state: StoreAgentReactState) => void;
-  clearAgentReactStates: () => void;
-
-  // v4.4: 通知 badge 计数
-  pendingNotifications: number;
-  incrementNotifications: () => void;
-  clearNotifications: () => void;
-
-  // v4.4: 用户验收弹窗
-  showAcceptancePanel: boolean;
-  setShowAcceptancePanel: (show: boolean) => void;
-
-  // v6.0: Agent 工作细节消息流 (按 agentId 分组)
-  agentWorkMessages: Map<string, AgentWorkMessage[]>;
-  addAgentWorkMessage: (agentId: string, msg: AgentWorkMessage) => void;
-  clearAgentWorkMessages: (agentId?: string) => void;
-
-  // v5.3: 全局右侧元Agent面板
-  metaAgentPanelOpen: boolean;
-  toggleMetaAgentPanel: () => void;
-
-  // v7.0: 元Agent 管理面板 (Modal)
-  metaAgentSettingsOpen: boolean;
-  setMetaAgentSettingsOpen: (open: boolean) => void;
-
-  // v5.4: 元Agent对话消息持久化 (按 projectId 分组, '_global' 为跨项目)
-  metaAgentMessages: Map<string, MetaAgentMessage[]>;
-  addMetaAgentMessage: (projectId: string, msg: MetaAgentMessage) => void;
-  clearMetaAgentMessages: (projectId: string) => void;
-  /** 更新最后一条 assistant 消息（用于流式/替换 placeholder） */
-  updateLastAssistantMessage: (projectId: string, content: string) => void;
-}
+// Re-export page ID types for consumers
+export type { GlobalPageId, ProjectPageId };
 
 /** Agent 工作消息 — 对话式展示思维链、工具调用、输出等 */
 export interface AgentWorkMessage {
@@ -160,149 +46,12 @@ export interface MetaAgentMessage {
   triggeredWish?: boolean;
 }
 
-let logIdCounter = 0;
+type AppState = NavigationSlice & LogSlice & AgentSlice & MetaAgentSlice;
 
-export const useAppStore = create<AppState>((set) => ({
-  // ── 双层导航 ──
-  insideProject: false,
-  globalPage: 'projects',
-  projectPage: 'overview',
-
-  enterProject: (projectId, page = 'overview') => set({
-    insideProject: true,
-    currentProjectId: projectId,
-    projectPage: page,
-  }),
-  exitProject: () => set({
-    insideProject: false,
-    globalPage: 'projects',
-  }),
-  setGlobalPage: (page) => set({ globalPage: page, insideProject: false }),
-  setProjectPage: (page) => set({ projectPage: page }),
-
-  currentProjectId: null,
-  setCurrentProject: (id) => set({ currentProjectId: id }),
-
-  logs: [],
-  addLog: (log) => set((state) => ({
-    logs: [...state.logs.slice(-500), { ...log, id: ++logIdCounter, timestamp: Date.now() }],
-  })),
-  clearLogs: () => set({ logs: [] }),
-
-  // ── 流式日志 ──
-  activeStreams: new Map(),
-  startStream: (agentId, label) => set((state) => {
-    const next = new Map(state.activeStreams);
-    next.set(agentId, { agentId, label, content: '', startedAt: Date.now() });
-    return { activeStreams: next };
-  }),
-  appendStream: (agentId, chunk) => set((state) => {
-    const session = state.activeStreams.get(agentId);
-    if (!session) return {};
-    const next = new Map(state.activeStreams);
-    next.set(agentId, { ...session, content: session.content + chunk });
-    return { activeStreams: next };
-  }),
-  endStream: (agentId) => set((state) => {
-    const next = new Map(state.activeStreams);
-    next.delete(agentId);
-    return { activeStreams: next };
-  }),
-
-  featureStatuses: new Map(),
-  updateFeatureStatus: (featureId, status) => set((state) => {
-    const next = new Map(state.featureStatuses);
-    next.set(featureId, status);
-    return { featureStatuses: next };
-  }),
-
-  agentStatuses: new Map(),
-  updateAgentStatus: (agentId, status, currentTask, featureTitle?) => set((state) => {
-    const next = new Map(state.agentStatuses);
-    next.set(agentId, { status, currentTask, featureTitle });
-    return { agentStatuses: next };
-  }),
-
-  settingsConfigured: false,
-  setSettingsConfigured: (v) => set({ settingsConfigured: v }),
-
-  // v1.1: 上下文快照
-  contextSnapshots: new Map(),
-  updateContextSnapshot: (snapshot) => set((state) => {
-    const next = new Map(state.contextSnapshots);
-    next.set(snapshot.agentId, snapshot);
-    return { contextSnapshots: next };
-  }),
-  clearContextSnapshots: () => set({ contextSnapshots: new Map() }),
-
-  // v1.1: Agent ReAct 实时状态
-  agentReactStates: new Map(),
-  updateAgentReactState: (state) => set((s) => {
-    const next = new Map(s.agentReactStates);
-    next.set(state.agentId, state);
-    return { agentReactStates: next };
-  }),
-  clearAgentReactStates: () => set({ agentReactStates: new Map() }),
-
-  // v4.4: 通知 badge
-  pendingNotifications: 0,
-  incrementNotifications: () => set((s) => ({ pendingNotifications: s.pendingNotifications + 1 })),
-  clearNotifications: () => set({ pendingNotifications: 0 }),
-
-  // v4.4: 用户验收弹窗
-  showAcceptancePanel: false,
-  setShowAcceptancePanel: (show) => set({ showAcceptancePanel: show }),
-
-  // v6.0: Agent 工作细节消息流
-  agentWorkMessages: new Map(),
-  addAgentWorkMessage: (agentId, msg) => set((s) => {
-    const next = new Map(s.agentWorkMessages);
-    const list = [...(next.get(agentId) || []), msg];
-    // 保留最近 500 条
-    next.set(agentId, list.slice(-500));
-    return { agentWorkMessages: next };
-  }),
-  clearAgentWorkMessages: (agentId?) => set((s) => {
-    if (agentId) {
-      const next = new Map(s.agentWorkMessages);
-      next.delete(agentId);
-      return { agentWorkMessages: next };
-    }
-    return { agentWorkMessages: new Map() };
-  }),
-
-  // v5.3: 全局右侧元Agent面板
-  metaAgentPanelOpen: false,
-  toggleMetaAgentPanel: () => set((s) => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
-
-  // v7.0: 元Agent 管理面板
-  metaAgentSettingsOpen: false,
-  setMetaAgentSettingsOpen: (open) => set({ metaAgentSettingsOpen: open }),
-
-  // v5.4: 元Agent对话
-  metaAgentMessages: new Map(),
-  addMetaAgentMessage: (projectId, msg) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    const list = [...(next.get(projectId) || []), msg];
-    // 保留最近 200 条
-    next.set(projectId, list.slice(-200));
-    return { metaAgentMessages: next };
-  }),
-  clearMetaAgentMessages: (projectId) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    next.delete(projectId);
-    return { metaAgentMessages: next };
-  }),
-  updateLastAssistantMessage: (projectId, content) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    const list = [...(next.get(projectId) || [])];
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].role === 'assistant') {
-        list[i] = { ...list[i], content };
-        break;
-      }
-    }
-    next.set(projectId, list);
-    return { metaAgentMessages: next };
-  }),
+export const useAppStore = create<AppState>()((...a) => ({
+  ...createNavigationSlice(...a),
+  ...createLogSlice(...a),
+  ...createAgentSlice(...a),
+  ...createMetaAgentSlice(...a),
 }));
+
