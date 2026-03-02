@@ -842,3 +842,273 @@ export function checkBudgetMulti(
 export function resetRateLimits(): void {
   rateBuckets.clear();
 }
+
+// ═══════════════════════════════════════
+// 6. Budget Tracker — 进度感知注入 (inspired by Google BATS)
+// ═══════════════════════════════════════
+
+/**
+ * v10.1: Budget Tracker — 每轮向 agent 注入剩余预算/进度感知信号
+ *
+ * 核心思想 (Google BATS paper, Nov 2025):
+ *   "Standard agents lack inherent budget awareness. Without explicit signals,
+ *    they perform shallow searches and fail to utilize resources effectively."
+ *
+ * Budget Tracker 不是设硬限等着超限终止，而是让 agent 自己感知剩余资源并调整策略。
+ * 在不同消耗阶段注入不同强度的引导信号:
+ *   - 探索阶段 (0-50%): 轻量提示 — "你已使用 N/M 轮"
+ *   - 收敛阶段 (50-80%): 中等引导 — "请开始收敛到输出"
+ *   - 紧急阶段 (80%+):  强制催促 — "必须在下 N 轮内完成"
+ */
+export interface BudgetTrackerState {
+  iteration: number;
+  maxIterations: number;
+  totalTokens: number;
+  maxTokens: number;
+  totalCost: number;
+  maxCost: number;
+  /** 是否已写过文件 (developer 角色专用) */
+  hasWrittenFiles: boolean;
+  /** 是否已执行过验证 */
+  hasRunVerification: boolean;
+  /** agent 角色 */
+  role: string;
+}
+
+export type BudgetPhase = 'explore' | 'converge' | 'urgent' | 'final';
+
+export interface BudgetNudge {
+  phase: BudgetPhase;
+  /** 是否需要注入消息 */
+  shouldInject: boolean;
+  /** 注入的消息文本 */
+  message: string;
+  /** 剩余轮次 */
+  remainingIterations: number;
+  /** 消耗百分比 (0-1) */
+  consumedRatio: number;
+}
+
+export function computeBudgetNudge(state: BudgetTrackerState): BudgetNudge {
+  const iterRatio = state.maxIterations > 0 ? state.iteration / state.maxIterations : 0;
+  const tokenRatio = state.maxTokens > 0 ? state.totalTokens / state.maxTokens : 0;
+  const costRatio = state.maxCost > 0 ? state.totalCost / state.maxCost : 0;
+  const consumedRatio = Math.max(iterRatio, tokenRatio, costRatio);
+  const remaining = state.maxIterations - state.iteration;
+
+  // ── Determine phase ──
+  let phase: BudgetPhase;
+  if (consumedRatio >= 0.9 || remaining <= 2) {
+    phase = 'final';
+  } else if (consumedRatio >= 0.75 || remaining <= 4) {
+    phase = 'urgent';
+  } else if (consumedRatio >= 0.5) {
+    phase = 'converge';
+  } else {
+    phase = 'explore';
+  }
+
+  // ── Build message ──
+  const isDev = state.role === 'developer' || state.role === 'qa';
+  const isPM = state.role === 'pm' || state.role === 'architect';
+
+  if (phase === 'explore') {
+    // 探索阶段: 每 5 轮轻提一次
+    if (state.iteration > 0 && state.iteration % 5 === 0) {
+      return {
+        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        message: `📊 进度: ${state.iteration}/${state.maxIterations} 轮 (${Math.round(consumedRatio * 100)}% 资源已消耗)。请确保你在朝目标推进。`,
+      };
+    }
+    return { phase, shouldInject: false, message: '', remainingIterations: remaining, consumedRatio };
+  }
+
+  if (phase === 'converge') {
+    const base = `⏳ 已使用 ${state.iteration}/${state.maxIterations} 轮 (${Math.round(consumedRatio * 100)}%)，剩余 ${remaining} 轮。`;
+    if (isPM) {
+      return {
+        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        message: `${base}请停止探索新信息，基于已有理解开始输出结构化结果。`,
+      };
+    }
+    if (isDev && !state.hasWrittenFiles) {
+      return {
+        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        message: `${base}你还没有写入任何文件。请立即开始编码实现，不要继续只读不写。`,
+      };
+    }
+    return {
+      phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+      message: `${base}请从探索/分析转向产出收敛。${isDev ? '确保尽快完成编码并验证。' : ''}`,
+    };
+  }
+
+  if (phase === 'urgent') {
+    const base = `⚠️ 紧急: 仅剩 ${remaining} 轮 (${Math.round(consumedRatio * 100)}% 资源已消耗)！`;
+    if (isPM) {
+      return {
+        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        message: `${base}必须立即输出 Feature JSON 并调用 task_complete。不要再读取任何文件。`,
+      };
+    }
+    if (isDev) {
+      const parts = [base];
+      if (!state.hasWrittenFiles) parts.push('你还没有写入任何文件！必须立即开始编码。');
+      if (state.hasWrittenFiles && !state.hasRunVerification) parts.push('你已写入文件但还没验证。必须立即运行验证命令。');
+      parts.push('完成后立即调用 task_complete。');
+      return { phase, shouldInject: true, remainingIterations: remaining, consumedRatio, message: parts.join(' ') };
+    }
+    return {
+      phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+      message: `${base}必须立即完成当前任务并调用 task_complete。`,
+    };
+  }
+
+  // phase === 'final'
+  return {
+    phase: 'final', shouldInject: true, remainingIterations: remaining, consumedRatio,
+    message: `🚨 最后 ${remaining} 轮！你必须在本轮或下一轮调用 task_complete 完成任务。不要做任何新操作。如果已经完成了工作，立即 task_complete；如果未完成，输出已有成果后 task_complete。`,
+  };
+}
+
+// ═══════════════════════════════════════
+// 7. Stuck Detector — 行为模式检测 (inspired by OpenHands)
+// ═══════════════════════════════════════
+
+/**
+ * v10.1: Stuck Detector — 检测 agent 陷入非生产性模式
+ *
+ * 核心思想 (OpenHands Stuck Detector):
+ *   检测五种 stuck 模式，检测到后不是终止，而是注入纠正指令让 agent 自行调整。
+ *
+ * 检测模式:
+ *   1. 重复读取同类文件 (read-only loop): 连续 N 轮都在读文件/搜索，无产出
+ *   2. 相同工具+参数重复 (exact repeat): 同一个调用重复 3+ 次
+ *   3. 乒乓交替 (ping-pong): 两个操作交替出现 4+ 次
+ *   4. Agent 独白 (monologue): 连续纯文本无工具调用 3+ 次
+ *   5. 总体无产出 (no-output stall): 已用 >40% 轮次但零文件写入 (仅 dev)
+ */
+
+export interface StuckDetectorEntry {
+  toolName: string;
+  argsSignature: string;  // 用于精确匹配
+  isReadOnly: boolean;
+}
+
+export interface StuckDetectorState {
+  history: StuckDetectorEntry[];
+  /** 连续只读轮数 */
+  consecutiveReadOnlyRounds: number;
+  /** 纯文本回复连续次数 (外部由 react loop 维护) */
+  plainTextStreak: number;
+}
+
+export function createStuckDetectorState(): StuckDetectorState {
+  return { history: [], consecutiveReadOnlyRounds: 0, plainTextStreak: 0 };
+}
+
+export interface StuckResult {
+  isStuck: boolean;
+  pattern: 'read-only-loop' | 'exact-repeat' | 'ping-pong' | 'monologue' | 'no-output-stall' | null;
+  /** 注入给 agent 的纠正消息 */
+  correctionMessage: string;
+}
+
+const READ_ONLY_TOOLS = new Set([
+  'think', 'read_file', 'read_many_files', 'list_files', 'glob_files',
+  'search_files', 'code_search', 'code_search_files', 'code_graph_query', 'repo_map',
+  'todo_read', 'scratchpad_read', 'memory_read', 'git_diff', 'git_log',
+  'web_search', 'fetch_url', 'browser_snapshot', 'browser_network',
+]);
+
+export function recordToolCalls(
+  state: StuckDetectorState,
+  toolCalls: Array<{ name: string; argsSignature: string }>,
+): void {
+  const allReadOnly = toolCalls.every(tc => READ_ONLY_TOOLS.has(tc.name));
+  if (allReadOnly) {
+    state.consecutiveReadOnlyRounds++;
+  } else {
+    state.consecutiveReadOnlyRounds = 0;
+  }
+
+  for (const tc of toolCalls) {
+    state.history.push({
+      toolName: tc.name,
+      argsSignature: tc.argsSignature,
+      isReadOnly: READ_ONLY_TOOLS.has(tc.name),
+    });
+  }
+
+  // Keep history bounded
+  if (state.history.length > 60) {
+    state.history = state.history.slice(-40);
+  }
+}
+
+export function detectStuckPattern(
+  state: StuckDetectorState,
+  budgetState: BudgetTrackerState,
+): StuckResult {
+  const ok: StuckResult = { isStuck: false, pattern: null, correctionMessage: '' };
+
+  // 1. Read-only loop: 5+ consecutive rounds of only read ops
+  if (state.consecutiveReadOnlyRounds >= 5) {
+    return {
+      isStuck: true, pattern: 'read-only-loop',
+      correctionMessage: `🔄 检测到连续 ${state.consecutiveReadOnlyRounds} 轮只读操作（读文件/搜索），没有产出。请停止继续阅读，基于已有信息开始产出。${budgetState.role === 'developer' ? '请开始编写/修改代码。' : '请输出你的分析结果。'}`,
+    };
+  }
+
+  // 2. Exact repeat: last 3 entries are identical tool+args
+  const h = state.history;
+  if (h.length >= 3) {
+    const last3 = h.slice(-3);
+    if (last3.every(e => e.toolName === last3[0].toolName && e.argsSignature === last3[0].argsSignature)) {
+      return {
+        isStuck: true, pattern: 'exact-repeat',
+        correctionMessage: `🔁 检测到你连续 3 次调用了完全相同的操作 (${last3[0].toolName})。这不会产生新信息。请换一种方法或工具来推进任务。`,
+      };
+    }
+  }
+
+  // 3. Ping-pong: last 8 entries alternate between two signatures
+  if (h.length >= 8) {
+    const last8 = h.slice(-8);
+    const sigA = `${last8[0].toolName}:${last8[0].argsSignature}`;
+    const sigB = `${last8[1].toolName}:${last8[1].argsSignature}`;
+    if (sigA !== sigB) {
+      const isPingPong = last8.every((e, i) => {
+        const sig = `${e.toolName}:${e.argsSignature}`;
+        return i % 2 === 0 ? sig === sigA : sig === sigB;
+      });
+      if (isPingPong) {
+        return {
+          isStuck: true, pattern: 'ping-pong',
+          correctionMessage: `🏓 检测到你在两个操作之间反复交替 (${last8[0].toolName} ↔ ${last8[1].toolName})。请退一步，用 think 工具重新思考你的方法，然后尝试一种全新的策略。`,
+        };
+      }
+    }
+  }
+
+  // 4. Monologue: 3+ consecutive plain text (tracked externally)
+  if (state.plainTextStreak >= 3) {
+    return {
+      isStuck: true, pattern: 'monologue',
+      correctionMessage: '💬 你已经连续 3 轮只输出文字而没有使用任何工具。请调用合适的工具来推进任务，或调用 task_complete 完成任务。',
+    };
+  }
+
+  // 5. No-output stall (dev only): >40% budget used but zero files written
+  if ((budgetState.role === 'developer') &&
+      budgetState.iteration > 0 &&
+      (budgetState.iteration / budgetState.maxIterations) > 0.4 &&
+      !budgetState.hasWrittenFiles) {
+    return {
+      isStuck: true, pattern: 'no-output-stall',
+      correctionMessage: `⚠️ 你已使用 ${budgetState.iteration}/${budgetState.maxIterations} 轮 (${Math.round(budgetState.iteration / budgetState.maxIterations * 100)}%)，但还没有写入任何文件。请立即开始编码实现。如果你还在分析，请用 think 工具总结你的理解，然后开始写代码。`,
+    };
+  }
+
+  return ok;
+}

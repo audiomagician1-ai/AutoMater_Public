@@ -28,10 +28,10 @@ import path from 'path';
 import { buildCodeGraph, type CodeGraph, detectCommunities, getHubFiles, buildProjectProfile } from './code-graph';
 import { generateRepoMap } from './repo-map';
 import { callLLM, getSettings } from './llm-client';
-import { writeDoc } from './doc-manager';
+// import { writeDoc } from './doc-manager';  // TODO: re-enable when needed
 import { createLogger } from './logger';
 import { planProbes, executeProbes, mergeFindings } from './probe-orchestrator';
-import { checkProbeCache, updateProbeCache, detectIncrementalChanges } from './probe-cache';
+import { checkProbeCache, updateProbeCache } from './probe-cache';
 import type {
   ScanResult,
   SeedFile,
@@ -42,7 +42,6 @@ import type {
   ArchNode,
   ArchEdge,
   ImportStats,
-  ImportProgressCallbackV7,
   ImportProgressEvent,
   ProbeProgress,
   MergedFindings,
@@ -123,7 +122,7 @@ export type ImportProgressCallback = (phase: number, step: string, progress: num
 
 const ANALYSIS_DIR = '.automater/analysis';
 const PROBES_DIR = '.automater/analysis/probes';
-const MODULES_DIR = '.automater/analysis/modules';
+// const MODULES_DIR = '.automater/analysis/modules';  // reserved for future use
 const SKELETON_FILE = '.automater/analysis/skeleton.json';
 const MODULE_GRAPH_FILE = '.automater/analysis/module-graph.json';
 const ARCH_TREE_FILE = '.automater/analysis/architecture-tree.json';
@@ -710,7 +709,7 @@ async function phase1Probe(
  * Compress a probe report into a concise summary for the fuse prompt.
  * Extracts structured data (findings, issues, files) instead of raw markdown.
  */
-function compressProbeReport(report: ProbeReport): string {
+function _compressProbeReport(report: ProbeReport): string {
   const lines: string[] = [];
   lines.push(
     `### ${report.probeId} (置信度: ${report.confidence}, 文件: ${report.filesExamined.length}, ${report.tokensUsed} tok)`,
@@ -1270,7 +1269,7 @@ export async function importProject(
   stats: ImportStats;
 }> {
   const t0 = Date.now();
-  const projectName = path.basename(workspacePath);
+  const _projectName = path.basename(workspacePath);
   log.info(`=== Import Start (v7.0) ===`, { workspacePath, projectId });
 
   // v7.2: Check if Phase 2 outputs already exist — avoid re-running the entire pipeline
@@ -1419,7 +1418,7 @@ export async function importProject(
 
 export async function scanProjectSkeleton(
   workspacePath: string,
-  onProgress?: ImportProgressCallback,
+  _onProgress?: ImportProgressCallback,
 ): Promise<ProjectSkeleton> {
   const t0 = Date.now();
   log.info('scanProjectSkeleton: Starting', { workspacePath });

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, Suspense, lazy } from 'react';
+import { useEffect, useState, useRef, Suspense, lazy } from 'react';
 import { useAppStore } from './stores/app-store';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';

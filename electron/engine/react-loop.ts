@@ -34,7 +34,6 @@ import { safeJsonParse } from './safe-json';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
 import { DEVELOPER_REACT_PROMPT, getCategoryGuidance } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
-import './output-parser';
 import {
   guardToolCall,
   checkReactTermination,
@@ -44,6 +43,12 @@ import {
   checkSemanticLoop,
   DEFAULT_REACT_CONFIG,
   type ReactState as GuardReactState,
+  // v10.1: Budget Tracker + Stuck Detector
+  computeBudgetNudge,
+  type BudgetTrackerState,
+  createStuckDetectorState,
+  recordToolCalls as recordStuckToolCalls,
+  detectStuckPattern,
 } from './guards';
 import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
 import { selectTools, detectProjectProfile, type TaskContext as ToolTaskContext } from './adaptive-tool-selector';
@@ -234,6 +239,15 @@ export async function reactDeveloperLoop(
   // v18.0: 迭代间学习
   const learningState: LearningState = createLearningState();
 
+  // v10.1: Budget Tracker + Stuck Detector (developer loop)
+  const devStuckState = createStuckDetectorState();
+  const devBudgetTracker: BudgetTrackerState = {
+    iteration: 0, maxIterations: MAX_ITERATIONS,
+    totalTokens: 0, maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
+    totalCost: 0, maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
+    hasWrittenFiles: false, hasRunVerification: false, role: 'developer',
+  };
+
   // v11.0: 从 workerId 提取 worker 索引 (用于成员级配置)
   const workerIndex = parseInt(workerId.replace('dev-', ''), 10) - 1 || 0;
 
@@ -347,7 +361,7 @@ export async function reactDeveloperLoop(
         agentId: workerId,
         content: `📊 ${feature.id} ${summary}`,
       });
-    } catch (err) {
+    } catch (_err) {
       log.debug('Code graph build skipped', { featureId: feature.id });
     }
   }
@@ -484,6 +498,29 @@ export async function reactDeveloperLoop(
       // v18.0: 注入从失败中学到的教训
       injectLessons(messages, learningState);
 
+      // v10.1: Budget Tracker — developer 进度感知
+      devBudgetTracker.iteration = iter;
+      devBudgetTracker.totalTokens = totalIn + totalOut;
+      devBudgetTracker.totalCost = totalCost;
+      devBudgetTracker.hasWrittenFiles = guardState.hasWrittenFiles;
+      devBudgetTracker.hasRunVerification = guardState.hasRunVerification;
+
+      const devNudge = computeBudgetNudge(devBudgetTracker);
+      if (devNudge.shouldInject) {
+        messages.push({ role: 'user', content: devNudge.message });
+        if (devNudge.phase === 'urgent' || devNudge.phase === 'final') {
+          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: devNudge.message });
+        }
+      }
+
+      // v10.1: Stuck Detector — developer 行为模式检测
+      devStuckState.plainTextStreak = guardState.consecutivePlainTextCount;
+      const devStuck = detectStuckPattern(devStuckState, devBudgetTracker);
+      if (devStuck.isStuck) {
+        messages.push({ role: 'user', content: devStuck.correctionMessage });
+        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔍 Stuck [${devStuck.pattern}]: ${devStuck.correctionMessage.slice(0, 120)}` });
+      }
+
       const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
       totalCost += cost;
@@ -568,7 +605,7 @@ export async function reactDeveloperLoop(
         try {
           toolArgs =
             typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-        } catch (err) {
+        } catch (_err) {
           log.warn('Failed to parse tool arguments as JSON, using empty object', { tool: tc.function.name });
           toolArgs = {};
         }
@@ -896,6 +933,12 @@ export async function reactDeveloperLoop(
 
       // ═══ 推送 Agent ReAct 迭代状态 ═══
       const toolCallsThisIter = (msg.tool_calls || []).map((tc: LLMToolCall) => tc.function.name);
+
+      // v10.1: Record tool calls for stuck detection (developer loop)
+      recordStuckToolCalls(devStuckState, (msg.tool_calls || []).map((tc: LLMToolCall) => ({
+        name: tc.function.name,
+        argsSignature: toolCallSignature(tc.function.name, (() => { try { return JSON.parse(tc.function.arguments as string); } catch { return {}; } })()),
+      })));
 
       // v3.0: 更新 guard 的 idle/error 追踪
       if (hasToolSideEffect(toolCallsThisIter)) {
@@ -1347,6 +1390,15 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
   // v18.0: 迭代间学习
   const learningState: LearningState = createLearningState();
 
+  // v10.1: Budget Tracker + Stuck Detector
+  const stuckState = createStuckDetectorState();
+  const budgetTrackerBase: BudgetTrackerState = {
+    iteration: 0, maxIterations: maxIterations,
+    totalTokens: 0, maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
+    totalCost: 0, maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
+    hasWrittenFiles: false, hasRunVerification: false, role,
+  };
+
   const messages: LLMMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
@@ -1380,6 +1432,29 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     try {
       // v18.0: 注入从失败中学到的教训
       injectLessons(messages, learningState);
+
+      // v10.1: Budget Tracker — 注入进度感知信号
+      budgetTrackerBase.iteration = iter;
+      budgetTrackerBase.totalTokens = totalIn + totalOut;
+      budgetTrackerBase.totalCost = totalCost;
+      budgetTrackerBase.hasWrittenFiles = guardState.hasWrittenFiles;
+      budgetTrackerBase.hasRunVerification = guardState.hasRunVerification;
+
+      const nudge = computeBudgetNudge(budgetTrackerBase);
+      if (nudge.shouldInject) {
+        messages.push({ role: 'user', content: nudge.message });
+        if (nudge.phase === 'urgent' || nudge.phase === 'final') {
+          sendToUI(win, 'agent:log', { projectId, agentId, content: nudge.message });
+        }
+      }
+
+      // v10.1: Stuck Detector — 检测并纠正非生产性模式
+      stuckState.plainTextStreak = guardState.consecutivePlainTextCount;
+      const stuckResult = detectStuckPattern(stuckState, budgetTrackerBase);
+      if (stuckResult.isStuck) {
+        messages.push({ role: 'user', content: stuckResult.correctionMessage });
+        sendToUI(win, 'agent:log', { projectId, agentId, content: `🔍 Stuck 检测 [${stuckResult.pattern}]: ${stuckResult.correctionMessage.slice(0, 100)}` });
+      }
 
       const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
@@ -1617,6 +1692,12 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       if (hasToolSideEffect(toolCallsThisIter)) guardState.consecutiveIdleCount = 0;
       else guardState.consecutiveIdleCount++;
       guardState.consecutiveErrorCount = 0;
+
+      // v10.1: Record tool calls for stuck detection
+      recordStuckToolCalls(stuckState, (msg.tool_calls || []).map((tc: LLMToolCall) => ({
+        name: tc.function.name,
+        argsSignature: toolCallSignature(tc.function.name, (() => { try { return JSON.parse(tc.function.arguments as string); } catch { return {}; } })()),
+      })));
 
       if (completed || blocked) {
         sendToUI(win, 'agent:log', {
