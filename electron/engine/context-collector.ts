@@ -665,7 +665,9 @@ export function collectLayeredContext(
       }
     } catch { /**/ }
 
-    depFiles = [...new Set(depFiles)];
+    const uniqueDeps = [...new Set(depFiles)];
+    depFiles.length = 0;
+    depFiles.push(...uniqueDeps);
     if (depFiles.length > 0) {
       const depParts: string[] = ['## 依赖文件'];
       const depFileList: string[] = [];

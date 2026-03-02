@@ -109,13 +109,13 @@ export function ImportAnalysisPanel({ projectId }: { projectId: string }) {
         window.automater.project.detectIncrementalChanges(projectId),
       ]);
       if (graphRes.success && graphRes.graph) setGraph(graphRes.graph as ModuleGraph);
-      if (reportsRes.success && reportsRes.reports) setReports(reportsRes.reports as ProbeReport[]);
+      if (reportsRes.success && reportsRes.reports) setReports((reportsRes.reports || []) as ProbeReport[]);
       if (issuesRes.success) setIssues(issuesRes.issues || '');
       if (incrRes.success) setIncremental({
-        changedFiles: incrRes.changedFiles || [],
-        affectedProbeTypes: incrRes.affectedProbeTypes || [],
-        needsFullReprobe: incrRes.needsFullReprobe || false,
-        reason: incrRes.reason || '',
+        changedFiles: incrRes.changedFiles ?? [],
+        affectedProbeTypes: incrRes.affectedProbeTypes ?? [],
+        needsFullReprobe: incrRes.needsFullReprobe ?? false,
+        reason: incrRes.reason ?? '',
       });
     } catch (err) {
       console.error('Failed to load analysis data', err);
