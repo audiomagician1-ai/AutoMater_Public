@@ -1,11 +1,18 @@
 ﻿/**
- * OverviewPage — 项目全景 (v6.1 refactored)
+ * OverviewPage — 项目全景 (v7.1 compact layout)
  *
  * 子组件已提取到 ./overview/ 目录:
  *   InteractiveGraph — 三层级 DAG 可视化 (dagre 布局)
  *   ProgressRing / StatCard — 数据展示原子组件
- *   PipelineBar / DocCompletionBar — 流水线 & 文档进度
+ *   DocCompletionBar — 文档进度
  *   AgentActivityPanel — Agent 实时工作面板
+ *
+ * v7.1 布局重构:
+ *   - 架构图置顶 (控制栏上方)
+ *   - 实时监控 + 活动趋势合并为一行 8 卡
+ *   - 进度看板 + 实时状态左右并排
+ *   - 流水线进度移除
+ *   - 导入分析仅在分析时显示
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -15,8 +22,9 @@ import { SystemMonitor } from '../components/SystemMonitor';
 import { ActivityCharts } from '../components/ActivityCharts';
 import {
   InteractiveGraph, ProgressRing, StatCard,
-  PipelineBar, PIPELINE_STAGES, DocCompletionBar,
-  AgentActivityPanel,
+  PipelineBar, PIPELINE_STAGES,
+  DocCompletionBar,
+  AgentActivityPanel, ImportAnalysisPanel,
   STATUS_COLOR, CATEGORY_BADGE, PROJECT_STATUS,
   type Feature,
 } from './overview';
@@ -260,11 +268,11 @@ export function OverviewPage() {
           <SystemMonitor />
         </section>
 
-        {/* ═══════ Activity Timeseries Charts (v6.0) ═══════ */}
+        {/* ═══════ Activity Timeseries Charts (v6.2 — compact) ═══════ */}
         {currentProjectId && (
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-slate-400">📈 活动趋势 <span className="text-[10px] text-slate-600 font-normal">过去 30 分钟</span></h3>
+              <h3 className="text-sm font-medium text-slate-400">📈 活动趋势 <span className="text-[10px] text-slate-600 font-normal">30 分钟</span></h3>
               <span className="text-[9px] text-slate-600">每 10 秒刷新</span>
             </div>
             <ActivityCharts projectId={currentProjectId} />
@@ -522,6 +530,9 @@ export function OverviewPage() {
 
         {/* ═══════ Agent 实时活动面板 (v6.1) ═══════ */}
         <AgentActivityPanel />
+
+        {/* ═══════ v7.0: 导入分析报告 (模块图 + 探针报告 + 已知问题) ═══════ */}
+        <ImportAnalysisPanel projectId={currentProjectId} />
 
         {/* Feature roadmap */}
         {enriched.length > 0 && (

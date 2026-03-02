@@ -24,6 +24,7 @@ import { readMemoryForRole } from './memory-system';
 import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
 import { buildCrossProjectContext } from './cross-project';
 import type { FeatureRow } from './types';
+import type { ModuleGraph, ModuleGraphNode, ModuleGraphEdge } from './probe-types';
 import { buildHotMemory, buildWarmMemory, selectColdModules, loadColdMemory, extractKeywords } from './memory-layers';
 
 // Re-export extracted memory-layers for backwards compatibility
@@ -39,6 +40,155 @@ function estimateTokens(text: string): number {
 }
 
 // ═══════════════════════════════════════
+// v7.0: Module Graph Guided File Selection
+// ═══════════════════════════════════════
+
+const MODULE_GRAPH_PATH = '.automater/analysis/module-graph.json';
+const KNOWN_ISSUES_PATH = '.automater/docs/KNOWN-ISSUES.md';
+
+let moduleGraphCache: { path: string; mtime: number; graph: ModuleGraph } | null = null;
+
+/** Load module-graph.json with file-mtime caching */
+export function loadModuleGraph(workspacePath: string): ModuleGraph | null {
+  const fullPath = path.join(workspacePath, MODULE_GRAPH_PATH);
+  try {
+    const stat = fs.statSync(fullPath);
+    if (moduleGraphCache && moduleGraphCache.path === fullPath && moduleGraphCache.mtime === stat.mtimeMs) {
+      return moduleGraphCache.graph;
+    }
+    const raw = fs.readFileSync(fullPath, 'utf-8');
+    const graph: ModuleGraph = JSON.parse(raw);
+    if (!graph.nodes || !graph.edges) return null;
+    moduleGraphCache = { path: fullPath, mtime: stat.mtimeMs, graph };
+    return graph;
+  } catch {
+    return null;
+  }
+}
+
+/** Load KNOWN-ISSUES.md content */
+export function loadKnownIssues(workspacePath: string): string | null {
+  return readWorkspaceFile(workspacePath, KNOWN_ISSUES_PATH) || null;
+}
+
+/** Score a module node against a feature for relevance */
+function scoreModuleRelevance(node: ModuleGraphNode, keywords: string[], feature: FeatureRow): number {
+  let score = 0;
+  const haystack = [
+    node.id, node.responsibility, node.path,
+    ...node.publicAPI, ...node.keyTypes, ...node.patterns,
+  ].join(' ').toLowerCase();
+
+  for (const kw of keywords) {
+    if (haystack.includes(kw)) score += 2;
+  }
+  // Bonus for modules with matching issues (feature may fix them)
+  if (node.issues.length > 0) {
+    const issueText = node.issues.join(' ').toLowerCase();
+    for (const kw of keywords) {
+      if (issueText.includes(kw)) score += 1;
+    }
+  }
+  // Scale by module size (prefer smaller, focused modules)
+  if (node.fileCount <= 3) score += 1;
+  if (node.type === 'entry-point' || node.type === 'api-layer') score += 1;
+  return score;
+}
+
+/** Expand module nodes into concrete file paths, following graph edges 1 hop */
+function expandModuleFiles(
+  graph: ModuleGraph,
+  rankedNodeIds: string[],
+  maxFiles: number,
+): string[] {
+  const files: string[] = [];
+  const seen = new Set<string>();
+
+  // Build adjacency index for 1-hop expansion
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
+    if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
+    adjacency.get(edge.source)!.add(edge.target);
+    adjacency.get(edge.target)!.add(edge.source);
+  }
+
+  const nodeMap = new Map(graph.nodes.map(n => [n.id, n]));
+
+  for (const nodeId of rankedNodeIds) {
+    if (files.length >= maxFiles) break;
+    const node = nodeMap.get(nodeId);
+    if (!node) continue;
+
+    // Add main module path
+    if (node.path && !seen.has(node.path)) {
+      seen.add(node.path);
+      files.push(node.path);
+    }
+
+    // 1-hop neighbors (sorted by edge weight)
+    const neighbors = adjacency.get(nodeId);
+    if (neighbors) {
+      const neighborEdges = graph.edges
+        .filter(e => (e.source === nodeId || e.target === nodeId) && neighbors.has(e.source === nodeId ? e.target : e.source))
+        .sort((a, b) => b.weight - a.weight);
+
+      for (const edge of neighborEdges) {
+        if (files.length >= maxFiles) break;
+        const neighborId = edge.source === nodeId ? edge.target : edge.source;
+        const neighborNode = nodeMap.get(neighborId);
+        if (neighborNode?.path && !seen.has(neighborNode.path)) {
+          seen.add(neighborNode.path);
+          files.push(neighborNode.path);
+        }
+      }
+    }
+  }
+  return files;
+}
+
+/**
+ * Graph-guided file selection using module-graph.json.
+ * Returns ranked file paths most relevant to the given feature.
+ * Falls back to empty array if module-graph is unavailable.
+ */
+export function selectGraphGuidedFiles(
+  workspacePath: string,
+  feature: FeatureRow,
+  maxFiles: number = 10,
+): { files: string[]; moduleHits: string[]; source: 'module-graph' | 'none' } {
+  const graph = loadModuleGraph(workspacePath);
+  if (!graph || graph.nodes.length === 0) {
+    return { files: [], moduleHits: [], source: 'none' };
+  }
+
+  const keywords = extractKeywords(feature.title + ' ' + (feature.description || ''));
+  if (keywords.length === 0) {
+    return { files: [], moduleHits: [], source: 'none' };
+  }
+
+  // Score and rank all modules
+  const scored = graph.nodes
+    .map(node => ({ node, score: scoreModuleRelevance(node, keywords, feature) }))
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) {
+    return { files: [], moduleHits: [], source: 'none' };
+  }
+
+  // Take top modules, expand to files
+  const topModuleIds = scored.slice(0, 5).map(s => s.node.id);
+  const files = expandModuleFiles(graph, topModuleIds, maxFiles);
+
+  return {
+    files,
+    moduleHits: topModuleIds,
+    source: 'module-graph',
+  };
+}
+
+// ═══════════════════════════════════════
 // v1.1: 结构化上下文数据类型
 // ═══════════════════════════════════════
 
@@ -49,7 +199,7 @@ export interface ContextSection {
   /** 人类可读名称 */
   name: string;
   /** 来源类型标签 */
-  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'code-graph' | 'plan' | 'qa-feedback';
+  source: 'project-config' | 'architecture' | 'file-tree' | 'repo-map' | 'dependency' | 'keyword-match' | 'code-graph' | 'module-graph' | 'known-issues' | 'plan' | 'qa-feedback';
   /** 内容文本 */
   content: string;
   /** 字符数 */
@@ -297,28 +447,40 @@ export async function collectDeveloperContext(
     }
   }
 
-  // ─── 4. Code Graph 相关文件 (v1.3: 替代关键词匹配) ───
+  // ─── 4. Graph-Guided File Selection (v7.0: module-graph → code-graph fallback) ───
   if (totalChars < charBudget * 0.7 && tree.length > 0) {
     const depSet = new Set(depFiles);
     let graphRelatedFiles: string[] = [];
+    let graphSource: 'module-graph' | 'code-graph' | 'keyword' = 'keyword';
+    let moduleHits: string[] = [];
 
-    try {
-      // 构建 Code Graph 并用 multi-hop 遍历查找相关文件
-      const graph = await buildCodeGraph(workspacePath, 300);
-      const keywords = extractKeywords(feature.title + ' ' + feature.description);
-      const seeds = inferSeedFiles(graph, depFiles, keywords, 5);
-
-      if (seeds.length > 0) {
-        const traversed = traverseGraph(graph, seeds, 2, 10);
-        graphRelatedFiles = traversed
-          .map(t => t.file)
-          .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
-      }
-    } catch {
-      // Code Graph 失败时 fallback 到关键词匹配
+    // v7.0: Try module-graph first (produced by import probes)
+    const mgResult = selectGraphGuidedFiles(workspacePath, feature, 10);
+    if (mgResult.files.length > 0) {
+      graphRelatedFiles = mgResult.files.filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
+      moduleHits = mgResult.moduleHits;
+      graphSource = 'module-graph';
     }
 
-    // Fallback: 如果 Code Graph 没找到结果，用旧的关键词匹配
+    // Fallback to code-graph traversal if module-graph didn't produce results
+    if (graphRelatedFiles.length === 0) {
+      try {
+        const graph = await buildCodeGraph(workspacePath, 300);
+        const keywords = extractKeywords(feature.title + ' ' + feature.description);
+        const seeds = inferSeedFiles(graph, depFiles, keywords, 5);
+        if (seeds.length > 0) {
+          const traversed = traverseGraph(graph, seeds, 2, 10);
+          graphRelatedFiles = traversed
+            .map(t => t.file)
+            .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
+          graphSource = 'code-graph';
+        }
+      } catch {
+        // Code Graph 失败时 fallback 到关键词匹配
+      }
+    }
+
+    // Final fallback: keyword matching on file paths
     if (graphRelatedFiles.length === 0) {
       const allFiles = flattenTree(tree).filter(p => !p.endsWith('/'));
       const keywords = extractKeywords(feature.title + ' ' + feature.description);
@@ -326,10 +488,14 @@ export async function collectDeveloperContext(
         .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md')
         .filter(f => keywords.some(kw => f.toLowerCase().includes(kw)))
         .slice(0, 5);
+      graphSource = 'keyword';
     }
 
     if (graphRelatedFiles.length > 0) {
-      const relContentParts: string[] = ['## 代码依赖图相关文件'];
+      const sourceLabel = graphSource === 'module-graph'
+        ? `模块图引导文件 (命中模块: ${moduleHits.join(', ')})`
+        : graphSource === 'code-graph' ? '代码依赖图关联文件' : '关键词匹配文件';
+      const relContentParts: string[] = [`## ${sourceLabel}`];
       const relFileList: string[] = [];
       for (const f of graphRelatedFiles.slice(0, 8)) {
         if (totalChars >= charBudget * 0.95) break;
@@ -346,7 +512,7 @@ export async function collectDeveloperContext(
       if (relContentParts.length > 1) {
         const relText = relContentParts.join('\n');
         sectionList.push({
-          id: 'code-graph-files', name: 'Code Graph 关联文件', source: 'dependency',
+          id: 'graph-guided-files', name: sourceLabel, source: 'code-graph',
           content: relText, chars: relText.length, tokens: estimateTokens(relText),
           truncated: false, files: relFileList,
         });
@@ -482,8 +648,8 @@ export function collectLayeredContext(
   }
 
   // ─── 依赖 Feature 产出文件 ───
+  const depFiles: string[] = [];
   if (totalChars < charBudget * 0.75) {
-    let depFiles: string[] = [];
     try {
       const deps: string[] = JSON.parse(feature.depends_on || '[]');
       if (deps.length > 0) {
@@ -524,6 +690,39 @@ export function collectLayeredContext(
           truncated: false, files: depFileList,
         });
         filesIncluded += depFileList.length;
+      }
+    }
+  }
+
+  // ─── v7.0: Module Graph Guided Files ───
+  if (totalChars < charBudget * 0.85) {
+    const depSet = new Set(depFiles);
+    const mgResult = selectGraphGuidedFiles(workspacePath, feature, 8);
+    if (mgResult.files.length > 0) {
+      const mgParts: string[] = [`## 模块图引导文件 (命中模块: ${mgResult.moduleHits.join(', ')})`];
+      const mgFileList: string[] = [];
+      for (const f of mgResult.files) {
+        if (depSet.has(f)) continue; // skip already-included dep files
+        if (totalChars >= charBudget * 0.95) break;
+        const content = readWorkspaceFile(workspacePath, f);
+        if (content) {
+          const maxLen = Math.floor((charBudget * 0.95 - totalChars) / Math.max(1, mgResult.files.length));
+          const trimmed = content.length > maxLen
+            ? content.slice(0, maxLen) + '\n... [截断]'
+            : content;
+          mgParts.push(`### ${f}\n\`\`\`\n${trimmed}\n\`\`\``);
+          totalChars += trimmed.length;
+          mgFileList.push(f);
+        }
+      }
+      if (mgParts.length > 1) {
+        const mgText = mgParts.join('\n');
+        sectionList.push({
+          id: 'graph-guided-files', name: '模块图引导文件', source: 'module-graph',
+          content: mgText, chars: mgText.length, tokens: estimateTokens(mgText),
+          truncated: false, files: mgFileList,
+        });
+        filesIncluded += mgFileList.length;
       }
     }
   }

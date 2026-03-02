@@ -14,7 +14,7 @@ import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type Str
 import { sendToUI, addLog } from './ui-bridge';
 import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
 import type { AppSettings, EnrichedFeature, LLMMessage, LLMToolCall } from './types';
-import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
+import { collectDeveloperContext, collectLightContext, loadKnownIssues, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
 import { DEVELOPER_REACT_PROMPT } from './prompts';
@@ -284,6 +284,18 @@ export async function reactDeveloperLoop(
     // skill-evolution 模块可能未初始化, 跳过
   }
 
+  // v7.0: Known Issues — inject tech-debt warnings from import probes
+  let knownIssuesText = '';
+  if (workspacePath) {
+    const issues = loadKnownIssues(workspacePath);
+    if (issues) {
+      // Truncate to max ~2000 chars to not overwhelm context
+      const maxLen = 2000;
+      const trimmed = issues.length > maxLen ? issues.slice(0, maxLen) + '\n... [更多问题见 .automater/docs/KNOWN-ISSUES.md]' : issues;
+      knownIssuesText = `## ⚠️ 已知技术问题 (导入分析发现)\n${trimmed}`;
+    }
+  }
+
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
 
@@ -291,7 +303,7 @@ export async function reactDeveloperLoop(
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 

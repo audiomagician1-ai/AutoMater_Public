@@ -34,6 +34,7 @@ import { callLLM, getSettings } from './llm-client';
 import { writeDoc } from './doc-manager';
 import { createLogger } from './logger';
 import { planProbes, executeProbes, mergeFindings } from './probe-orchestrator';
+import { checkProbeCache, updateProbeCache, detectIncrementalChanges } from './probe-cache';
 import type {
   ScanResult, SeedFile, ProbeReport, FuseOutput,
   ModuleGraph, ImportStats, ImportProgressCallbackV7,
@@ -467,6 +468,7 @@ function buildSeedFiles(
 
 /**
  * Phase 1: 并行探测 — 执行所有探针，收集 ProbeReport[]
+ * v7.0+: 支持缓存命中跳过、增量探测
  */
 async function phase1Probe(
   scan: ScanResult,
@@ -477,9 +479,35 @@ async function phase1Probe(
   if (!settings) throw new Error('未配置 LLM 设置，请先在设置页面配置 API');
 
   const probeStatuses = new Map<string, ProbeProgress>();
+  const allConfigs = scan.explorationPlan.probes;
 
-  // Initialize all probes as queued
-  for (const config of scan.explorationPlan.probes) {
+  // ── v7.0 D1+D2: Cache check — skip probes whose files haven't changed ──
+  const cacheCheck = checkProbeCache(scan.workspacePath, allConfigs);
+  const cachedReports: ProbeReport[] = cacheCheck.hits.map(h => h.cachedReport);
+  const configsToRun = cacheCheck.misses;
+
+  if (cacheCheck.hits.length > 0) {
+    log.info(`Cache: ${cacheCheck.hits.length} probes reused, ${configsToRun.length} probes to run`);
+    onProgress?.({
+      phase: 'probe',
+      step: `缓存命中 ${cacheCheck.hits.length}/${allConfigs.length} 个探针，需要重新运行 ${configsToRun.length} 个`,
+      progress: 0.0,
+    });
+  }
+
+  // Mark cached probes as completed in status
+  for (const hit of cacheCheck.hits) {
+    probeStatuses.set(hit.config.id, {
+      probeId: hit.config.id,
+      type: hit.config.type,
+      status: 'completed',
+      description: `(缓存) ${hit.cachedReport.findings.length} 发现`,
+      progress: 1.0,
+    });
+  }
+
+  // Initialize probes-to-run as queued
+  for (const config of configsToRun) {
     probeStatuses.set(config.id, {
       probeId: config.id,
       type: config.type,
@@ -498,45 +526,59 @@ async function phase1Probe(
     });
   };
 
-  broadcastProgress(
-    `启动 ${scan.explorationPlan.probes.length} 个探针...`,
-    0.0,
-  );
+  let freshReports: ProbeReport[] = [];
 
-  const reports = await executeProbes(scan, scan.explorationPlan, {
-    concurrency: Math.min(settings.workerCount || 3, 4),
-    signal,
-    budgetUsd: resolveImportBudget(settings),
-    settings,
-    onProbeComplete: (report) => {
-      probeStatuses.set(report.probeId, {
-        probeId: report.probeId,
-        type: report.type,
-        status: report.findings.length > 0 ? 'completed' : 'failed',
-        description: `${report.findings.length} 发现, ${report.filesExamined.length} 文件`,
-        progress: 1.0,
-      });
-      const completed = [...probeStatuses.values()].filter(p => p.status === 'completed' || p.status === 'failed').length;
-      const total = probeStatuses.size;
-      broadcastProgress(
-        `探针 ${completed}/${total} 完成`,
-        completed / total,
-      );
-    },
-    onProgress: (probeId, status, progress) => {
-      const existing = probeStatuses.get(probeId);
-      if (existing) {
-        existing.status = 'running';
-        existing.description = status;
-        existing.progress = progress;
-      }
-    },
-  });
+  if (configsToRun.length > 0) {
+    broadcastProgress(
+      `启动 ${configsToRun.length} 个探针 (${cacheCheck.hits.length} 缓存命中)...`,
+      0.0,
+    );
+
+    // Build a modified exploration plan with only the probes that need running
+    const runPlan = { ...scan.explorationPlan, probes: configsToRun };
+
+    freshReports = await executeProbes(scan, runPlan, {
+      concurrency: Math.min(settings.workerCount || 3, 4),
+      signal,
+      budgetUsd: resolveImportBudget(settings),
+      settings,
+      onProbeComplete: (report) => {
+        probeStatuses.set(report.probeId, {
+          probeId: report.probeId,
+          type: report.type,
+          status: report.findings.length > 0 ? 'completed' : 'failed',
+          description: `${report.findings.length} 发现, ${report.filesExamined.length} 文件`,
+          progress: 1.0,
+        });
+        const completed = [...probeStatuses.values()].filter(p => p.status === 'completed' || p.status === 'failed').length;
+        const total = probeStatuses.size;
+        broadcastProgress(
+          `探针 ${completed}/${total} 完成`,
+          completed / total,
+        );
+      },
+      onProgress: (probeId, status, progress) => {
+        const existing = probeStatuses.get(probeId);
+        if (existing) {
+          existing.status = 'running';
+          existing.description = status;
+          existing.progress = progress;
+        }
+      },
+    });
+
+    // ── Update cache with fresh results ──
+    updateProbeCache(scan.workspacePath, configsToRun, freshReports);
+  } else {
+    broadcastProgress('所有探针结果从缓存恢复 ✅', 1.0);
+  }
+
+  const allReports = [...cachedReports, ...freshReports];
 
   // Save probe reports to disk
   const probesDir = path.join(scan.workspacePath, PROBES_DIR);
   fs.mkdirSync(probesDir, { recursive: true });
-  for (const report of reports) {
+  for (const report of allReports) {
     const reportPath = path.join(probesDir, `${report.probeId}.json`);
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
     // Also save markdown version
@@ -545,12 +587,14 @@ async function phase1Probe(
   }
 
   log.info(`Phase 1 complete`, {
-    probes: reports.length,
-    totalFindings: reports.reduce((s, r) => s + r.findings.length, 0),
-    totalTokens: reports.reduce((s, r) => s + r.tokensUsed, 0),
+    probes: allReports.length,
+    fromCache: cachedReports.length,
+    fresh: freshReports.length,
+    totalFindings: allReports.reduce((s, r) => s + r.findings.length, 0),
+    totalTokens: freshReports.reduce((s, r) => s + r.tokensUsed, 0),
   });
 
-  return reports;
+  return allReports;
 }
 
 // ═══════════════════════════════════════

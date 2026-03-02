@@ -14,7 +14,8 @@ import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, 
 import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 import { importProject } from '../engine/project-importer';
-import { collectBaselineContext } from '../engine/context-collector';
+import { collectBaselineContext, loadModuleGraph, loadKnownIssues } from '../engine/context-collector';
+import { detectIncrementalChanges, applyUserCorrection, getUserCorrections, type UserCorrection } from '../engine/probe-cache';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getSettings } from '../engine/llm-client';
 import {
@@ -980,6 +981,64 @@ export function setupProjectHandlers() {
     })();
 
     return { success: true, message: '分析已启动，请在 Overview 页面查看进度' };
+  });
+
+  // ── v7.0: Module Graph + Probe Analysis API ──
+
+  ipcMain.handle('project:get-module-graph', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const graph = loadModuleGraph(project.workspace_path);
+    if (!graph) return { success: false, error: 'Module graph not available (run import analysis first)' };
+    return { success: true, graph };
+  });
+
+  ipcMain.handle('project:get-known-issues', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const issues = loadKnownIssues(project.workspace_path);
+    return { success: true, issues: issues || '' };
+  });
+
+  ipcMain.handle('project:get-probe-reports', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const probesDir = path.join(project.workspace_path, '.automater/analysis/probes');
+    if (!fs.existsSync(probesDir)) return { success: true, reports: [] };
+    try {
+      const files = fs.readdirSync(probesDir).filter(f => f.endsWith('.json'));
+      const reports = files.map(f => {
+        try { return JSON.parse(fs.readFileSync(path.join(probesDir, f), 'utf-8')); } catch { return null; }
+      }).filter(Boolean);
+      return { success: true, reports };
+    } catch { return { success: true, reports: [] }; }
+  });
+
+  ipcMain.handle('project:detect-incremental-changes', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const result = detectIncrementalChanges(project.workspace_path);
+    return { success: true, ...result, affectedProbeTypes: [...result.affectedProbeTypes] };
+  });
+
+  ipcMain.handle('project:apply-module-correction', (_event, projectId: string, correction: Omit<UserCorrection, 'timestamp'>) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    const updatedGraph = applyUserCorrection(project.workspace_path, correction);
+    if (!updatedGraph) return { success: false, error: 'Failed to apply correction' };
+    return { success: true, graph: updatedGraph };
+  });
+
+  ipcMain.handle('project:get-user-corrections', (_event, projectId: string) => {
+    const db = getDb();
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+    return { success: true, corrections: getUserCorrections(project.workspace_path) };
   });
 
   // ── 文件夹选择对话框 (v5.1) ──

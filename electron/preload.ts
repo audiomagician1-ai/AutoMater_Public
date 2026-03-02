@@ -68,6 +68,19 @@ contextBridge.exposeInMainWorld('automater', {
     // v5.1: 分析已有项目
     analyzeExisting: (projectId: string) =>
       ipcRenderer.invoke('project:analyze-existing', projectId),
+    // v7.0: Module Graph + Probe Analysis API
+    getModuleGraph: (projectId: string) =>
+      ipcRenderer.invoke('project:get-module-graph', projectId),
+    getKnownIssues: (projectId: string) =>
+      ipcRenderer.invoke('project:get-known-issues', projectId),
+    getProbeReports: (projectId: string) =>
+      ipcRenderer.invoke('project:get-probe-reports', projectId),
+    detectIncrementalChanges: (projectId: string) =>
+      ipcRenderer.invoke('project:detect-incremental-changes', projectId),
+    applyModuleCorrection: (projectId: string, correction: Record<string, unknown>) =>
+      ipcRenderer.invoke('project:apply-module-correction', projectId, correction),
+    getUserCorrections: (projectId: string) =>
+      ipcRenderer.invoke('project:get-user-corrections', projectId),
   },
 
   // ── 需求队列 (v3.1) ──
@@ -197,6 +210,14 @@ contextBridge.exposeInMainWorld('automater', {
     searchMemories: (query: string, limit?: number) => ipcRenderer.invoke('meta-agent:memory:search', query, limit),
     getMemoryStats: () => ipcRenderer.invoke('meta-agent:memory:stats'),
     clearMemories: (category?: string) => ipcRenderer.invoke('meta-agent:memory:clear', category),
+    // Daemon (heartbeat/hooks/cron)
+    getDaemonStatus: () => ipcRenderer.invoke('meta-agent:daemon:status'),
+    getDaemonConfig: () => ipcRenderer.invoke('meta-agent:daemon:config:get'),
+    saveDaemonConfig: (config: any) => ipcRenderer.invoke('meta-agent:daemon:config:save', config),
+    startDaemon: () => ipcRenderer.invoke('meta-agent:daemon:start'),
+    stopDaemon: () => ipcRenderer.invoke('meta-agent:daemon:stop'),
+    triggerHeartbeat: () => ipcRenderer.invoke('meta-agent:daemon:trigger'),
+    getDaemonLogs: (limit?: number) => ipcRenderer.invoke('meta-agent:daemon:logs', limit),
   },
 
   // ── 临时工作流 (v5.5) ──

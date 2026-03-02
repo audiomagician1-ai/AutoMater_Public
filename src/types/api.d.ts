@@ -55,6 +55,49 @@ interface MetaAgentMemoryRecord {
   updated_at: string;
 }
 
+/** v7.0: 管家守护进程配置 */
+interface MetaAgentDaemonConfig {
+  enabled: boolean;
+  heartbeatIntervalMin: number;
+  activeHoursStart: string;
+  activeHoursEnd: string;
+  dailyTokenBudget: number;
+  hooks: {
+    onFeatureFailed: boolean;
+    onProjectComplete: boolean;
+    onProjectStalled: boolean;
+    onError: boolean;
+    stallThresholdMin: number;
+  };
+  cronJobs: Array<{
+    id: string;
+    name: string;
+    schedule: string;
+    prompt: string;
+    enabled: boolean;
+  }>;
+  heartbeatPrompt: string;
+}
+
+/** v7.0: 心跳日志 */
+interface MetaAgentHeartbeatLog {
+  id?: number;
+  type: 'heartbeat' | 'hook' | 'cron';
+  trigger_desc: string;
+  result: 'ok' | 'notified' | 'error';
+  message: string;
+  tokens_used: number;
+  created_at?: string;
+}
+
+/** v7.0: 守护进程状态 */
+interface MetaAgentDaemonStatus {
+  running: boolean;
+  config: MetaAgentDaemonConfig;
+  todayTokens: number;
+  recentLogs: MetaAgentHeartbeatLog[];
+}
+
 interface FileNode {
   name: string;
   path: string;
@@ -275,6 +318,18 @@ interface AutoMaterAPI {
     getImpactAnalysis(changeRequestId: string): Promise<ChangeRequestDetail | null>;
     /** v5.1: 分析已有项目（异步，进度通过 project:import-progress 事件推送） */
     analyzeExisting(projectId: string): Promise<{ success: boolean; message?: string; error?: string }>;
+    /** v7.0: 获取模块依赖图 */
+    getModuleGraph(projectId: string): Promise<{ success: boolean; graph?: unknown; error?: string }>;
+    /** v7.0: 获取已知技术问题 */
+    getKnownIssues(projectId: string): Promise<{ success: boolean; issues?: string; error?: string }>;
+    /** v7.0: 获取所有探针报告 */
+    getProbeReports(projectId: string): Promise<{ success: boolean; reports?: unknown[]; error?: string }>;
+    /** v7.0: 检测增量变更 */
+    detectIncrementalChanges(projectId: string): Promise<{ success: boolean; changedFiles?: string[]; affectedProbeTypes?: string[]; needsFullReprobe?: boolean; reason?: string; error?: string }>;
+    /** v7.0: 应用用户对模块图的校正 */
+    applyModuleCorrection(projectId: string, correction: Record<string, unknown>): Promise<{ success: boolean; graph?: unknown; error?: string }>;
+    /** v7.0: 获取用户校正历史 */
+    getUserCorrections(projectId: string): Promise<{ success: boolean; corrections?: unknown[]; error?: string }>;
   };
   /** v3.1: 需求队列 */
   wish: {
@@ -373,6 +428,14 @@ interface AutoMaterAPI {
     searchMemories(query: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
     getMemoryStats(): Promise<{ total: number; byCategory: Record<string, number> }>;
     clearMemories(category?: string): Promise<{ success: boolean }>;
+    // Daemon (heartbeat/hooks/cron)
+    getDaemonStatus(): Promise<MetaAgentDaemonStatus>;
+    getDaemonConfig(): Promise<MetaAgentDaemonConfig>;
+    saveDaemonConfig(config: Partial<MetaAgentDaemonConfig>): Promise<{ success: boolean; config: MetaAgentDaemonConfig }>;
+    startDaemon(): Promise<{ success: boolean }>;
+    stopDaemon(): Promise<{ success: boolean }>;
+    triggerHeartbeat(): Promise<{ success: boolean }>;
+    getDaemonLogs(limit?: number): Promise<MetaAgentHeartbeatLog[]>;
   };
 
   /** v6.0: 临时工作流 */
