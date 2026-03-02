@@ -25,6 +25,7 @@ import {
 import {
   createBranch, switchBranch, gitPush, createPR, addIssueComment, closeIssue, getCurrentBranch,
 } from '../git-provider';
+import { harvestPostFeature } from '../experience-harvester';
 
 const log = createLogger('phase:worker');
 
@@ -289,6 +290,20 @@ export async function workerLoop(
     const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('qa_passed','passed','failed')").get(projectId) as CountResult).c;
     if (completedCount % 3 === 0) createCheckpoint(projectId, `${completedCount} Features 已处理`);
     if (passed && workspacePath) await commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
+
+    // D5+D9: Post-feature 经验提取 (fire-and-forget, 覆盖 passed/failed 双路径)
+    if (workspacePath) {
+      const projRow = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId) as { name: string } | undefined;
+      harvestPostFeature({
+        projectId, featureId: feature.id, featureTitle: feature.title || '',
+        result: passed ? 'passed' : 'failed',
+        qaAttempts: maxQARetries,
+        filesWritten: [], // files already committed; not tracked here
+        reason: passed ? undefined : lastErrorMsg || undefined,
+        workspacePath, projectName: projRow?.name || projectId,
+        settings, signal,
+      }).catch(() => {}); // non-blocking
+    }
 
     // v14.0: Post-completion GitHub automation (push → PR → Issue comment/close)
     if (passed && issueBranch && gitConfig.mode === 'github') {

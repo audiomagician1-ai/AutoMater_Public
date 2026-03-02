@@ -20,6 +20,7 @@ import {
 } from './shared';
 import fs from 'fs';
 import path from 'path';
+import { harvestPostFeature } from '../experience-harvester';
 
 const log = createLogger('phase:pm');
 
@@ -260,6 +261,18 @@ export async function phasePMAcceptance(
         const icon = verdict === 'accept' ? '✅' : verdict === 'conditional_accept' ? '⚠️' : '❌';
         sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `${icon} ${feature.id} PM 验收: ${verdict} (${score}/100) — ${summary}` });
         sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: finalStatus, agentId: pmAccId });
+
+        // D5: PM 驳回时提取失败经验
+        if (finalStatus === 'pm_rejected' && workspacePath) {
+          const projRow = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId) as { name: string } | undefined;
+          harvestPostFeature({
+            projectId, featureId: feature.id, featureTitle: feature.title || '',
+            result: 'pm_rejected',
+            reason: feedback || summary || undefined,
+            workspacePath, projectName: projRow?.name || projectId,
+            settings, signal,
+          }).catch(() => {}); // non-blocking
+        }
       }
       sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `  📋 批次 ${bi + 1}/${accBatches.length} 验收完成 ($${accCost.toFixed(4)})` });
     } catch (err: unknown) {

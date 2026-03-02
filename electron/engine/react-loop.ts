@@ -45,6 +45,7 @@ import {
   recordProgress, extractExperience, getOtherWorkersChanges,
 } from './scratchpad';
 import { compressSubAgentResult } from './sub-agent-compressor';
+import { harvestPostSession } from './experience-harvester';
 import { summarizeToolResult } from './tool-result-summarizer';
 import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
@@ -926,6 +927,16 @@ export async function reactDeveloperLoop(
       filesWritten: [...filesWritten],
     },
   });
+
+  // ── D4: Post-session 反思 (fire-and-forget, 不阻塞返回) ──
+  if (workspacePath) {
+    harvestPostSession({
+      projectId, agentId: workerId, role: 'developer',
+      featureId: feature.id, featureTitle: feature.title || '',
+      completed, iterations: reactState.iterations.length,
+      filesWritten: [...filesWritten], workspacePath, settings, signal,
+    }).catch(() => {}); // non-blocking
+  }
 
   return {
     completed,

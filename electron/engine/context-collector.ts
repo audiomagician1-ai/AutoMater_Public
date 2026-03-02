@@ -20,12 +20,13 @@ import path from 'path';
 import { readDirectoryTree, readWorkspaceFile, type FileNode } from './file-writer';
 import { getDb } from '../db';
 import { generateRepoMap } from './repo-map';
-import { readMemoryForRole } from './memory-system';
+import { readMemoryForRole, readProjectMemory } from './memory-system';
 import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
 import { buildCrossProjectContext } from './cross-project';
 import type { FeatureRow } from './types';
 import type { ModuleGraph, ModuleGraphNode, ModuleGraphEdge } from './probe-types';
 import { buildHotMemory, buildWarmMemory, selectColdModules, loadColdMemory, extractKeywords } from './memory-layers';
+import { extractRecentFeatureLessons } from './experience-harvester';
 
 // Re-export extracted memory-layers for backwards compatibility
 export { buildHotMemory, buildWarmMemory, loadColdMemory, selectColdModules, extractKeywords, type MemoryLayer } from './memory-layers';
@@ -402,6 +403,20 @@ export async function collectDeveloperContext(
     }
   }
 
+  // ─── 0.7. Instance Memory — 近期 Feature 经验 (D8) ───
+  if (memory.project) {
+    const instanceLessons = extractRecentFeatureLessons(memory.project, 5);
+    if (instanceLessons) {
+      const instanceContent = `## 近期 Feature 经验 (避免重复踩坑)\n${instanceLessons}`;
+      if (totalChars + instanceContent.length < charBudget * 0.08) {
+        addSection({
+          id: 'instance-memory', name: '近期 Feature 经验 (Instance Memory)', source: 'project-config',
+          content: instanceContent, truncated: false,
+        });
+      }
+    }
+  }
+
   // ─── 1. 架构文档 (v20.0: 按 feature 裁剪相关部分) ───
   const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
   if (archContent) {
@@ -671,6 +686,20 @@ export function collectLayeredContext(
       id: 'warm-memory', name: 'Warm Memory (模块索引)', source: 'repo-map',
       content: warm.content, truncated: false,
     });
+  }
+
+  // ─── Instance Memory — 近期 Feature 经验 (D8) ───
+  {
+    const projMem = readProjectMemory(workspacePath);
+    if (projMem) {
+      const instanceLessons = extractRecentFeatureLessons(projMem, 5);
+      if (instanceLessons && totalChars + instanceLessons.length + 50 < charBudget * 0.35) {
+        addSection({
+          id: 'instance-memory', name: '近期 Feature 经验 (Instance Memory)', source: 'project-config',
+          content: `## 近期 Feature 经验 (避免重复踩坑)\n${instanceLessons}`, truncated: false,
+        });
+      }
+    }
   }
 
   // ─── Cold Memory (按需加载, ≤20% 预算) ───

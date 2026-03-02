@@ -44,6 +44,7 @@ export { selectModelTier, resolveModel } from '../model-selector';
 export { emitEvent } from '../event-store';
 export { createCheckpoint } from '../mission';
 export { extractFromProjectMemory } from '../cross-project';
+export { harvestPostFeature, harvestPostSession, extractRecentFeatureLessons } from '../experience-harvester';
 export { writeDoc, readDoc, buildDesignContext, buildFeatureDocContext, checkConsistency } from '../doc-manager';
 export { detectImplicitChanges, runChangeRequest, type WishTriageResult } from '../change-manager';
 export {
