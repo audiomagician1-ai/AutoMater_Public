@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Agent Manager — Agent 生命周期管理
  *
  * 运行注册表、spawn、stats更新、预算防护、feature原子锁定、停止
@@ -125,7 +125,7 @@ export function getTeamPrompt(projectId: string, role: string, agentIndex: numbe
     const member = members[Math.min(agentIndex, members.length - 1)];
     const prompt = member?.system_prompt?.trim();
     return prompt && prompt.length > 10 ? prompt : null;
-  } catch {
+  } catch { /* silent: DB/team lookup fallback */
     return null;
   }
 }
@@ -185,7 +185,7 @@ export function getTeamMemberLLMConfig(
     }
 
     return fallback;
-  } catch {
+  } catch { /* silent: model config parse fallback */
     return fallback;
   }
 }
@@ -204,7 +204,7 @@ export function getTeamMemberMcpServers(projectId: string, role: string, agentIn
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.mcp_servers) return [];
     return JSON.parse(member.mcp_servers);
-  } catch {
+  } catch { /* silent: mcp_servers JSON parse fallback */
     return [];
   }
 }
@@ -223,7 +223,7 @@ export function getTeamMemberSkills(projectId: string, role: string, agentIndex:
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.skills) return [];
     return JSON.parse(member.skills);
-  } catch {
+  } catch { /* silent: skills JSON parse fallback */
     return [];
   }
 }

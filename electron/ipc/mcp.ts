@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MCP & Skill IPC Handlers — 管理 MCP 服务器连接 + 技能目录
  *
  * 提供以下 IPC 通道:
@@ -40,7 +40,7 @@ function loadMcpConfigs(): McpServerConfig[] {
   if (!row) return [];
   try {
     return JSON.parse(row.value);
-  } catch {
+  } catch { /* silent: MCP config JSON parse failed */
     return [];
   }
 }

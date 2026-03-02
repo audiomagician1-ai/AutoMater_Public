@@ -634,7 +634,7 @@ class SkillEvolutionManager {
       const p = getKnowledgePath(skillId);
       if (!fs.existsSync(p)) return null;
       return fs.readFileSync(p, 'utf-8');
-    } catch {
+    } catch { /* silent: knowledge file read failed */
       return null;
     }
   }

@@ -174,7 +174,7 @@ function repairObject(
             result[key] = parsed;
             warnings.push(`${fullPath}: parsed string as JSON array`);
           }
-        } catch {
+        } catch { /* JSON array parse failed — wrap as single-item array */
           result[key] = [value];
           warnings.push(`${fullPath}: wrapped string in array`);
         }
@@ -216,7 +216,7 @@ function repairObject(
 function tryDirectParse(raw: string): unknown | null {
   try {
     return JSON.parse(raw.trim());
-  } catch {
+  } catch { /* not valid JSON */
     return null;
   }
 }
@@ -271,7 +271,7 @@ function tryBracketMatch(raw: string, targetBracket: '[' | '{'): unknown | null 
         const candidate = raw.slice(startIdx, i + 1);
         try {
           return JSON.parse(candidate);
-        } catch {
+        } catch { /* not valid JSON at this boundary */
           return null;
         }
       }

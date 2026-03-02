@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Structured Logger — 统一日志系统
  *
  * 设计目标:
@@ -107,7 +107,7 @@ function normalizeError(err: unknown): { message: string; stack?: string } {
   }
   try {
     return { message: JSON.stringify(err) };
-  } catch {
+  } catch { /* silent: JSON.stringify failed — use String() */
     return { message: String(err) };
   }
 }

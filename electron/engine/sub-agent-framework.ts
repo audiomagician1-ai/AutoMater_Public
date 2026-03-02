@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sub-Agent Framework — 通用多能力子 Agent 系统
  *
  * 从 spawn_researcher (只读8轮) 升级为:
@@ -399,7 +399,7 @@ export async function spawnSubAgent(
             toolArgs = typeof tc.function.arguments === 'string'
               ? JSON.parse(tc.function.arguments)
               : tc.function.arguments;
-          } catch {
+          } catch { /* silent: tool args JSON parse failed */
             toolArgs = {};
           }
 

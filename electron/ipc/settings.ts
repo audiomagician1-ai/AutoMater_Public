@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 设置 IPC — 读写用户配置 (API Key、模型等)
  */
 
@@ -34,7 +34,7 @@ export function setupSettingsHandlers() {
     if (row) {
       try {
         return { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) };
-      } catch {
+      } catch { /* silent: settings JSON parse — use defaults */
         return DEFAULT_SETTINGS;
       }
     }

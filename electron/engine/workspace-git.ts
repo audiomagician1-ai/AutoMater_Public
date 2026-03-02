@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workspace Git — 项目工作区 Git 管理 (高层接口)
  *
  * 委托底层操作给 git-provider.ts，消除重复实现。
@@ -26,7 +26,7 @@ export function hasGit(): boolean {
   try {
     execSync('git --version', { stdio: 'ignore' });
     return true;
-  } catch {
+  } catch { /* silent: git not installed */
     return false;
   }
 }

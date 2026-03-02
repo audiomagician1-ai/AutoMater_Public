@@ -68,7 +68,7 @@ function isForbidden(command: string): boolean {
   return FORBIDDEN_PATTERNS.some(p => {
     try {
       return new RegExp(p, 'i').test(lower);
-    } catch {
+    } catch { /* regex compile failed — fallback to includes() */
       return lower.includes(p);
     }
   });

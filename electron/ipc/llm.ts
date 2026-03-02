@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LLM IPC — 在主进程中直接调用 LLM API
  * 
  * 没有后端服务，没有 sidecar — 直接 fetch
@@ -123,7 +123,7 @@ export function setupLLMHandlers() {
       const data = await res.json() as { data?: Array<{ id: string }> };
       const models = (data.data || []).map((m) => m.id).sort();
       return { success: true, models };
-    } catch {
+    } catch { /* silent: model list fetch failed */
       return { success: false, models: [] };
     }
   });

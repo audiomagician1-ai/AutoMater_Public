@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Research Engine — 深度研究分析引擎
  *
  * 类似 echoagent 的 WebResearchAgent 子代理能力:
@@ -281,7 +281,7 @@ ${resultsText.slice(0, 25000)}
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     };
-  } catch {
+  } catch { /* silent: synthesis LLM call failed */
     return {
       report: result.content,
       keyFindings: [],

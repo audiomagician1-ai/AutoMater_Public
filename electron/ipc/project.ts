@@ -587,7 +587,7 @@ export function setupProjectHandlers() {
             isImportProject = true;
           }
         }
-      } catch {}
+      } catch { /* non-critical: JSON parse fallback */ }
     }
 
     if (isImportProject) {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Dynamic Model Selection — 按任务复杂度自动选模型
  *
  * 对标: Cursor 2.0 / Factory Droids — Agent 按任务类型和复杂度
@@ -164,7 +164,7 @@ export function estimateFeatureComplexity(feature: FeatureRow): number {
 
   // 验收标准多 → 复杂
   let criteria: string[] = [];
-  try { criteria = JSON.parse(feature.acceptance_criteria || '[]'); } catch {}
+  try { criteria = JSON.parse(feature.acceptance_criteria || '[]'); } catch { /* silent: acceptance_criteria JSON parse */ }
   if (criteria.length > 5) score += 2;
   else if (criteria.length > 3) score += 1;
 

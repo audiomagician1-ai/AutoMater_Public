@@ -39,6 +39,12 @@ import type { AppSettings, FileTreeNode } from './types';
 import { trimToolResult } from './context-collector';
 import { configureSearch, getAvailableProviders } from './search-provider';
 import { skillEvolution } from './skill-evolution';
+import { configureImageGen, isImageGenAvailable, textToImage, editImage } from './image-gen';
+import {
+  deployWithCompose, composeDown, pm2Start, pm2Status,
+  writeNginxConfig, writeDockerfile, healthCheck,
+  type ServiceConfig, type NginxSiteConfig, type DockerfileConfig,
+} from './deploy-tools';
 
 const log = createLogger('tool-executor');
 
@@ -561,6 +567,15 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'sandbox_write':
       case 'sandbox_read':
       case 'sandbox_destroy':
+      case 'generate_image':
+      case 'edit_image':
+      case 'deploy_compose':
+      case 'deploy_compose_down':
+      case 'deploy_pm2':
+      case 'deploy_pm2_status':
+      case 'generate_nginx_config':
+      case 'generate_dockerfile':
+      case 'health_check':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
 
       // Sync-only tools
@@ -592,6 +607,17 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         });
         const available = getAvailableProviders();
         return { success: true, output: `搜索引擎配置已更新\n可用引擎: [${available.join(', ')}]\n\n提示: 配置 API Key 后搜索质量将大幅提升。Brave (免费2000次/月): https://brave.com/search/api/`, action: 'web' };
+      }
+
+      // v9.0: 图像生成配置 (同步)
+      case 'configure_image_gen': {
+        configureImageGen({
+          provider: call.arguments.provider,
+          apiKey: call.arguments.api_key,
+          baseUrl: call.arguments.base_url || 'https://api.openai.com',
+          model: call.arguments.model,
+        });
+        return { success: true, output: `图像生成引擎已配置\nProvider: ${call.arguments.provider}\nModel: ${call.arguments.model || 'default'}\n\n现在可以使用 generate_image 和 edit_image 工具了。`, action: 'web' };
       }
 
       default: {
@@ -952,6 +978,160 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
 
     const allSuccess = results.every(r => r.result.success);
     return { success: allSuccess, output: `并行执行完成 (${results.length} 个任务):\n\n${summary}`.slice(0, 8000), action: 'shell' };
+  }
+
+  // ── v9.0: Image Generation ──
+  if (call.name === 'generate_image') {
+    const result = await textToImage({
+      prompt: call.arguments.prompt,
+      negativePrompt: call.arguments.negative_prompt,
+      size: call.arguments.size,
+      quality: call.arguments.quality,
+      style: call.arguments.style,
+      savePath: call.arguments.save_path ? path.resolve(ctx.workspacePath, call.arguments.save_path) : undefined,
+    });
+    if (!result.success) {
+      return { success: false, output: `图像生成失败: ${result.error}`, action: 'web' };
+    }
+    // 缓存生成的图像以便 edit_image 使用
+    if (result.images[0]?.base64) {
+      cacheScreenshot('generated_latest', result.images[0].base64);
+    }
+    const summary = [
+      `图像生成成功 ✅ (${result.durationMs}ms)`,
+      result.images[0]?.revisedPrompt ? `修正后的 prompt: ${result.images[0].revisedPrompt}` : '',
+      result.savedPaths.length > 0 ? `已保存: ${result.savedPaths.join(', ')}` : '',
+      `图像大小: ${Math.round((result.images[0]?.base64.length || 0) / 1024)}KB base64`,
+      `图像已缓存为 'generated_latest'，可用 edit_image 编辑`,
+    ].filter(Boolean).join('\n');
+    return { success: true, output: summary, action: 'web' };
+  }
+
+  if (call.name === 'edit_image') {
+    const srcBase64 = getCachedScreenshot(call.arguments.image_label);
+    if (!srcBase64) return { success: false, output: `未找到标签为 "${call.arguments.image_label}" 的图像。请先截图或生成图像。`, action: 'web' };
+    const maskBase64 = call.arguments.mask_label ? getCachedScreenshot(call.arguments.mask_label) : undefined;
+    const result = await editImage({
+      imageBase64: srcBase64,
+      maskBase64: maskBase64,
+      prompt: call.arguments.prompt,
+      size: call.arguments.size,
+      savePath: call.arguments.save_path ? path.resolve(ctx.workspacePath, call.arguments.save_path) : undefined,
+    });
+    if (!result.success) {
+      return { success: false, output: `图像编辑失败: ${result.error}`, action: 'web' };
+    }
+    if (result.images[0]?.base64) {
+      cacheScreenshot('edited_latest', result.images[0].base64);
+    }
+    return {
+      success: true,
+      output: `图像编辑完成 ✅ (${result.durationMs}ms)\n${result.savedPaths.length > 0 ? `已保存: ${result.savedPaths.join(', ')}` : ''}图像已缓存为 'edited_latest'`,
+      action: 'web',
+    };
+  }
+
+  // ── v9.0: Deployment Tools ──
+  if (call.name === 'deploy_compose') {
+    const services: ServiceConfig[] = (call.arguments.services || []).map((s: Record<string, unknown>) => ({
+      name: s.name as string,
+      image: s.image as string | undefined,
+      build: s.build as string | undefined,
+      ports: (s.ports as string[]) || [],
+      env: s.env as Record<string, string> | undefined,
+      volumes: s.volumes as string[] | undefined,
+      dependsOn: s.depends_on as string[] | undefined,
+      healthCheck: s.health_check as string | undefined,
+      restart: s.restart as ServiceConfig['restart'],
+      command: s.command as string | undefined,
+    }));
+    const result = await deployWithCompose(
+      { projectName: call.arguments.project_name, services },
+      ctx.workspacePath,
+      { buildFirst: call.arguments.build_first, detach: true },
+    );
+    return {
+      success: result.success,
+      output: result.success ? result.output : `部署失败: ${result.error}`,
+      action: 'shell',
+    };
+  }
+
+  if (call.name === 'deploy_compose_down') {
+    const result = await composeDown(ctx.workspacePath);
+    return { success: result.success, output: result.success ? result.output : `停止失败: ${result.error}`, action: 'shell' };
+  }
+
+  if (call.name === 'deploy_pm2') {
+    const apps = (call.arguments.apps || []).map((a: Record<string, unknown>) => ({
+      name: a.name as string,
+      script: a.script as string,
+      cwd: a.cwd as string | undefined,
+      args: a.args as string | undefined,
+      instances: a.instances as number | undefined,
+      env: a.env as Record<string, string> | undefined,
+      maxMemoryRestart: a.max_memory_restart as string | undefined,
+      watch: a.watch as boolean | undefined,
+    }));
+    const result = await pm2Start(apps, ctx.workspacePath);
+    return { success: result.success, output: result.success ? result.output : `PM2 启动失败: ${result.error}`, action: 'shell' };
+  }
+
+  if (call.name === 'deploy_pm2_status') {
+    const result = await pm2Status();
+    return { success: result.success, output: result.output, action: 'shell' };
+  }
+
+  if (call.name === 'generate_nginx_config') {
+    const siteConfig: NginxSiteConfig = {
+      serverName: call.arguments.server_name,
+      listenPort: call.arguments.listen_port,
+      upstream: call.arguments.upstream,
+      staticRoot: call.arguments.static_root,
+      spaMode: call.arguments.spa_mode,
+      ssl: call.arguments.ssl_cert ? { certPath: call.arguments.ssl_cert, keyPath: call.arguments.ssl_key } : undefined,
+    };
+    const outputDir = path.join(ctx.workspacePath, 'nginx');
+    const result = await writeNginxConfig(siteConfig, outputDir);
+    return {
+      success: result.success,
+      output: result.success ? `Nginx 配置已生成: ${result.filePath}` : `生成失败: ${result.error}`,
+      action: 'write',
+    };
+  }
+
+  if (call.name === 'generate_dockerfile') {
+    const dockerConfig: DockerfileConfig = {
+      baseImage: call.arguments.base_image,
+      installCmd: call.arguments.install_cmd,
+      buildCmd: call.arguments.build_cmd,
+      startCmd: call.arguments.start_cmd,
+      exposePorts: call.arguments.expose_ports,
+    };
+    const outputPath = path.resolve(ctx.workspacePath, call.arguments.output_path || 'Dockerfile');
+    const result = await writeDockerfile(dockerConfig, outputPath);
+    return {
+      success: result.success,
+      output: result.success ? `Dockerfile 已生成: ${result.filePath}` : `生成失败: ${result.error}`,
+      action: 'write',
+    };
+  }
+
+  if (call.name === 'health_check') {
+    const targets = (call.arguments.urls || []).map((u: Record<string, unknown>) => ({
+      name: u.name as string,
+      url: u.url as string,
+      expectedStatus: u.expected_status as number | undefined,
+    }));
+    const result = await healthCheck(targets, { timeout: call.arguments.timeout });
+    const lines = result.services.map(s =>
+      `${s.healthy ? '✅' : '❌'} ${s.name}: ${s.url} ${s.healthy ? `(${s.responseTime}ms)` : `— ${s.error}`}`,
+    );
+    return {
+      success: result.success,
+      output: `健康检查 ${result.success ? '全部通过 ✅' : '部分失败 ❌'}\n${lines.join('\n')}`,
+      action: 'shell',
+    };
   }
 
   // ── MCP 外部工具 ──

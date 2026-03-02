@@ -61,7 +61,7 @@ function getActiveWorkflowStages(projectId: string): WorkflowStageId[] {
   try {
     const stages: WorkflowStage[] = JSON.parse(row.stages);
     return stages.map(s => s.id as WorkflowStageId);
-  } catch {
+  } catch { /* silent: stages JSON parse — use default pipeline */
     return ['pm_analysis', 'architect', 'docs_gen', 'dev_implement', 'qa_review', 'finalize'];
   }
 }

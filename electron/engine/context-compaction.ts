@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Compaction — 对话历史压缩 + 工具结果裁剪
  *
  * 从 context-collector.ts 拆分 (v12.3)
@@ -120,7 +120,7 @@ export async function compactMessages(
         `请将以下 ReAct 对话历史压缩为关键摘要（保留：已完成的操作、已创建/修改的文件、遇到的错误、关键决策）：\n\n${middleText}`,
       );
       usedLLM = true;
-    } catch {
+    } catch { /* silent: LLM summarize failed — use raw text */
       summaryText = middleText;
     }
   } else {
@@ -158,26 +158,46 @@ export async function compactMessages(
  * 当工具返回大段代码/日志时，智能截取关键部分
  */
 export function trimToolResult(content: string, maxTokens: number = 3000): string {
-  const charLimit = maxTokens * 1.5;
+  const charLimit = Math.floor(maxTokens * 1.5);
   if (content.length <= charLimit) return content;
 
-  // 策略：保留头部 + 尾部 + 错误信息
+  // 策略：保留头部 + 尾部 + 错误信息，按字符预算分配
   const lines = content.split('\n');
   const errorLines = lines.filter(l =>
-    l.includes('Error') || l.includes('error') || l.includes('FAIL') || l.includes('warning'),
+    /error|Error|FAIL|warning/i.test(l),
   );
 
-  const headCount = Math.floor(lines.length * 0.3);
-  const tailCount = Math.floor(lines.length * 0.15);
+  // 预算分配：错误行30%, 头部50%, 尾部20%
+  const errorBudget = errorLines.length > 0 ? Math.floor(charLimit * 0.3) : 0;
+  const headBudget = Math.floor((charLimit - errorBudget) * 0.7);
+  const tailBudget = charLimit - errorBudget - headBudget;
 
-  const head = lines.slice(0, Math.min(headCount, 50));
-  const tail = lines.slice(-Math.min(tailCount, 20));
-  const errors = errorLines.slice(0, 10);
+  // 按字符预算收集头部行
+  const head: string[] = [];
+  let headChars = 0;
+  for (const line of lines) {
+    if (headChars + line.length + 1 > headBudget) break;
+    head.push(line);
+    headChars += line.length + 1;
+  }
+
+  // 收集尾部行
+  const tail: string[] = [];
+  let tailChars = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (tailChars + lines[i].length + 1 > tailBudget) break;
+    tail.unshift(lines[i]);
+    tailChars += lines[i].length + 1;
+  }
+
+  // 收集错误行（去重与head/tail）
+  const headTailSet = new Set([...head, ...tail]);
+  const errors = errorLines.filter(l => !headTailSet.has(l)).slice(0, 10);
 
   const parts = [
     ...head,
     '',
-    `... [省略 ${lines.length - headCount - tailCount} 行]`,
+    `... [省略 ${lines.length - head.length - tail.length} 行]`,
     '',
   ];
 
@@ -190,9 +210,9 @@ export function trimToolResult(content: string, maxTokens: number = 3000): strin
   parts.push(...tail);
 
   const result = parts.join('\n');
-  return result.length <= charLimit
+  return result.length <= charLimit + 50
     ? result
-    : result.slice(0, Math.floor(charLimit)) + '\n... [结果已截断]';
+    : result.slice(0, charLimit) + '\n... [结果已截断]';
 }
 
 // ═══════════════════════════════════════

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tool Registry — 工具定义 + 角色权限 + Schema 格式化
  *
  * 职责单一：声明工具的 name / description / parameters (JSON Schema)，
@@ -924,6 +924,194 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['feature_description'],
     },
   },
+
+  // ═══════════════════════════════════════════════════
+  // v9.0: Image Generation
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'generate_image',
+    description: '文生图 — 根据文字描述生成图像。支持 DALL-E 3/2、Gemini Imagen、自定义 OpenAI 兼容 API (如本地 Stable Diffusion)。\n返回 base64 PNG + 可选本地保存。',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '图像生成提示词 (英文效果更好)' },
+        negative_prompt: { type: 'string', description: '负面提示词 (仅自定义 API 支持)' },
+        size: { type: 'string', enum: ['256x256', '512x512', '1024x1024', '1024x1792', '1792x1024'], description: '图像尺寸，默认 1024x1024', default: '1024x1024' },
+        quality: { type: 'string', enum: ['standard', 'hd'], description: '质量 (DALL-E 3)，默认 standard' },
+        style: { type: 'string', enum: ['vivid', 'natural'], description: '风格 (DALL-E 3)，默认 vivid' },
+        save_path: { type: 'string', description: '保存到本地的路径 (可选，如 ./assets/hero.png)' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'edit_image',
+    description: '图像编辑 (inpainting) — 基于蒙版编辑已有图像的局部区域。仅 DALL-E 2 / 自定义 API 支持。',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_label: { type: 'string', description: '源图像标签 (来自截图缓存或 generate_image 缓存)' },
+        prompt: { type: 'string', description: '编辑提示词 — 描述编辑区域的期望效果' },
+        mask_label: { type: 'string', description: '蒙版图像标签 (透明区域=编辑区)' },
+        size: { type: 'string', enum: ['256x256', '512x512', '1024x1024'], description: '输出尺寸' },
+        save_path: { type: 'string', description: '保存路径' },
+      },
+      required: ['image_label', 'prompt'],
+    },
+  },
+  {
+    name: 'configure_image_gen',
+    description: '配置图像生成引擎。支持: openai (DALL-E)、gemini (Imagen)、custom (任何 OpenAI 兼容 API)。\n配置一次后所有后续 generate_image 调用都使用此配置。',
+    parameters: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', enum: ['openai', 'gemini', 'custom'], description: '图像生成引擎类型' },
+        api_key: { type: 'string', description: 'API Key' },
+        base_url: { type: 'string', description: 'API Base URL (OpenAI 默认 https://api.openai.com)' },
+        model: { type: 'string', description: '模型名 (dall-e-3, dall-e-2, gemini-2.0-flash-exp 等)' },
+      },
+      required: ['provider', 'api_key'],
+    },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // v9.0: Deployment Tools
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'deploy_compose',
+    description: '使用 Docker Compose 部署服务。自动生成 docker-compose.yml 并执行 docker compose up。\n支持多服务编排、端口映射、环境变量、健康检查、依赖关系。',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_name: { type: 'string', description: '项目名称 (用于 compose project name)' },
+        services: {
+          type: 'array',
+          description: '服务列表',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '服务名' },
+              image: { type: 'string', description: 'Docker 镜像 (与 build 二选一)' },
+              build: { type: 'string', description: 'Dockerfile 路径 (与 image 二选一)' },
+              ports: { type: 'array', items: { type: 'string' }, description: '端口映射 如 ["3000:3000"]' },
+              env: { type: 'object', description: '环境变量 {KEY: VALUE}' },
+              volumes: { type: 'array', items: { type: 'string' }, description: '挂载卷' },
+              depends_on: { type: 'array', items: { type: 'string' }, description: '依赖服务' },
+              health_check: { type: 'string', description: '健康检查命令' },
+              restart: { type: 'string', enum: ['always', 'unless-stopped', 'on-failure', 'no'], description: '重启策略' },
+              command: { type: 'string', description: '启动命令' },
+            },
+            required: ['name', 'ports'],
+          },
+        },
+        build_first: { type: 'boolean', description: '是否先构建镜像 (--build)', default: false },
+      },
+      required: ['project_name', 'services'],
+    },
+  },
+  {
+    name: 'deploy_compose_down',
+    description: '停止并清理 Docker Compose 部署的服务 (docker compose down -v)',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'deploy_pm2',
+    description: '使用 PM2 部署 Node.js 应用。自动生成 ecosystem.config.js 并启动。\n支持多进程、自动重启、内存限制、日志管理。',
+    parameters: {
+      type: 'object',
+      properties: {
+        apps: {
+          type: 'array',
+          description: '应用列表',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '应用名' },
+              script: { type: 'string', description: '启动脚本路径' },
+              cwd: { type: 'string', description: '工作目录' },
+              args: { type: 'string', description: '启动参数' },
+              instances: { type: 'number', description: '实例数 (0 = CPU 核数)' },
+              env: { type: 'object', description: '环境变量' },
+              max_memory_restart: { type: 'string', description: '内存限制重启阈值 (如 500M)' },
+              watch: { type: 'boolean', description: '是否监听文件变化自动重启' },
+            },
+            required: ['name', 'script'],
+          },
+        },
+      },
+      required: ['apps'],
+    },
+  },
+  {
+    name: 'deploy_pm2_status',
+    description: '查询 PM2 进程状态 — 名称、状态、CPU、内存、运行时间、重启次数',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'generate_nginx_config',
+    description: '生成 Nginx 反向代理配置。支持 SSL、SPA 模式、静态文件缓存、WebSocket 代理、Gzip。\n生成的配置文件可直接放入 /etc/nginx/sites-enabled/ 或 Docker 挂载。',
+    parameters: {
+      type: 'object',
+      properties: {
+        server_name: { type: 'string', description: '域名 (如 myapp.local)' },
+        listen_port: { type: 'number', description: '监听端口，默认 80', default: 80 },
+        upstream: { type: 'string', description: '后端服务地址 (如 127.0.0.1:3000)' },
+        static_root: { type: 'string', description: '静态文件目录 (如 /var/www/dist)' },
+        spa_mode: { type: 'boolean', description: 'SPA 模式 — 所有路由 fallback 到 index.html', default: false },
+        ssl_cert: { type: 'string', description: 'SSL 证书路径' },
+        ssl_key: { type: 'string', description: 'SSL 私钥路径' },
+      },
+      required: ['server_name', 'upstream'],
+    },
+  },
+  {
+    name: 'generate_dockerfile',
+    description: '生成 Dockerfile。支持多阶段构建、Node/Python/Go 等各类项目。',
+    parameters: {
+      type: 'object',
+      properties: {
+        base_image: { type: 'string', description: '基础镜像 (如 node:20-alpine, python:3.12-slim)' },
+        install_cmd: { type: 'string', description: '安装依赖命令 (如 npm ci --production)' },
+        build_cmd: { type: 'string', description: '构建命令 (如 npm run build)' },
+        start_cmd: { type: 'string', description: '启动命令 (如 ["node", "dist/index.js"])' },
+        expose_ports: { type: 'array', items: { type: 'number' }, description: '暴露端口列表' },
+        output_path: { type: 'string', description: '输出路径，默认 ./Dockerfile', default: './Dockerfile' },
+        multi_stage: { type: 'boolean', description: '是否使用多阶段构建', default: false },
+      },
+      required: ['base_image', 'start_cmd'],
+    },
+  },
+  {
+    name: 'health_check',
+    description: '部署后健康检查 — 轮询 URL 列表直到全部可达或超时。用于验证部署是否成功。',
+    parameters: {
+      type: 'object',
+      properties: {
+        urls: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '服务名' },
+              url: { type: 'string', description: '检查 URL' },
+              expected_status: { type: 'number', description: '期望 HTTP 状态码，默认 200' },
+            },
+            required: ['name', 'url'],
+          },
+        },
+        timeout: { type: 'number', description: '超时毫秒数，默认 60000', default: 60000 },
+      },
+      required: ['urls'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -939,6 +1127,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'read_file', 'list_files', 'search_files', 'glob_files',  // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
+    'generate_image', 'configure_image_gen',  // v9.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
     'rfc_propose',     // v5.5: RFC 设计变更提案
@@ -949,6 +1138,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'write_file',
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
+    'generate_image', 'configure_image_gen',  // v9.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
     'rfc_propose',     // v5.5: RFC 设计变更提案
@@ -984,6 +1174,11 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
     // v8.0: Black-box test runner
     'run_blackbox_tests',
+    // v9.0: Image Generation
+    'generate_image', 'edit_image', 'configure_image_gen',
+    // v9.0: Deployment Tools
+    'deploy_compose', 'deploy_compose_down', 'deploy_pm2', 'deploy_pm2_status',
+    'generate_nginx_config', 'generate_dockerfile', 'health_check',
   ],
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -1016,6 +1211,11 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'git_commit', 'git_diff', 'git_log',
     'github_create_issue', 'github_list_issues',
     'memory_read', 'memory_append',
+    // v9.0: Deployment Tools (devops 核心能力)
+    'deploy_compose', 'deploy_compose_down', 'deploy_pm2', 'deploy_pm2_status',
+    'generate_nginx_config', 'generate_dockerfile', 'health_check',
+    // v9.0: Docker Sandbox (devops needs sandbox for infra testing)
+    'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
   ],
   researcher: [
     'think',
@@ -1113,7 +1313,7 @@ function getExternalMcpTools(role?: string): OpenAIFunctionTool[] {
       description: `[MCP] ${t.description}`,
       parameters: t.inputSchema,
     }));
-  } catch {
+  } catch { /* silent: MCP tools load failed */
     return [];
   }
 }
@@ -1130,7 +1330,7 @@ function getExternalSkillTools(role?: string): OpenAIFunctionTool[] {
       ? skillManager.getDefinitionsForRole(role)
       : skillManager.getAllDefinitions();
     return defs.map(toOpenAITool);
-  } catch {
+  } catch { /* silent: skill definitions load failed */
     return [];
   }
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Browser Tools — Playwright 浏览器自动化 (v2.3)
  * 
  * 使用 playwright-core（不含浏览器二进制）+ 系统已安装的 Chrome/Edge
@@ -90,7 +90,7 @@ export async function closeBrowser(): Promise<{ success: boolean }> {
     if (_browser) { await _browser.close().catch(() => {}); _browser = null; }
     if (_cleanupTimer) { clearInterval(_cleanupTimer); _cleanupTimer = null; }
     return { success: true };
-  } catch {
+  } catch { /* silent: browser cleanup error — force-null refs */
     _page = null; _context = null; _browser = null;
     return { success: true };
   }

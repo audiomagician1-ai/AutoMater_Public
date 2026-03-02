@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Docker Sandbox — 容器化隔离执行环境
  *
  * 通过本地 Docker CLI (docker exec / docker cp) 实现：
@@ -104,7 +104,7 @@ export function isDockerAvailable(): boolean {
   try {
     execSync('docker info', { stdio: 'ignore', timeout: 5000 });
     _dockerAvailable = true;
-  } catch {
+  } catch { /* silent: docker not available */
     _dockerAvailable = false;
   }
   return _dockerAvailable;

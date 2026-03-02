@@ -479,7 +479,7 @@ export async function detectImplicitChanges(
 
   const featureList = existingFeatures.map(f => {
     let criteria = '';
-    try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch {}
+    try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch { /* silent: acceptance_criteria JSON parse */ }
     return `- **${f.id}** [${f.status}]: ${f.title}\n  描述: ${f.description}\n  验收: ${criteria}`;
   }).join('\n');
 

@@ -479,7 +479,7 @@ export function setupMetaAgentHandlers() {
             toolArgs = typeof tc.function.arguments === 'string'
               ? JSON.parse(tc.function.arguments)
               : tc.function.arguments;
-          } catch {
+          } catch { /* silent: tool args JSON parse failed */
             toolArgs = {};
           }
 

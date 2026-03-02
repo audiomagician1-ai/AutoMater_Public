@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Black-Box Test Runner — 自主黑盒测试 + 迭代修复循环
  *
  * 完整闭环:
@@ -211,7 +211,7 @@ ${config.appUrl ? `\nApp URL for E2E: ${config.appUrl}` : ''}
       steps: t.steps as E2EStep[] | undefined,
       expected: (t.expected as string) || '',
     }));
-  } catch {
+  } catch { /* silent: test spec parse failed — use single fallback test */
     tests = [{
       id: 'T001',
       name: 'Basic functionality test',
@@ -581,7 +581,7 @@ ${codeContext || '(no code files provided)'}
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     };
-  } catch {
+  } catch { /* silent: fix analysis parse failed */
     return {
       description: 'Fix analysis (unparsed)',
       filesToModify: [],

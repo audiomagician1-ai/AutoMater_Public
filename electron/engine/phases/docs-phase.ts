@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Docs Phase — 批量子需求 + 测试规格 + 增量文档同步
  * Extracted from orchestrator.ts for maintainability.
  * @module phases/docs-phase
@@ -174,7 +174,7 @@ export async function phaseIncrementalDocSync(
     try {
       const diffOutput = execSync('git diff --name-only HEAD~5 HEAD', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 }).trim();
       if (diffOutput) { changedFiles = diffOutput.split('\n').filter(Boolean); }
-    } catch {
+    } catch { /* silent: git log parse failed */
       try {
         const statusOutput = execSync('git diff --name-only --cached', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 }).trim();
         if (statusOutput) { changedFiles = statusOutput.split('\n').filter(Boolean); }

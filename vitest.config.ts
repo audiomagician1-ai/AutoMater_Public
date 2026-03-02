@@ -22,10 +22,10 @@ export default defineConfig({
         'electron/engine/types.ts',       // pure type defs
       ],
       thresholds: {
-        statements: 14,   // 2026-03-02: 15.4% actual, 门槛设为 14%
-        branches: 13,
-        functions: 14,
-        lines: 14,
+        statements: 17,   // 2026-03-02: 18.0% actual → 门槛 17%
+        branches: 16,     // 16.8% actual
+        functions: 19,    // 20.0% actual
+        lines: 17,        // 17.9% actual
       },
     },
   },
