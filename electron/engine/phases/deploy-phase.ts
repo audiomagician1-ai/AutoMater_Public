@@ -321,7 +321,7 @@ export async function phaseDeployPipeline(
       gitConfig,
       win,
       signal,
-      maxIterations: getTeamMemberMaxIterations(projectId, 'devops') ?? 25,  // 部署流程可能步骤较多
+      maxIterations: getTeamMemberMaxIterations(projectId, 'devops') ?? 50,
       model,
       timeoutMs: 300_000, // 5 分钟超时 (部署可能较慢)
     });

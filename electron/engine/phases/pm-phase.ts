@@ -58,7 +58,7 @@ export async function phasePMAnalysis(
       workspacePath: workspacePath || null,
       gitConfig,
       win, signal,
-      maxIterations: getTeamMemberMaxIterations(projectId, 'pm') ?? 15,
+      maxIterations: getTeamMemberMaxIterations(projectId, 'pm') ?? 50,
       model: getTeamMemberLLMConfig(projectId, 'pm', 0, settings).model,
       permissions,
     });

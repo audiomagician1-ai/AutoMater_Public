@@ -4,6 +4,7 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import { toErrorMessage, createLogger } from '../engine/logger';
+import { assertProjectId, assertNonEmptyString, assertOptionalString } from './ipc-validator';
 import {
   createMission, getMission, listMissions, getMissionTasks,
   runMission, cancelMission, cleanupMission, deleteMission,
@@ -18,6 +19,7 @@ const log = createLogger('ipc:missions');
 export function setupMissionHandlers() {
   // 创建并启动 mission
   ipcMain.handle('mission:create', async (_event, projectId: string, type: MissionType, config?: MissionConfig) => {
+    assertProjectId('mission:create', projectId);
     try {
       const id = createMission(projectId, type, config);
       const win = BrowserWindow.getAllWindows()[0] ?? null;

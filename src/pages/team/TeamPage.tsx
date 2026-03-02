@@ -1,13 +1,13 @@
 /**
- * TeamPage — 虚拟团队 (v6.0)
+ * TeamPage — 虚拟团队 (v6.0 → v19.0)
  *
- * 运行状态 tab: 左侧精简成员卡片 + 右侧对话式工作细节面板
+ * 运行状态 tab: 左侧精简成员卡片 + 右侧 SessionPanel (session列表 + 对话内容)
  * 团队配置 tab: 成员 CRUD
  */
 
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app-store';
-import { AgentWorkFeed } from '../../components/AgentWorkFeed';
+import { SessionPanel } from '../../components/SessionPanel';
 import { toast, confirm } from '../../stores/toast-store';
 import { ROLE_INFO, INPUT_CLS } from './types';
 import { MiniAgentCard } from './MiniAgentCard';
@@ -336,16 +336,16 @@ export function TeamPage() {
             )}
           </div>
 
-          {/* ── 右侧: 工作细节面板 ── */}
+          {/* ── 右侧: Session 面板 (实时流 + 历史会话) ── */}
           <div className="flex-1 bg-slate-950/50">
-            {selectedAgent ? (
-              <AgentWorkFeed agentId={selectedAgent.id} />
+            {selectedAgent && currentProjectId ? (
+              <SessionPanel agentId={selectedAgent.id} projectId={currentProjectId} />
             ) : (
               <div className="h-full flex items-center justify-center text-slate-600">
                 <div className="text-center">
                   <div className="text-4xl mb-3">👈</div>
-                  <div className="text-sm">选择一位成员查看工作细节</div>
-                  <div className="text-xs text-slate-700 mt-1">思维链、工具调用、子Agent交互 一览无余</div>
+                  <div className="text-sm">选择一位成员查看工作记录</div>
+                  <div className="text-xs text-slate-700 mt-1">实时工作流 + 历史会话回放 · 关联具体任务项</div>
                 </div>
               </div>
             )}

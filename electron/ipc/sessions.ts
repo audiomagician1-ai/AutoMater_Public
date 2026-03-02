@@ -12,6 +12,7 @@
  */
 
 import { ipcMain } from 'electron';
+import { assertProjectId, assertNonEmptyString } from './ipc-validator';
 import {
   createSession, switchSession, listSessions, listAllSessions,
   getActiveSession, readSessionBackup, getBackupStats, cleanupOldBackups,
@@ -26,11 +27,14 @@ export function setupSessionHandlers() {
 
   /** 创建新 Session */
   ipcMain.handle('session:create', (_event, projectId: string | null, agentId: string, agentRole: string) => {
+    assertNonEmptyString('session:create', 'agentId', agentId);
+    assertNonEmptyString('session:create', 'agentRole', agentRole);
     return createSession(projectId, agentId, agentRole);
   });
 
   /** 切换到指定 Session */
   ipcMain.handle('session:switch', (_event, sessionId: string) => {
+    assertNonEmptyString('session:switch', 'sessionId', sessionId);
     return switchSession(sessionId);
   });
 
@@ -53,6 +57,7 @@ export function setupSessionHandlers() {
 
   /** 读取 Session 对应的备份内容 */
   ipcMain.handle('session:read-backup', (_event, sessionId: string) => {
+    assertNonEmptyString('session:read-backup', 'sessionId', sessionId);
     return readSessionBackup(sessionId);
   });
 

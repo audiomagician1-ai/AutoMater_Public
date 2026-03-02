@@ -128,7 +128,7 @@ describe('checkReactTermination', () => {
 
   it('stops on max iterations', () => {
     const result = checkReactTermination(
-      makeState({ iteration: 25 }), DEFAULT_REACT_CONFIG, false,
+      makeState({ iteration: 50 }), DEFAULT_REACT_CONFIG, false,
     );
     expect(result.shouldContinue).toBe(false);
     expect(result.reason).toBe('max_iterations');

@@ -317,7 +317,7 @@ export interface ReactTerminationConfig {
 }
 
 export const DEFAULT_REACT_CONFIG: ReactTerminationConfig = {
-  maxIterations: 25,
+  maxIterations: 50,
   maxTotalTokens: 500_000,
   maxCostUsd: 2.0,
   maxWallTimeMs: 10 * 60 * 1000,  // 10 minutes

@@ -18,6 +18,7 @@ import { callLLMWithTools, calcCost, getSettings } from '../engine/llm-client';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getDb } from '../db';
 import { runOrchestrator } from '../engine/orchestrator';
+import { assertNonEmptyString, assertObject, assertOptionalString, assertOptionalNumber } from './ipc-validator';
 import {
   getDaemonConfig, saveDaemonConfig, getDaemonStatus,
   startDaemon, stopDaemon, restartDaemon,
@@ -353,10 +354,13 @@ export function setupMetaAgentHandlers() {
   });
 
   ipcMain.handle('meta-agent:memory:update', (_event, id: string, updates: { content?: string; importance?: number; category?: string }) => {
+    assertNonEmptyString('meta-agent:memory:update', 'id', id);
+    assertObject('meta-agent:memory:update', 'updates', updates);
     return { success: updateMemory(id, updates) };
   });
 
   ipcMain.handle('meta-agent:memory:delete', (_event, id: string) => {
+    assertNonEmptyString('meta-agent:memory:delete', 'id', id);
     return { success: deleteMemory(id) };
   });
 
@@ -381,6 +385,7 @@ export function setupMetaAgentHandlers() {
   // ── Chat (v6.1: ReAct 模式 — callLLMWithTools + 只读工具集) ──
 
   ipcMain.handle('meta-agent:chat', async (_event, projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) => {
+    assertNonEmptyString('meta-agent:chat', 'message', message);
     const settings = getSettings();
     if (!settings?.apiKey) {
       return { reply: '请先在设置页配置 LLM API Key。', intent: 'general' };

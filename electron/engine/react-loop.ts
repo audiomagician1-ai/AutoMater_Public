@@ -36,6 +36,8 @@ import {
   getBackoffDelayMs, checkContextBudget, compressToolOutputs,
   buildRecoveryHint,
 } from './react-resilience';
+import { summarizeToolResult } from './tool-result-summarizer';
+import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import type { GitProviderConfig } from './git-provider';
 
 const log = createLogger('react-loop');
@@ -162,7 +164,7 @@ export async function reactDeveloperLoop(
   const db = getDb();
   // v18.0: 成员级 maxIterations 优先 → 系统默认 25
   const memberMaxIter = getTeamMemberMaxIterations(projectId, 'developer', parseInt(workerId.replace('dev-', ''), 10) - 1 || 0);
-  const MAX_ITERATIONS = memberMaxIter ?? 25;
+  const MAX_ITERATIONS = memberMaxIter ?? 50;
 
   // v3.0: 程序化终止控制器 (替代依赖 LLM 调用 task_complete)
   const guardState: GuardReactState = {
@@ -579,10 +581,15 @@ export async function reactDeveloperLoop(
             ],
           });
         } else {
+          // v18.0: 智能摘要 — 根据工具类型和 context 预算进行结构化摘要
+          const summary = summarizeToolResult(tc.function.name, toolResult.output, {
+            success: toolResult.success,
+            budgetStatus: 'normal', // 下方压缩逻辑会二次处理
+          });
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: toolResult.output.slice(0, 4000),
+            content: summary.text,
           });
         }
       }
@@ -869,7 +876,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       maxIterations,
       maxWallTimeMs: maxIterations * timeoutMs,
       // PM / Architect 角色以分析为主，天然只读不写，放宽空转检测
-      maxIdleIterations: (role === 'pm' || role === 'architect') ? 12 : DEFAULT_REACT_CONFIG.maxIdleIterations,
+      maxIdleIterations: (role === 'pm' || role === 'architect') ? 50 : DEFAULT_REACT_CONFIG.maxIdleIterations,
     }, signal.aborted);
     if (!termCheck.shouldContinue) {
       sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 终止: ${termCheck.reason}` });
@@ -907,77 +914,112 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
 
       messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
 
-      for (const tc of msg.tool_calls) {
-        let toolArgs: Record<string, any>;
+      // v18.0: 并行工具执行分析
+      const toolCallInfos: ToolCallInfo[] = msg.tool_calls.map((tc: LLMToolCall) => {
+        let args: Record<string, unknown>;
         try {
-          toolArgs = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-        } catch { toolArgs = {}; }
-
-        const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
-        const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
-        if (!guard.allowed) {
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: `拦截: ${guard.reason}` });
-          guardState.consecutiveErrorCount++;
-          continue;
-        }
-        if (guard.repairedArgs) { toolCall.arguments = guard.repairedArgs; toolArgs = guard.repairedArgs; }
-
-        guardState.recentCallSignatures.push(toolCallSignature(tc.function.name, toolArgs));
-        if (guardState.recentCallSignatures.length > 10) guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
-
-        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') toolArgs._agentId = agentId;
-
-        // task_complete
-        if (tc.function.name === 'task_complete') {
-          completed = true; guardState.taskCompleted = true;
-          sendToUI(win, 'agent:log', { projectId, agentId, content: `✅ task_complete: ${toolArgs.summary || '完成'}` });
-          addLog(projectId, agentId, 'output', `Completed: ${toolArgs.summary || '完成'}`);
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: `任务已完成: ${toolArgs.summary}` });
-          continue;
-        }
-
-        // report_blocked
-        if (tc.function.name === 'report_blocked') {
-          blocked = true;
-          blockReason = toolArgs.reason || '未说明原因';
-          blockSuggestions = toolArgs.suggestions || [];
-          sendToUI(win, 'agent:log', { projectId, agentId, content: `🚫 BLOCKED: ${blockReason}\n建议: ${blockSuggestions.join(' / ')}` });
-          addLog(projectId, agentId, 'warning', `BLOCKED: ${blockReason}`);
-          sendToUI(win, 'agent:blocked', { projectId, agentId, reason: blockReason, suggestions: blockSuggestions });
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: '已报告阻塞，等待用户回应。' });
-          continue;
-        }
-
-        // 执行工具
-        const isAsync = isAsyncTool(tc.function.name);
-
-        let toolResult: ToolResult = isAsync
-          ? await executeToolAsync(toolCall, toolCtx)
-          : executeTool(toolCall, toolCtx);
-
-        // v8.0: 工具调用智能重试 — 对可重试工具的网络/超时错误自动重试一次
-        if (!toolResult.success && isRetryableTool(tc.function.name) && isRetryableError(toolResult.output || '')) {
-          await sleep(1500);
-          toolResult = isAsync
-            ? await executeToolAsync(toolCall, toolCtx)
-            : executeTool(toolCall, toolCtx);
-        }
-
-        const argsSummary = tc.function.name === 'write_file'
-          ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
-          : JSON.stringify(toolArgs).slice(0, 120);
+          args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
+        } catch { args = {}; }
+        return { id: tc.id, name: tc.function.name, arguments: args };
+      });
+      const execPlan = buildExecutionPlan(toolCallInfos);
+      if (execPlan.hasParallelism) {
         sendToUI(win, 'agent:log', {
           projectId, agentId,
-          content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
+          content: `⚡ 并行执行: ${execPlan.batches.length} 批次 (预估节省 ${execPlan.estimatedTimeSavedMs}ms)`,
         });
-        emitEvent({ projectId, agentId, type: 'tool:call', data: { tool: tc.function.name, success: toolResult.success } });
+      }
 
-        if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
-          filesWritten.add(toolArgs.path);
-          sendToUI(win, 'workspace:changed', { projectId });
+      // 按批次执行 — 批次内并行，批次间串行
+      for (const batch of execPlan.batches) {
+        const batchResults = await Promise.all(batch.map(async (tcInfo) => {
+          // 找到原始 tool_call (保留 id)
+          const tc = msg.tool_calls!.find((t: LLMToolCall) => t.id === tcInfo.id)!;
+          const toolArgs = tcInfo.arguments as Record<string, any>;
+          const toolCall: ToolCall = { name: tcInfo.name, arguments: toolArgs };
+
+          // guard 检查
+          const guard = guardToolCall(tcInfo.name, toolArgs, !!workspacePath);
+          if (!guard.allowed) {
+            guardState.consecutiveErrorCount++;
+            return { tc, toolArgs, result: null as ToolResult | null, guardReason: guard.reason };
+          }
+          if (guard.repairedArgs) { toolCall.arguments = guard.repairedArgs; }
+
+          guardState.recentCallSignatures.push(toolCallSignature(tcInfo.name, toolArgs));
+          if (guardState.recentCallSignatures.length > 10) guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
+
+          if (tcInfo.name === 'todo_write' || tcInfo.name === 'todo_read') toolArgs._agentId = agentId;
+
+          // 特殊处理: task_complete / report_blocked
+          if (tcInfo.name === 'task_complete') {
+            completed = true; guardState.taskCompleted = true;
+            return { tc, toolArgs, result: { success: true, output: `任务已完成: ${toolArgs.summary}`, action: 'complete' } as ToolResult, special: 'complete' };
+          }
+          if (tcInfo.name === 'report_blocked') {
+            blocked = true; blockReason = toolArgs.reason || '未说明原因'; blockSuggestions = toolArgs.suggestions || [];
+            return { tc, toolArgs, result: { success: true, output: '已报告阻塞', action: 'blocked' } as ToolResult, special: 'blocked' };
+          }
+
+          // 执行工具
+          const isAsync = isAsyncTool(tcInfo.name);
+          let toolResult: ToolResult = isAsync
+            ? await executeToolAsync(toolCall, toolCtx)
+            : executeTool(toolCall, toolCtx);
+
+          // 自动重试
+          if (!toolResult.success && isRetryableTool(tcInfo.name) && isRetryableError(toolResult.output || '')) {
+            await sleep(1500);
+            toolResult = isAsync ? await executeToolAsync(toolCall, toolCtx) : executeTool(toolCall, toolCtx);
+          }
+
+          return { tc, toolArgs, result: toolResult };
+        }));
+
+        // 将批次结果按原始顺序加入 messages
+        for (const { tc, toolArgs, result, guardReason, special } of batchResults) {
+          if (guardReason) {
+            messages.push({ role: 'tool', tool_call_id: tc.id, content: `拦截: ${guardReason}` });
+            continue;
+          }
+          if (!result) continue;
+
+          if (special === 'complete') {
+            sendToUI(win, 'agent:log', { projectId, agentId, content: `✅ task_complete: ${toolArgs.summary || '完成'}` });
+            addLog(projectId, agentId, 'output', `Completed: ${toolArgs.summary || '完成'}`);
+            messages.push({ role: 'tool', tool_call_id: tc.id, content: result.output });
+            continue;
+          }
+          if (special === 'blocked') {
+            sendToUI(win, 'agent:log', { projectId, agentId, content: `🚫 BLOCKED: ${blockReason}` });
+            addLog(projectId, agentId, 'warning', `BLOCKED: ${blockReason}`);
+            sendToUI(win, 'agent:blocked', { projectId, agentId, reason: blockReason, suggestions: blockSuggestions });
+            messages.push({ role: 'tool', tool_call_id: tc.id, content: result.output });
+            continue;
+          }
+
+          // 日志
+          const argsSummary = tc.function.name === 'write_file'
+            ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
+            : JSON.stringify(toolArgs).slice(0, 120);
+          sendToUI(win, 'agent:log', {
+            projectId, agentId,
+            content: `🔧 ${tc.function.name}(${argsSummary}) → ${result.success ? '✅' : '❌'} ${result.output.slice(0, 100)}`,
+          });
+          emitEvent({ projectId, agentId, type: 'tool:call', data: { tool: tc.function.name, success: result.success } });
+
+          if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && result.success) {
+            filesWritten.add(toolArgs.path);
+            sendToUI(win, 'workspace:changed', { projectId });
+          }
+
+          // v18.0: 智能摘要
+          const summary = summarizeToolResult(tc.function.name, result.output, {
+            success: result.success,
+            budgetStatus: 'normal',
+          });
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: summary.text });
         }
-
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult.output.slice(0, 4000) });
       }
 
       const toolCallsThisIter = (msg.tool_calls || []).map((tc: LLMToolCall) => tc.function.name);

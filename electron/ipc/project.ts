@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { toErrorMessage, createLogger } from '../engine/logger';
+import { assertProjectId, assertNonEmptyString, assertString, assertObject, assertOptionalString } from './ipc-validator';
 import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactStates, emitMemberAdded } from '../engine/orchestrator';
 import { runChangeRequest } from '../engine/change-manager';
 import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
@@ -262,7 +263,7 @@ export function setupProjectHandlers() {
   }
 
   // ── 创建项目 ──
-  ipcMain.handle('project:create', async (_event, name: string, options?: {
+  ipcMain.handle('project:create', async (_event, name: unknown, options?: {
     workspacePath?: string;
     gitMode?: string;
     githubRepo?: string;
@@ -270,6 +271,7 @@ export function setupProjectHandlers() {
     importExisting?: boolean;
     historyPath?: string;
   }) => {
+    assertNonEmptyString('project:create', 'name', name);
     const db = getDb();
     const id = generateId();
     const displayName = name.length > 50 ? name.slice(0, 50) + '...' : name;
@@ -326,6 +328,8 @@ export function setupProjectHandlers() {
 
   // ── 设置/更新项目需求 (legacy: 更新 projects.wish 字段) ──
   ipcMain.handle('project:set-wish', async (_event, projectId: string, wish: string) => {
+    assertProjectId('project:set-wish', projectId);
+    assertString('project:set-wish', 'wish', wish);
     const db = getDb();
     db.prepare(`UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?`).run(wish, projectId);
     return { success: true };
@@ -333,6 +337,8 @@ export function setupProjectHandlers() {
 
   // v16.0: 更新项目权限开关 (存储在 config JSON 中)
   ipcMain.handle('project:update-permissions', async (_event, projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }) => {
+    assertProjectId('project:update-permissions', projectId);
+    assertObject('project:update-permissions', 'permissions', permissions);
     const db = getDb();
     const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as { config: string } | undefined;
     if (!row) return { success: false, error: 'Project not found' };
@@ -360,6 +366,8 @@ export function setupProjectHandlers() {
 
   /** 创建一条新需求 */
   ipcMain.handle('wish:create', async (_event, projectId: string, content: string) => {
+    assertProjectId('wish:create', projectId);
+    assertNonEmptyString('wish:create', 'content', content);
     const db = getDb();
     const id = 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     db.prepare(`INSERT INTO wishes (id, project_id, content) VALUES (?, ?, ?)`).run(id, projectId, content);
@@ -368,12 +376,14 @@ export function setupProjectHandlers() {
 
   /** 列出项目的所有需求 */
   ipcMain.handle('wish:list', (_event, projectId: string) => {
+    assertProjectId('wish:list', projectId);
     const db = getDb();
     return db.prepare('SELECT * FROM wishes WHERE project_id = ? ORDER BY created_at DESC').all(projectId);
   });
 
   /** 获取单条需求详情 */
   ipcMain.handle('wish:get', (_event, wishId: string) => {
+    assertNonEmptyString('wish:get', 'wishId', wishId);
     const db = getDb();
     return db.prepare('SELECT * FROM wishes WHERE id = ?').get(wishId);
   });
@@ -382,6 +392,8 @@ export function setupProjectHandlers() {
   ipcMain.handle('wish:update', (_event, wishId: string, fields: {
     status?: string; pm_analysis?: string; design_doc?: string; content?: string;
   }) => {
+    assertNonEmptyString('wish:update', 'wishId', wishId);
+    assertObject('wish:update', 'fields', fields);
     const db = getDb();
     const sets: string[] = [];
     const vals: Array<string | number | null> = [];
@@ -398,6 +410,7 @@ export function setupProjectHandlers() {
 
   /** 删除需求 */
   ipcMain.handle('wish:delete', (_event, wishId: string) => {
+    assertNonEmptyString('wish:delete', 'wishId', wishId);
     const db = getDb();
     db.prepare('DELETE FROM wishes WHERE id = ?').run(wishId);
     return { success: true };
@@ -407,6 +420,7 @@ export function setupProjectHandlers() {
 
   /** 列出项目的团队成员 */
   ipcMain.handle('team:list', (_event, projectId: string) => {
+    assertProjectId('team:list', projectId);
     const db = getDb();
     return db.prepare('SELECT * FROM team_members WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
@@ -417,6 +431,8 @@ export function setupProjectHandlers() {
     capabilities?: string[]; system_prompt?: string; context_files?: string[];
     max_context_tokens?: number;
   }) => {
+    assertProjectId('team:add', projectId);
+    assertObject('team:add', 'member', member);
     const db = getDb();
     const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens)
@@ -534,6 +550,7 @@ export function setupProjectHandlers() {
 
   /** 删除成员 */
   ipcMain.handle('team:delete', (_event, memberId: string) => {
+    assertNonEmptyString('team:delete', 'memberId', memberId);
     const db = getDb();
     db.prepare('DELETE FROM team_members WHERE id = ?').run(memberId);
     return { success: true };
@@ -541,6 +558,7 @@ export function setupProjectHandlers() {
 
   /** 批量初始化默认团队 */
   ipcMain.handle('team:init-defaults', (_event, projectId: string) => {
+    assertProjectId('team:init-defaults', projectId);
     const db = getDb();
     return initDefaultTeam(db, projectId);
   });
@@ -649,6 +667,7 @@ export function setupProjectHandlers() {
   //       自动路由到 importProject 流程，而非走 PM 流水线（wish 为空会失败）
   // v5.4: 也检查 config.importExisting 标记 — 分析失败(error)后重试也走导入流程
   ipcMain.handle('project:start', async (_event, projectId: string) => {
+    assertProjectId('project:start', projectId);
     const db = getDb();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     const proj = db.prepare('SELECT status, workspace_path, config, wish FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string; config: string; wish: string } | undefined;
@@ -725,6 +744,7 @@ export function setupProjectHandlers() {
 
   // ── 停止项目 ──
   ipcMain.handle('project:stop', (_event, projectId: string) => {
+    assertProjectId('project:stop', projectId);
     // 如果有导入进程在跑，取消它
     const ac = importAbortControllers.get(projectId);
     if (ac) {
@@ -751,6 +771,7 @@ export function setupProjectHandlers() {
 
   // ── 删除项目 ──
   ipcMain.handle('project:delete', (_event, projectId: string) => {
+    assertProjectId('project:delete', projectId);
     stopOrchestrator(projectId);
     const db = getDb();
     // 获取 workspace 路径以清理磁盘
@@ -806,6 +827,8 @@ export function setupProjectHandlers() {
 
   // ── Git commit ──
   ipcMain.handle('project:git-commit', async (_event, projectId: string, message: string) => {
+    assertProjectId('project:git-commit', projectId);
+    assertNonEmptyString('project:git-commit', 'message', message);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { success: false };
@@ -815,6 +838,7 @@ export function setupProjectHandlers() {
 
   // ── Git log ──
   ipcMain.handle('project:git-log', async (_event, projectId: string) => {
+    assertProjectId('project:git-log', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return [];
@@ -931,6 +955,8 @@ export function setupProjectHandlers() {
 
   // ── v4.3: 提交需求变更 ──
   ipcMain.handle('project:submit-change', async (_event, projectId: string, description: string) => {
+    assertProjectId('project:submit-change', projectId);
+    assertNonEmptyString('project:submit-change', 'description', description);
     const db = getDb();
     const id = 'cr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     db.prepare("INSERT INTO change_requests (id, project_id, description) VALUES (?, ?, ?)")
