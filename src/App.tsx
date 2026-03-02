@@ -21,6 +21,7 @@ import { GuidePage } from './pages/GuidePage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, ConfirmDialog } from './components/Toast';
 import { ProjectBar } from './components/ProjectBar';
+import { GlobalSearchBar } from './components/GlobalSearchBar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { toast } from './stores/toast-store';
 
@@ -244,9 +245,12 @@ export function App() {
         <Sidebar />
         {/* 右侧区域: 顶部项目栏 + 页面内容 */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* 项目切换栏 — 始终可见 */}
+          {/* 项目切换栏 + 全局搜索 — 始终可见 */}
           <div className="h-10 shrink-0 flex items-center bg-slate-900/80 border-b border-slate-800/60">
             <ProjectBar />
+            <div className="flex-shrink-0 pr-2">
+              <GlobalSearchBar />
+            </div>
           </div>
           <main className="flex-1 overflow-hidden">
             {renderContent()}

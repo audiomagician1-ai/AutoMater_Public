@@ -25,7 +25,7 @@ const log = createLogger('DocsPage');
 // ═══════════════════════════════════════
 
 interface DocTreeItem {
-  type: 'design' | 'requirement' | 'test_spec';
+  type: 'design' | 'requirement' | 'test_spec' | 'architecture' | 'known_issues';
   id: string;
   label: string;
   version: number;
@@ -64,9 +64,11 @@ interface DocListResult {
 // ═══════════════════════════════════════
 
 const DOC_TYPE_LABELS: Record<string, { icon: string; label: string; color: string }> = {
-  design:      { icon: '📐', label: '总体设计文档', color: 'text-violet-400' },
-  requirement: { icon: '📋', label: '子需求文档',   color: 'text-blue-400' },
-  test_spec:   { icon: '🧪', label: '测试规格',     color: 'text-emerald-400' },
+  design:       { icon: '📐', label: '总体设计文档', color: 'text-violet-400' },
+  requirement:  { icon: '📋', label: '子需求文档',   color: 'text-blue-400' },
+  test_spec:    { icon: '🧪', label: '测试规格',     color: 'text-emerald-400' },
+  architecture: { icon: '🏗️', label: '系统架构文档', color: 'text-cyan-400' },
+  known_issues: { icon: '⚠️', label: '已知问题',     color: 'text-amber-400' },
 };
 
 const DOC_ACTION_LABELS: Record<string, { text: string; color: string }> = {
@@ -319,16 +321,30 @@ export function DocsPage() {
   const [changelogFilter, setChangelogFilter] = useState<string>('all');
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: DocTreeItem } | null>(null);
   const [versionModal, setVersionModal] = useState<{ item: DocTreeItem; versions: Array<{ version: number; date: string; summary: string; action?: string; agent?: string }> } | null>(null);
+  // v9.1: 导入分析产物
+  const [importDocs, setImportDocs] = useState<DocTreeItem[]>([]);
 
   // ── Load doc list + changelog ──
   const loadDocList = useCallback(async () => {
     if (!currentProjectId) return;
-    const [docs, log] = await Promise.all([
+    const [docs, logEntries, archRes, issuesRes] = await Promise.all([
       window.automater.project.listAllDocs(currentProjectId),
       window.automater.project.getDocChangelog(currentProjectId),
+      window.automater.project.getArchitectureDoc(currentProjectId),
+      window.automater.project.getKnownIssues(currentProjectId),
     ]);
     setDocList(docs as DocListResult);
-    setChangelog((log || []) as DocChangeEntry[]);
+    setChangelog((logEntries || []) as DocChangeEntry[]);
+
+    // Build import analysis doc items
+    const impDocs: DocTreeItem[] = [];
+    if (archRes.success && archRes.content) {
+      impDocs.push({ type: 'architecture', id: 'ARCHITECTURE', label: '系统架构文档', version: 1, updatedAt: '', sizeBytes: archRes.content.length });
+    }
+    if (issuesRes.success && issuesRes.issues) {
+      impDocs.push({ type: 'known_issues', id: 'KNOWN-ISSUES', label: '已知问题', version: 1, updatedAt: '', sizeBytes: issuesRes.issues.length });
+    }
+    setImportDocs(impDocs);
   }, [currentProjectId]);
 
   useEffect(() => { loadDocList(); }, [loadDocList]);
@@ -373,6 +389,19 @@ export function DocsPage() {
     setLoadingContent(true);
     try {
       if (!currentProjectId) return;
+
+      // Import analysis docs use separate APIs
+      if (item.type === 'architecture') {
+        const res = await window.automater.project.getArchitectureDoc(currentProjectId);
+        setDocContent(res.success ? (res.content ?? null) : null);
+        return;
+      }
+      if (item.type === 'known_issues') {
+        const res = await window.automater.project.getKnownIssues(currentProjectId);
+        setDocContent(res.success ? (res.issues ?? null) : null);
+        return;
+      }
+
       const content = await window.automater.project.readDoc(
         currentProjectId,
         item.type,
@@ -386,11 +415,15 @@ export function DocsPage() {
 
   // ── Find selected doc meta ──
   const selectedMeta = useMemo(() => {
-    if (!selectedKey || !docList) return null;
+    if (!selectedKey) return null;
     const [type, id] = selectedKey.split(':');
+    // Check import docs first
+    const impDoc = importDocs.find(d => d.type === type && d.id === id);
+    if (impDoc) return impDoc as DocMeta & { type: string; id: string };
+    if (!docList) return null;
     const all = [...docList.design, ...docList.requirements, ...docList.testSpecs];
     return all.find(d => d.type === type && d.id === id) || null;
-  }, [selectedKey, docList]);
+  }, [selectedKey, docList, importDocs]);
 
   // ── Filter changelog ──
   const filteredChangelog = useMemo(() => {
@@ -406,7 +439,7 @@ export function DocsPage() {
     return changelog.filter(e => e.type === type && e.id === docId).reverse();
   }, [selectedKey, changelog]);
 
-  const totalDocs = (docList?.design.length ?? 0) + (docList?.requirements.length ?? 0) + (docList?.testSpecs.length ?? 0);
+  const totalDocs = (docList?.design.length ?? 0) + (docList?.requirements.length ?? 0) + (docList?.testSpecs.length ?? 0) + importDocs.length;
 
   const handleDocRightClick = (e: React.MouseEvent, item: DocTreeItem) => {
     setCtxMenu({ x: e.clientX, y: e.clientY, item });
@@ -487,6 +520,17 @@ export function DocsPage() {
             onSelect={handleSelectDoc}
             onRightClick={handleDocRightClick}
           />
+          {importDocs.length > 0 && (
+            <DocTreeSection
+              title="导入分析文档"
+              icon="📊"
+              color="text-cyan-400"
+              items={importDocs}
+              selectedId={selectedKey}
+              onSelect={handleSelectDoc}
+              onRightClick={handleDocRightClick}
+            />
+          )}
         </div>
 
         <div className="px-4 py-2 border-t border-slate-800">
@@ -510,7 +554,10 @@ export function DocsPage() {
               </span>
               <div className="flex-1">
                 <h3 className="text-sm font-bold text-slate-200">
-                  {selectedMeta.type === 'design' ? '总体设计文档' : selectedMeta.id}
+                  {selectedMeta.type === 'design' ? '总体设计文档'
+                    : selectedMeta.type === 'architecture' ? '系统架构文档'
+                    : selectedMeta.type === 'known_issues' ? '已知问题'
+                    : selectedMeta.id}
                 </h3>
                 <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
                   <span className={DOC_TYPE_LABELS[selectedMeta.type]?.color}>

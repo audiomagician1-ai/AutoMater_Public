@@ -21,9 +21,9 @@ import { TechBackground } from '../components/TechBackground';
 import { SystemMonitor } from '../components/SystemMonitor';
 import { ActivityCharts } from '../components/ActivityCharts';
 import {
-  InteractiveGraph, ProgressRing, StatCard,
+  InteractiveGraph, ModuleArchGraph, ProgressRing, StatCard,
   DocCompletionBar,
-  AgentActivityPanel, ImportAnalysisPanel, ArchitectureDocPanel,
+  AgentActivityPanel, ImportAnalysisPanel,
   STATUS_COLOR, CATEGORY_BADGE, PROJECT_STATUS,
   type Feature,
 } from './overview';
@@ -203,11 +203,11 @@ export function OverviewPage() {
         {/* ═══════ 导入项目架构展示 (features=0 时展示分析产物) ═══════ */}
         {enriched.length === 0 && !isAnalyzing && (
           <>
-            {/* 模块架构图 + 探针报告 + 已知问题 */}
-            <ImportAnalysisPanel projectId={currentProjectId} />
+            {/* 模块架构关系图谱 (dagre DAG 可视化) */}
+            <ModuleArchGraph projectId={currentProjectId} />
 
-            {/* ARCHITECTURE.md 文档 */}
-            <ArchitectureDocPanel projectId={currentProjectId} />
+            {/* 探针报告 + 已知问题 (补充信息) */}
+            <ImportAnalysisPanel projectId={currentProjectId} />
           </>
         )}
 

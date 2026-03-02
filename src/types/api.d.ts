@@ -120,6 +120,48 @@ interface FileNode {
   children?: FileNode[];
 }
 
+/** v21.0: 搜索匹配结果 */
+interface SearchMatchItem {
+  file: string;
+  line: number;
+  content: string;
+  contextBefore?: string[];
+  contextAfter?: string[];
+}
+
+/** v21.0: 项目内搜索结果 */
+interface WorkspaceSearchResult {
+  success: boolean;
+  error?: string;
+  mode: 'filename' | 'content';
+  // 文件名搜索
+  files?: string[];
+  // 内容搜索
+  matches?: SearchMatchItem[];
+  totalMatches: number;
+  truncated?: boolean;
+  engine?: string;
+  durationMs: number;
+}
+
+/** v21.0: 全局搜索 — 单个项目的结果 */
+interface GlobalSearchProjectResult {
+  projectId: string;
+  projectName: string;
+  matches?: Array<{ file: string; line: number; content: string }>;
+  files?: string[];
+  matchCount: number;
+}
+
+/** v21.0: 全局搜索结果 */
+interface GlobalSearchResult {
+  success: boolean;
+  results: GlobalSearchProjectResult[];
+  totalProjects: number;
+  searchedProjects: number;
+  durationMs: number;
+}
+
 /** 上下文模块 (v1.1) */
 interface ContextSection {
   id: string;
@@ -394,6 +436,22 @@ interface AutoMaterAPI {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;
     readFile(projectId: string, relativePath: string): Promise<{ success: boolean; content: string }>;
     getPath(projectId: string): Promise<string | null>;
+    /** v21.0: 项目内搜索 — 文件名 / 内容 (复用 Agent ripgrep 引擎) */
+    search(projectId: string, query: string, options?: {
+      mode?: 'filename' | 'content';
+      include?: string[];
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      maxResults?: number;
+      context?: number;
+    }): Promise<WorkspaceSearchResult>;
+    /** v21.0: 全局跨项目搜索 */
+    searchGlobal(query: string, options?: {
+      mode?: 'filename' | 'content';
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      maxResultsPerProject?: number;
+    }): Promise<GlobalSearchResult>;
   };
   events: {
     query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<EventRow[]>;

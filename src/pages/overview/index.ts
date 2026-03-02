@@ -1,4 +1,5 @@
 export { InteractiveGraph } from './InteractiveGraph';
+export { ModuleArchGraph } from './ModuleArchGraph';
 export { ProgressRing } from './ProgressRing';
 export { StatCard } from './StatCard';
 export { PipelineBar, PIPELINE_STAGES } from './PipelineBar';

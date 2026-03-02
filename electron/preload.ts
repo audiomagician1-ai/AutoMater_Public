@@ -112,11 +112,27 @@ contextBridge.exposeInMainWorld('automater', {
     testMemberModel: (memberId: string, config: Record<string, unknown>) => ipcRenderer.invoke('team:test-member-model', memberId, config),
   },
 
-  // ── 工作区文件系统 ──
+  // ── 工作区文件系统 + 搜索 (v21.0) ──
   workspace: {
     tree: (projectId: string) => ipcRenderer.invoke('workspace:tree', projectId),
     readFile: (projectId: string, relativePath: string) => ipcRenderer.invoke('workspace:read-file', projectId, relativePath),
     getPath: (projectId: string) => ipcRenderer.invoke('workspace:get-path', projectId),
+    /** v21.0: 项目内搜索 — 文件名 / 内容 (复用 Agent 的 ripgrep 引擎) */
+    search: (projectId: string, query: string, options?: {
+      mode?: 'filename' | 'content';
+      include?: string[];
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      maxResults?: number;
+      context?: number;
+    }) => ipcRenderer.invoke('workspace:search', projectId, query, options),
+    /** v21.0: 全局搜索 — 跨所有项目 */
+    searchGlobal: (query: string, options?: {
+      mode?: 'filename' | 'content';
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      maxResultsPerProject?: number;
+    }) => ipcRenderer.invoke('workspace:search-global', query, options),
   },
 
   // ── v2.0: 事件流 + Mission ──
