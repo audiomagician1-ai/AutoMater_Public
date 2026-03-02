@@ -578,7 +578,7 @@ export function WishPage() {
   const loadFeatures = useCallback(async () => {
     if (!currentProjectId) return;
     const data = await window.automater.project.getFeatures(currentProjectId);
-    setFeatures(data || []);
+    setFeatures((data || []) as FeatureItem[]);
   }, [currentProjectId]);
 
   useEffect(() => { loadWishes(); }, [loadWishes]);
