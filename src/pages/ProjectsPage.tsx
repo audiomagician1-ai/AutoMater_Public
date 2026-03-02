@@ -1,6 +1,8 @@
 ﻿import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { toErrorMessage } from '../utils/errors';
+import { friendlyErrorMessage } from '../utils/errors';
+import { toast, confirm } from '../stores/toast-store';
+import { EmptyState } from '../components/EmptyState';
 
 const STATUS_LABELS: Record<string, { text: string; color: string; icon: string }> = {
   initializing: { text: '分析中', color: 'text-blue-400',    icon: '🔵' },
@@ -44,7 +46,7 @@ export function ProjectsPage() {
     setProjects(list || []);
     const stats: Record<string, any> = {};
     for (const p of (list || [])) {
-      try { stats[p.id] = await window.automater.project.getStats(p.id); } catch {}
+      try { stats[p.id] = await window.automater.project.getStats(p.id); } catch { /* stats unavailable for this project */ }
     }
     setProjectStats(stats);
   };
@@ -71,6 +73,7 @@ export function ProjectsPage() {
       const result = await window.automater.project.create(projectName.trim(), options);
       if (result.success) {
         addLog({ projectId: result.projectId, agentId: 'system', content: `📁 项目已创建: ${result.name}` });
+        toast.success(`项目「${result.name}」创建成功`);
         // 重置表单
         setProjectName('');
         setWorkspacePath('');
@@ -82,7 +85,9 @@ export function ProjectsPage() {
         enterProject(result.projectId, 'wish');
       }
     } catch (err: unknown) {
-      addLog({ projectId: '', agentId: 'system', content: `❌ ${toErrorMessage(err)}` });
+      const msg = friendlyErrorMessage(err);
+      addLog({ projectId: '', agentId: 'system', content: `❌ ${msg}` });
+      toast.error(msg);
     } finally {
       setCreating(false);
       loadProjects();
@@ -112,14 +117,25 @@ export function ProjectsPage() {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    const ok = await confirm({
+      title: '删除项目',
+      message: '确定要删除此项目吗？项目数据将被永久移除，此操作无法撤销。',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     await window.automater.project.delete(id);
+    toast.success('项目已删除');
     loadProjects();
   };
 
   const handleExport = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const result = await window.automater.project.export(id);
-    if (result.success) addLog({ projectId: id, agentId: 'system', content: `📦 已导出: ${result.path}` });
+    if (result.success) {
+      addLog({ projectId: id, agentId: 'system', content: `📦 已导出: ${result.path}` });
+      toast.success('项目已导出');
+    }
   };
 
   const handleImportProject = async () => {
@@ -141,6 +157,7 @@ export function ProjectsPage() {
         window.automater.project.analyzeExisting(result.projectId).catch(() => {});
 
         addLog({ projectId: result.projectId, agentId: 'system', content: `📥 项目已导入，分析中: ${name}` });
+        toast.info(`项目「${name}」已导入，后台分析中...`, 5000);
         setImportPath('');
         setImportName('');
         setShowImport(false);
@@ -149,7 +166,9 @@ export function ProjectsPage() {
         enterProject(result.projectId, 'overview');
       }
     } catch (err: unknown) {
-      addLog({ projectId: '', agentId: 'system', content: `❌ 导入失败: ${toErrorMessage(err)}` });
+      const msg = friendlyErrorMessage(err);
+      addLog({ projectId: '', agentId: 'system', content: `❌ 导入失败: ${msg}` });
+      toast.error(`导入失败: ${msg}`);
     } finally {
       setImporting(false);
       setImportProgress(null);
@@ -225,7 +244,7 @@ export function ProjectsPage() {
                           setImportPath(result.filePaths[0]);
                           if (!importName) setImportName(result.filePaths[0].split(/[\\/]/).pop() || '');
                         }
-                      } catch {}
+                      } catch { /* dialog cancelled or unavailable */ }
                     }}
                     className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
                     title="浏览文件夹"
@@ -341,7 +360,7 @@ export function ProjectsPage() {
                       try {
                         const result = await window.automater.dialog.openDirectory('选择工作区文件夹');
                         if (!result.canceled && result.filePaths?.[0]) setWorkspacePath(result.filePaths[0]);
-                      } catch {}
+                      } catch { /* dialog cancelled or unavailable */ }
                     }}
                     className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
                     title="浏览文件夹"
@@ -371,7 +390,7 @@ export function ProjectsPage() {
                       try {
                         const result = await window.automater.dialog.openDirectory('选择历史版本文件夹');
                         if (!result.canceled && result.filePaths?.[0]) setHistoryPath(result.filePaths[0]);
-                      } catch {}
+                      } catch { /* dialog cancelled or unavailable */ }
                     }}
                     className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs transition-colors shrink-0"
                     title="浏览文件夹"
@@ -460,11 +479,12 @@ export function ProjectsPage() {
       <div className="flex-1 px-8 py-6">
         <div className="max-w-5xl mx-auto">
           {projects.length === 0 ? (
-            <div className="text-center py-20 text-slate-600">
-              <p className="text-4xl mb-3">🏗️</p>
-              <p className="text-lg">还没有项目</p>
-              <p className="text-sm mt-1">点击「新建项目」开始</p>
-            </div>
+            <EmptyState
+              icon="🏗️"
+              title="还没有项目"
+              description="点击上方「新建项目」创建你的第一个 AI 开发项目，或导入已有项目"
+              action={{ label: '+ 新建项目', onClick: () => setShowCreate(true) }}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {projects.map(p => {

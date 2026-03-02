@@ -18,6 +18,11 @@ import { callLLMWithTools, calcCost, getSettings } from '../engine/llm-client';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getDb } from '../db';
 import { runOrchestrator } from '../engine/orchestrator';
+import {
+  getDaemonConfig, saveDaemonConfig, getDaemonStatus,
+  startDaemon, stopDaemon, restartDaemon,
+  triggerManualHeartbeat, getHeartbeatLogs,
+} from '../engine/meta-agent-daemon';
 import { backupConversation } from '../engine/conversation-backup';
 import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
 import { guardToolCall } from '../engine/guards';
@@ -631,5 +636,43 @@ export function setupMetaAgentHandlers() {
       tokens: totalIn + totalOut,
       cost: totalCost,
     };
+  });
+
+  // ═══════════════════════════════════════
+  // Daemon — 心跳/事件钩子/定时任务 管理
+  // ═══════════════════════════════════════
+
+  ipcMain.handle('meta-agent:daemon:status', () => {
+    return getDaemonStatus();
+  });
+
+  ipcMain.handle('meta-agent:daemon:config:get', () => {
+    return getDaemonConfig();
+  });
+
+  ipcMain.handle('meta-agent:daemon:config:save', (_event, config: any) => {
+    const saved = saveDaemonConfig(config);
+    // Restart daemon with new config
+    restartDaemon();
+    return { success: true, config: saved };
+  });
+
+  ipcMain.handle('meta-agent:daemon:start', () => {
+    startDaemon();
+    return { success: true };
+  });
+
+  ipcMain.handle('meta-agent:daemon:stop', () => {
+    stopDaemon();
+    return { success: true };
+  });
+
+  ipcMain.handle('meta-agent:daemon:trigger', async () => {
+    await triggerManualHeartbeat();
+    return { success: true };
+  });
+
+  ipcMain.handle('meta-agent:daemon:logs', (_event, limit?: number) => {
+    return getHeartbeatLogs(limit);
   });
 }

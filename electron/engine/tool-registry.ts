@@ -980,38 +980,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   // ═══════════════════════════════════════════════════
 
   {
-    name: 'deploy_compose',
-    description: '使用 Docker Compose 部署服务。自动生成 docker-compose.yml 并执行 docker compose up。\n支持多服务编排、端口映射、环境变量、健康检查、依赖关系。',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_name: { type: 'string', description: '项目名称 (用于 compose project name)' },
-        services: {
-          type: 'array',
-          description: '服务列表',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: '服务名' },
-              image: { type: 'string', description: 'Docker 镜像 (与 build 二选一)' },
-              build: { type: 'string', description: 'Dockerfile 路径 (与 image 二选一)' },
-              ports: { type: 'array', items: { type: 'string' }, description: '端口映射 如 ["3000:3000"]' },
-              env: { type: 'object', description: '环境变量 {KEY: VALUE}' },
-              volumes: { type: 'array', items: { type: 'string' }, description: '挂载卷' },
-              depends_on: { type: 'array', items: { type: 'string' }, description: '依赖服务' },
-              health_check: { type: 'string', description: '健康检查命令' },
-              restart: { type: 'string', enum: ['always', 'unless-stopped', 'on-failure', 'no'], description: '重启策略' },
-              command: { type: 'string', description: '启动命令' },
-            },
-            required: ['name', 'ports'],
-          },
-        },
-        build_first: { type: 'boolean', description: '是否先构建镜像 (--build)', default: false },
-      },
-      required: ['project_name', 'services'],
-    },
-  },
-  {
     name: 'deploy_compose_down',
     description: '停止并清理 Docker Compose 部署的服务 (docker compose down -v)',
     parameters: {
@@ -1020,96 +988,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: 'deploy_pm2',
-    description: '使用 PM2 部署 Node.js 应用。自动生成 ecosystem.config.js 并启动。\n支持多进程、自动重启、内存限制、日志管理。',
-    parameters: {
-      type: 'object',
-      properties: {
-        apps: {
-          type: 'array',
-          description: '应用列表',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: '应用名' },
-              script: { type: 'string', description: '启动脚本路径' },
-              cwd: { type: 'string', description: '工作目录' },
-              args: { type: 'string', description: '启动参数' },
-              instances: { type: 'number', description: '实例数 (0 = CPU 核数)' },
-              env: { type: 'object', description: '环境变量' },
-              max_memory_restart: { type: 'string', description: '内存限制重启阈值 (如 500M)' },
-              watch: { type: 'boolean', description: '是否监听文件变化自动重启' },
-            },
-            required: ['name', 'script'],
-          },
-        },
-      },
-      required: ['apps'],
-    },
-  },
-  {
     name: 'deploy_pm2_status',
     description: '查询 PM2 进程状态 — 名称、状态、CPU、内存、运行时间、重启次数',
     parameters: {
       type: 'object',
       properties: {},
-    },
-  },
-  {
-    name: 'generate_nginx_config',
-    description: '生成 Nginx 反向代理配置。支持 SSL、SPA 模式、静态文件缓存、WebSocket 代理、Gzip。\n生成的配置文件可直接放入 /etc/nginx/sites-enabled/ 或 Docker 挂载。',
-    parameters: {
-      type: 'object',
-      properties: {
-        server_name: { type: 'string', description: '域名 (如 myapp.local)' },
-        listen_port: { type: 'number', description: '监听端口，默认 80', default: 80 },
-        upstream: { type: 'string', description: '后端服务地址 (如 127.0.0.1:3000)' },
-        static_root: { type: 'string', description: '静态文件目录 (如 /var/www/dist)' },
-        spa_mode: { type: 'boolean', description: 'SPA 模式 — 所有路由 fallback 到 index.html', default: false },
-        ssl_cert: { type: 'string', description: 'SSL 证书路径' },
-        ssl_key: { type: 'string', description: 'SSL 私钥路径' },
-      },
-      required: ['server_name', 'upstream'],
-    },
-  },
-  {
-    name: 'generate_dockerfile',
-    description: '生成 Dockerfile。支持多阶段构建、Node/Python/Go 等各类项目。',
-    parameters: {
-      type: 'object',
-      properties: {
-        base_image: { type: 'string', description: '基础镜像 (如 node:20-alpine, python:3.12-slim)' },
-        install_cmd: { type: 'string', description: '安装依赖命令 (如 npm ci --production)' },
-        build_cmd: { type: 'string', description: '构建命令 (如 npm run build)' },
-        start_cmd: { type: 'string', description: '启动命令 (如 ["node", "dist/index.js"])' },
-        expose_ports: { type: 'array', items: { type: 'number' }, description: '暴露端口列表' },
-        output_path: { type: 'string', description: '输出路径，默认 ./Dockerfile', default: './Dockerfile' },
-        multi_stage: { type: 'boolean', description: '是否使用多阶段构建', default: false },
-      },
-      required: ['base_image', 'start_cmd'],
-    },
-  },
-  {
-    name: 'health_check',
-    description: '部署后健康检查 — 轮询 URL 列表直到全部可达或超时。用于验证部署是否成功。',
-    parameters: {
-      type: 'object',
-      properties: {
-        urls: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: '服务名' },
-              url: { type: 'string', description: '检查 URL' },
-              expected_status: { type: 'number', description: '期望 HTTP 状态码，默认 200' },
-            },
-            required: ['name', 'url'],
-          },
-        },
-        timeout: { type: 'number', description: '超时毫秒数，默认 60000', default: 60000 },
-      },
-      required: ['urls'],
     },
   },
 
@@ -1646,7 +1529,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     // Docker Sandbox
     'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
     // 搜索
-    'web_search', 'web_search_boost', 'fetch_url',
+    'web_search', 'web_search_boost',
     // 记忆
     'memory_read', 'memory_append',
     // v14.0: Supabase (全部)

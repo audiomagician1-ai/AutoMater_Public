@@ -7,6 +7,7 @@ import { setupWorkspaceHandlers } from './ipc/workspace';
 import { setupEventHandlers } from './ipc/events';
 import { setupMcpHandlers, initMcpAndSkills, shutdownMcpAndSkills } from './ipc/mcp';
 import { setupMetaAgentHandlers } from './ipc/meta-agent';
+import { startDaemon, stopDaemon } from './engine/meta-agent-daemon';
 import { setupMissionHandlers } from './ipc/missions';
 import { setupSessionHandlers } from './ipc/sessions';
 import { setupMonitorHandlers } from './ipc/monitor';
@@ -120,6 +121,9 @@ app.whenReady().then(async () => {
   // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
   initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });
 
+  // v7.0: 启动管家守护进程 (心跳/事件钩子/定时任务)
+  startDaemon();
+
   createWindow();
 
   app.on('activate', () => {
@@ -130,6 +134,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  stopDaemon();
   shutdownMcpAndSkills().catch(() => {});
   if (process.platform !== 'darwin') {
     app.quit();

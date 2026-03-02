@@ -186,21 +186,22 @@ export function OverviewPage() {
           </section>
         )}
 
-        {/* Skeleton: 架构图占位 (无 features 且未激活) */}
-        {enriched.length === 0 && !isActive && (
+        {/* Skeleton: 架构图占位 (无 features 时始终显示) */}
+        {enriched.length === 0 && (
           <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 rounded-full bg-slate-700" />
+              <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
               <span className="text-xs text-slate-600 uppercase tracking-wider">🗺️ 系统架构图</span>
+              {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待 Agent 生成…</span>}
             </div>
             <div className="h-36 flex items-center justify-center">
               <div className="text-center text-slate-700 space-y-2">
                 <div className="flex items-center justify-center gap-4">
                   {['模块A', '模块B', '模块C'].map(m => (
-                    <div key={m} className="w-24 h-12 rounded-lg border border-slate-800/50 bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700">{m}</div>
+                    <div key={m} className={`w-24 h-12 rounded-lg border bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700 ${isActive ? 'border-cyan-800/30 animate-pulse' : 'border-slate-800/50'}`}>{m}</div>
                   ))}
                 </div>
-                <div className="text-[10px]">PM 分析后自动生成</div>
+                <div className="text-[10px]">{isActive ? 'Agent 正在分析项目结构…' : 'PM 分析后自动生成'}</div>
               </div>
             </div>
           </section>
@@ -341,17 +342,18 @@ export function OverviewPage() {
           </section>
         )}
 
-        {/* Skeleton: 进度 + 状态占位 (无 features 且未激活) */}
-        {enriched.length === 0 && !isActive && (
+        {/* Skeleton: 进度 + 状态占位 (无 features 时始终显示) */}
+        {enriched.length === 0 && (
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
                 <span className="text-xs text-slate-600 uppercase tracking-wider">📊 进度看板</span>
+                {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待数据…</span>}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {['Agents', 'Tokens', '成本', '分类'].map(l => (
-                  <div key={l} className="bg-slate-800/30 rounded-lg p-3 text-center">
+                  <div key={l} className={`rounded-lg p-3 text-center ${isActive ? 'bg-slate-800/40 animate-pulse' : 'bg-slate-800/30'}`}>
                     <div className="text-lg font-bold text-slate-700">—</div>
                     <div className="text-[10px] text-slate-700">{l}</div>
                   </div>
@@ -360,12 +362,13 @@ export function OverviewPage() {
             </div>
             <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-slate-700" />
+                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
                 <span className="text-xs text-slate-600 uppercase tracking-wider">📋 实时状态</span>
+                {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待数据…</span>}
               </div>
               <div className="grid grid-cols-5 gap-2">
                 {['待做', '开发中', '审查中', '已完成', '失败'].map(l => (
-                  <div key={l} className="bg-slate-800/30 rounded-lg p-3 text-center">
+                  <div key={l} className={`rounded-lg p-3 text-center ${isActive ? 'bg-slate-800/40 animate-pulse' : 'bg-slate-800/30'}`}>
                     <div className="text-lg font-bold text-slate-700">—</div>
                     <div className="text-[10px] text-slate-700">{l}</div>
                   </div>

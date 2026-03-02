@@ -634,7 +634,7 @@ export function setupProjectHandlers() {
         } catch (err: unknown) {
           log.error('importProject FAILED', err);
           const status = ac.signal.aborted ? 'paused' : 'error';
-          db.prepare(`UPDATE projects SET status = '${status}', updated_at = datetime('now') WHERE id = ?`).run(projectId);
+          db.prepare('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, projectId);
           const msg = ac.signal.aborted ? '⏸ 分析已中断' : `❌ 分析失败: ${toErrorMessage(err)}`;
           sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: msg, progress: 0, done: true, error: !ac.signal.aborted });
           sendToUI(win, 'project:status', { projectId, status });
@@ -963,7 +963,7 @@ export function setupProjectHandlers() {
         log.error('analyze-existing FAILED', err);
         // 被用户取消时不标记为 error，改为 paused 以允许重试
         const status = ac.signal.aborted ? 'paused' : 'error';
-        db.prepare(`UPDATE projects SET status = '${status}', updated_at = datetime('now') WHERE id = ?`).run(projectId);
+        db.prepare('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, projectId);
         const msg = ac.signal.aborted ? '⏸ 分析已中断，可重新启动' : `❌ 分析失败: ${toErrorMessage(err)}`;
         sendToUI(win, 'project:import-progress', {
           projectId,

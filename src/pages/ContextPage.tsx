@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { toast } from '../stores/toast-store';
 
 // Types: ContextSection, ContextSnapshot, TeamMember are global (src/types/api.d.ts)
 
@@ -672,7 +673,7 @@ export function ContextPage() {
                   <button
                     className="px-2 py-1 text-[10px] rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
                     title="压缩上下文"
-                    onClick={() => alert('上下文压缩将在下次 Agent 执行时自动触发')}
+                    onClick={() => toast.info('上下文压缩将在下次 Agent 执行时自动触发')}
                   >
                     🗜️ 压缩
                   </button>

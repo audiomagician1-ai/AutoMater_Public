@@ -40,6 +40,7 @@ import {
   phaseReqsAndTestSpecs, phaseIncrementalDocSync,
   workerLoop,
   phaseDevOpsBuild,
+  phaseDeployPipeline,
   phaseFinalize,
   phaseEnvironmentBootstrap,
 } from './phases';
@@ -287,10 +288,20 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // 首次运行: 按工作流配置执行阶段 (v12.0)
     // ═══════════════════════════════════════
 
+    // v13.1: 将 wishes 表中所有 pending/developing 的需求标记为 analyzing
+    db.prepare(
+      "UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE project_id = ? AND status IN ('pending', 'developing')"
+    ).run(projectId);
+
     // PM 分析 (pm_analysis or pm_triage)
     if (hasStage(workflowStages, 'pm_analysis')) {
       const features = await phasePMAnalysis(projectId, project, settings, win, signal);
       if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+
+      // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
+      db.prepare(
+        "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'"
+      ).run(projectId);
 
       // 架构设计 (architect)
       if (hasStage(workflowStages, 'architect')) {
@@ -307,6 +318,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       // 快速迭代模式: 只做分诊, 跳过架构和文档
       const features = await phasePMAnalysis(projectId, project, settings, win, signal);
       if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+
+      // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
+      db.prepare(
+        "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'"
+      ).run(projectId);
     }
   } else {
     // ═══════════════════════════════════════
@@ -361,17 +377,48 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // 关键: 新 wish 可能隐含对已有 feature 的变更 — 用户不会主动说"这是变更"。
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — PM 检查是否有新需求或隐式变更...' });
 
-    // 获取当前 wish (可能被用户更新过)
+    // v13.1: 从 wishes 表收集所有待处理的需求 (pending / developing)
+    // 修复: 此前只读 projects.wish (单字段)，导致 wishes 表中待分析的需求被忽略
+    const pendingWishes = db.prepare(
+      "SELECT id, content FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing') ORDER BY created_at ASC"
+    ).all(projectId) as Array<{ id: string; content: string }>;
+
+    // 获取 projects.wish (可能被用户更新过)
     const freshProject = db.prepare('SELECT wish FROM projects WHERE id = ?').get(projectId) as { wish: string };
-    const currentWish = freshProject.wish;
+    const projectWish = freshProject.wish?.trim() || '';
+
+    // 合并需求来源: wishes 表中的待处理条目 + projects.wish
+    // wishes 表是精确的需求队列, projects.wish 是 legacy 兼容字段
+    let mergedWishContent = '';
+    const pendingWishIds: string[] = [];
+
+    if (pendingWishes.length > 0) {
+      // 优先使用 wishes 表的待处理需求
+      mergedWishContent = pendingWishes.map(w => w.content).join('\n\n---\n\n');
+      pendingWishIds.push(...pendingWishes.map(w => w.id));
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: `📋 发现 ${pendingWishes.length} 个待处理需求, 纳入本轮分析`,
+      });
+    } else if (projectWish) {
+      // 兜底: 如果 wishes 表没有 pending, 使用 projects.wish
+      mergedWishContent = projectWish;
+    }
+
+    // 标记 wishes 为 analyzing
+    if (pendingWishIds.length > 0) {
+      const placeholders = pendingWishIds.map(() => '?').join(',');
+      db.prepare(`UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE id IN (${placeholders})`)
+        .run(...pendingWishIds);
+    }
 
     // 判断是否有新 wish 需要处理 (对比最近一次 wish 是否与现有 features 有偏差)
     // 如果 workspace 存在且有设计文档, 做分诊; 否则直接续跑
     let triage: WishTriageResult | null = null;
 
-    if (workspacePath && currentWish?.trim()) {
+    if (workspacePath && mergedWishContent) {
       triage = await detectImplicitChanges(
-        projectId, currentWish, settings, win, signal, workspacePath,
+        projectId, mergedWishContent, settings, win, signal, workspacePath,
       );
       if (signal.aborted) { unregisterOrchestrator(projectId); return; }
     }
@@ -385,7 +432,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
       // 将隐式变更合成为变更描述
       const changeDescription = [
-        `用户新需求: ${currentWish}`,
+        `用户新需求: ${mergedWishContent}`,
         '',
         '检测到的隐式变更:',
         ...triage.implicitChanges.map(c =>
@@ -439,6 +486,14 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         projectId, agentId: 'system',
         content: '♻️ 无新需求或变更, 继续处理未完成的 Feature...',
       });
+    }
+
+    // v13.1: 更新 wishes 表状态 — 标记已处理的需求为 analyzed
+    if (pendingWishIds.length > 0) {
+      const placeholders = pendingWishIds.map(() => '?').join(',');
+      db.prepare(`UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE id IN (${placeholders})`)
+        .run(...pendingWishIds);
+      log.info(`Updated ${pendingWishIds.length} wishes to 'analyzed'`);
     }
   }
 
@@ -524,10 +579,10 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
-  // Phase 4d: DevOps 自动构建验证 (v12.0: 按工作流控制)
+  // Phase 4d: DevOps 全自动部署 Pipeline (v15.0: 按工作流控制)
   // ═══════════════════════════════════════
   if (workspacePath && hasStage(workflowStages, 'devops_build')) {
-    await phaseDevOpsBuild(projectId, settings, win, signal, workspacePath);
+    await phaseDeployPipeline(projectId, settings, win, signal, workspacePath, gitConfig);
     if (signal.aborted) { unregisterOrchestrator(projectId); return; }
   }
 

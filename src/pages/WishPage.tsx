@@ -11,8 +11,11 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
-import { toErrorMessage } from '../utils/errors';
+import { friendlyErrorMessage } from '../utils/errors';
 import { MetaAgentSettings } from '../components/MetaAgentSettings';
+import { toast, confirm } from '../stores/toast-store';
+import { renderMarkdown } from '../utils/markdown';
+import { EmptyState } from '../components/EmptyState';
 
 // ═══════════════════════════════════════
 // Constants
@@ -62,6 +65,21 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     }).catch(() => {});
   }, [settingsOpen]); // Refresh when settings close
 
+  // Listen for daemon (heartbeat/hook/cron) messages
+  useEffect(() => {
+    const unsub = window.automater.on('meta-agent:daemon-message', (data: any) => {
+      const typeLabel = data.type === 'heartbeat' ? '💓 心跳' : data.type === 'hook' ? '🪝 事件' : '⏰ 定时';
+      const daemonMsg: MetaAgentMessage = {
+        id: `daemon-${Date.now()}`,
+        role: 'assistant',
+        content: `[${typeLabel}] ${data.message}`,
+        timestamp: data.timestamp || Date.now(),
+      };
+      addMessage(chatKey, daemonMsg);
+    });
+    return unsub;
+  }, [chatKey, addMessage]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -109,7 +127,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));
       }
     } catch (err: unknown) {
-      updateLastAssistant(chatKey, `❌ 请求失败: ${toErrorMessage(err) || '未知错误'}。请检查 LLM 设置。`);
+      updateLastAssistant(chatKey, `❌ 请求失败: ${friendlyErrorMessage(err) || '未知错误'}。请检查 LLM 设置。`);
     } finally {
       setSending(false);
     }
@@ -145,12 +163,15 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {displayMessages.map(msg => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
               msg.role === 'user'
-                ? 'bg-forge-600/20 text-forge-200 rounded-br-md'
+                ? 'bg-forge-600/20 text-forge-200 rounded-br-md whitespace-pre-wrap'
                 : 'bg-slate-800/80 text-slate-300 rounded-bl-md'
             }`}>
-              {msg.content}
+              {msg.role === 'assistant'
+                ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                : msg.content
+              }
               {msg.triggeredWish && (
                 <div className="mt-1 text-[10px] text-emerald-400">✅ 已创建需求</div>
               )}
@@ -350,7 +371,10 @@ function WishDetailPanel({
           </div>
         </div>
         <button
-          onClick={() => { if (confirm('确认删除此需求？')) onDelete(wish.id); }}
+          onClick={async () => {
+            const ok = await confirm({ title: '删除需求', message: '确定要删除此需求吗？此操作无法撤销。', confirmText: '删除', danger: true });
+            if (ok) onDelete(wish.id);
+          }}
           className="text-[10px] text-red-500/60 hover:text-red-400 transition-colors"
           title="删除需求"
         >
@@ -646,7 +670,9 @@ export function WishPage() {
       setProjectPage('overview');
       await loadWishes();
     } catch (err: unknown) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ ${toErrorMessage(err)}` });
+      const msg = friendlyErrorMessage(err);
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ ${msg}` });
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -684,10 +710,12 @@ export function WishPage() {
         {/* Wish List */}
         <div className="flex-1 overflow-y-auto">
           {wishes.length === 0 && !showNewWish && (
-            <div className="text-center py-12 text-slate-600 text-xs">
-              <div className="text-3xl mb-2">✨</div>
-              暂无需求<br />点击「+ 需求」或直接告诉管家
-            </div>
+            <EmptyState
+              icon="✨"
+              title="暂无需求"
+              description="点击「+ 需求」创建，或直接告诉右侧管家你想做什么"
+              action={{ label: '+ 新建需求', onClick: () => setShowNewWish(true) }}
+            />
           )}
           {wishes.map(w => {
             const st = WISH_STATUS[w.status] || WISH_STATUS.pending;

@@ -19,6 +19,9 @@ import { MetaAgentPanel } from './components/MetaAgentPanel';
 import { SessionManager } from './components/SessionManager';
 import { GuidePage } from './pages/GuidePage';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastContainer, ConfirmDialog } from './components/Toast';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { toast } from './stores/toast-store';
 
 export function App() {
   // ── 精确选择器: 只订阅渲染需要的状态片段，避免不相关 store 变化触发 App 重渲染 ──
@@ -27,12 +30,14 @@ export function App() {
   const projectPage = useAppStore(s => s.projectPage);
   const currentProjectId = useAppStore(s => s.currentProjectId);
 
+  // 全局键盘快捷键
+  useKeyboardShortcuts();
+
   // ── 事件回调: 用 ref 获取稳定引用, 不订阅 store 变化 ──
   const storeRef = useRef(useAppStore.getState());
   useEffect(() => useAppStore.subscribe(s => { storeRef.current = s; }), []);
 
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
-
   // 订阅主进程事件 — 通过 storeRef 获取 action, 不加入 deps
   useEffect(() => {
     const s = () => storeRef.current;
@@ -88,6 +93,18 @@ export function App() {
 
     unsubs.push(window.automater.on('agent:error', (data: IpcAgentErrorData) => {
       s().addLog({ projectId: data.projectId, agentId: 'system', content: `❌ 错误: ${data.error}` });
+    }));
+
+    // v15.0: 导入进度实时推送 — 完成/失败时 Toast 通知
+    unsubs.push(window.automater.on('project:import-progress', (data: { projectId: string; phase: number; step: string; progress: number; done?: boolean; error?: boolean }) => {
+      s().addLog({ projectId: data.projectId, agentId: 'system', content: `📥 ${data.step}` });
+      if (data.done) {
+        if (data.error) {
+          toast.error(`项目分析失败: ${data.step}`);
+        } else {
+          toast.success('🎉 项目分析完成！可以开始开发了', 5000);
+        }
+      }
     }));
 
     // 工具调用事件 (v0.9 ReAct)
@@ -185,7 +202,7 @@ export function App() {
   useEffect(() => {
     if (!currentProjectId) { setStats(null); return; }
     const poll = async () => {
-      try { setStats(await window.automater.project.getStats(currentProjectId)); } catch {}
+      try { setStats(await window.automater.project.getStats(currentProjectId)); } catch { /* stats query failed, non-critical */ }
     };
     poll();
     const t = setInterval(poll, 5000);
@@ -231,6 +248,8 @@ export function App() {
       </div>
       {insideProject && <StatusBar stats={stats} />}
       {insideProject && <AcceptancePanel />}
+      <ToastContainer />
+      <ConfirmDialog />
     </div>
   );
 }

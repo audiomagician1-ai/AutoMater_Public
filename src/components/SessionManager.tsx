@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createLogger } from '../utils/logger';
+import { toast, confirm } from '../stores/toast-store';
 
 const log = createLogger('SessionManager');
 
@@ -113,13 +114,20 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   };
 
   const handleCleanup = async () => {
-    if (!confirm('确认清理 30 天前的旧备份？')) return;
+    const ok = await confirm({
+      title: '清理旧备份',
+      message: '确认清理 30 天前的旧备份？此操作无法撤销。',
+      confirmText: '清理',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const result = await (window as any).automater.session.cleanup(30);
-      alert(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
+      toast.success(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
       await loadStats();
     } catch (err) {
       log.error('Cleanup failed:', err);
+      toast.error('清理失败，请重试');
     }
   };
 

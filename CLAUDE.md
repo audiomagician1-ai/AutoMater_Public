@@ -1,10 +1,10 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-02 | 版本: v14.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-02 | 版本: v15.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v14.0 — Branch/PR 管理 + Issue→Feature 自动化 + 远程同步
+**当前阶段**: v15.0 — 全自动 CI/CD Pipeline + ReAct DevOps Agent + 扩展部署工具集 + **UX 体验优化 Sprint**
 **最高优先级**: 代码质量治理 (类型安全, 测试覆盖, 文档同步)
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
@@ -56,7 +56,8 @@ AutoMater/
 │       │   ├── architect-phase.ts  # Phase 2: 架构设计
 │       │   ├── bootstrap-phase.ts  # Phase 3: 批量拆分
 │       │   ├── worker-phase.ts # Phase 4b: Developer + QA
-│       │   ├── devops-phase.ts # Phase 4e: 自动构建
+│       │   ├── devops-phase.ts # Phase 4e: 快速构建验证 (legacy)
+│       │   ├── deploy-phase.ts # Phase 4e: 全自动部署 Pipeline (v15.0, ReAct)
 │       │   ├── docs-phase.ts   # Phase 4d: 增量文档
 │       │   ├── finalize-phase.ts   # Phase 5: 汇总验收
 │       │   └── shared.ts       # 阶段共享工具
@@ -70,7 +71,7 @@ AutoMater/
 │       ├── orchestrator.ts     # 多阶段编排器 (入口, v12 可配置工作流)
 │       ├── react-loop.ts       # Developer ReAct 循环 (25 轮上限)
 │       ├── qa-loop.ts          # QA 审查 (程序化 + LLM + TDD)
-│       ├── tool-registry.ts    # 42+ 工具定义 + 角色权限矩阵
+│       ├── tool-registry.ts    # 84+ 工具定义 + 角色权限矩阵
 │       ├── tool-executor.ts    # 工具执行分发 (同步 + 异步)
 │       ├── tool-system.ts      # 工具系统抽象层
 │       ├── llm-client.ts       # LLM 调用 (流式/非流式, Anthropic/OpenAI)

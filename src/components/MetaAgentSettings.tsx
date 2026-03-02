@@ -10,10 +10,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createLogger } from '../utils/logger';
+import { toast, confirm as showConfirm } from '../stores/toast-store';
 
 const log = createLogger('MetaAgentSettings');
 
-type Tab = 'config' | 'memory';
+type Tab = 'config' | 'memory' | 'daemon';
 type MemoryCategory = 'identity' | 'user_profile' | 'lessons' | 'facts' | 'conversation_summary';
 
 const CATEGORY_LABELS: Record<MemoryCategory, { label: string; icon: string; desc: string }> = {
@@ -196,13 +197,23 @@ export function MetaAgentSettings({ onClose }: Props) {
               <span className="px-1.5 py-0.5 rounded-full bg-slate-700 text-[10px] text-slate-400">{memoryStats.total}</span>
             )}
           </button>
+          <button
+            onClick={() => setTab('daemon')}
+            className={`px-4 py-2 rounded-t-lg text-xs font-medium transition-all ${
+              tab === 'daemon'
+                ? 'bg-slate-800 text-forge-400 border-b-2 border-forge-500'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+            }`}
+          >
+            💓 自主行为
+          </button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
           {tab === 'config' ? (
             <ConfigTab config={config} setConfig={setConfig} onSave={handleSaveConfig} saving={saving} saved={saved} />
-          ) : (
+          ) : tab === 'memory' ? (
             <MemoryTab
               memories={memories}
               memoryFilter={memoryFilter}
@@ -221,6 +232,8 @@ export function MetaAgentSettings({ onClose }: Props) {
               onDelete={handleDeleteMemory}
               onClearCategory={handleClearCategory}
             />
+          ) : (
+            <DaemonTab />
           )}
         </div>
       </div>
@@ -448,10 +461,14 @@ function MemoryTab({
         </button>
         {memoryFilter !== 'all' && (
           <button
-            onClick={() => {
-              if (confirm(`确定清空所有「${CATEGORY_LABELS[memoryFilter].label}」类记忆？此操作不可撤销。`)) {
-                onClearCategory(memoryFilter);
-              }
+            onClick={async () => {
+              const ok = await showConfirm({
+                title: '清空记忆',
+                message: `确定清空所有「${CATEGORY_LABELS[memoryFilter].label}」类记忆？此操作不可撤销。`,
+                confirmText: '清空',
+                danger: true,
+              });
+              if (ok) onClearCategory(memoryFilter);
             }}
             className="px-3 py-2 rounded-lg bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs transition-all shrink-0"
           >
@@ -611,6 +628,336 @@ function Field({ label, desc, children }: { label: string; desc?: string; childr
       <label className="text-[11px] text-slate-400 font-medium block mb-1">{label}</label>
       {desc && <p className="text-[10px] text-slate-600 mb-1.5">{desc}</p>}
       {children}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
+// Daemon Tab — 心跳/事件钩子/定时任务
+// ═══════════════════════════════════════
+
+function DaemonTab() {
+  const [status, setStatus] = useState<MetaAgentDaemonStatus | null>(null);
+  const [config, setConfig] = useState<MetaAgentDaemonConfig | null>(null);
+  const [logs, setLogs] = useState<MetaAgentHeartbeatLog[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [triggering, setTriggering] = useState(false);
+
+  // New cron job form
+  const [showAddCron, setShowAddCron] = useState(false);
+  const [newCron, setNewCron] = useState({ name: '', schedule: 'daily:09:00', prompt: '' });
+
+  useEffect(() => {
+    window.automater.metaAgent.getDaemonStatus().then(s => {
+      setStatus(s);
+      setConfig(s.config);
+      setLogs(s.recentLogs);
+    }).catch(console.error);
+  }, []);
+
+  const refreshLogs = () => {
+    window.automater.metaAgent.getDaemonLogs(30).then(setLogs).catch(console.error);
+    window.automater.metaAgent.getDaemonStatus().then(s => setStatus(s)).catch(console.error);
+  };
+
+  const handleSave = async () => {
+    if (!config) return;
+    setSaving(true);
+    try {
+      const result = await window.automater.metaAgent.saveDaemonConfig(config);
+      if (result.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        refreshLogs();
+      }
+    } catch (err) { console.error(err); }
+    finally { setSaving(false); }
+  };
+
+  const handleToggle = async () => {
+    if (!config) return;
+    const newEnabled = !config.enabled;
+    setConfig({ ...config, enabled: newEnabled });
+    await window.automater.metaAgent.saveDaemonConfig({ enabled: newEnabled });
+    refreshLogs();
+  };
+
+  const handleTrigger = async () => {
+    setTriggering(true);
+    try {
+      await window.automater.metaAgent.triggerHeartbeat();
+      setTimeout(refreshLogs, 3000); // Wait for LLM response
+    } catch (err) { console.error(err); }
+    finally { setTriggering(false); }
+  };
+
+  const handleAddCron = () => {
+    if (!config || !newCron.name.trim() || !newCron.prompt.trim()) return;
+    const job = {
+      id: `cron-${Date.now().toString(36)}`,
+      name: newCron.name.trim(),
+      schedule: newCron.schedule,
+      prompt: newCron.prompt.trim(),
+      enabled: true,
+    };
+    setConfig({ ...config, cronJobs: [...config.cronJobs, job] });
+    setNewCron({ name: '', schedule: 'daily:09:00', prompt: '' });
+    setShowAddCron(false);
+  };
+
+  const handleRemoveCron = (id: string) => {
+    if (!config) return;
+    setConfig({ ...config, cronJobs: config.cronJobs.filter(j => j.id !== id) });
+  };
+
+  const handleToggleCron = (id: string) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      cronJobs: config.cronJobs.map(j => j.id === id ? { ...j, enabled: !j.enabled } : j),
+    });
+  };
+
+  if (!config) return <div className="text-center py-8 text-slate-600 text-xs">加载中...</div>;
+
+  return (
+    <div className="space-y-5">
+      {/* Master Switch + Status */}
+      <section className="flex items-center justify-between bg-slate-800/30 rounded-xl px-5 py-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+            💓 管家守护进程
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              config.enabled && status?.running ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-500'
+            }`}>
+              {config.enabled && status?.running ? '运行中' : '已停止'}
+            </span>
+          </h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            让管家持续监控项目进度，主动通知你需要关注的事情
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleTrigger}
+            disabled={triggering || !config.enabled}
+            className="px-3 py-1.5 text-[11px] rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all disabled:opacity-40"
+          >
+            {triggering ? '检查中...' : '立即检查'}
+          </button>
+          <button
+            onClick={handleToggle}
+            className={`relative w-11 h-6 rounded-full transition-colors ${config.enabled ? 'bg-forge-600' : 'bg-slate-700'}`}
+          >
+            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${config.enabled ? 'left-[26px]' : 'left-1'}`} />
+          </button>
+        </div>
+      </section>
+
+      {/* Heartbeat Config */}
+      <section>
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">💓 心跳检查</h3>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="检查间隔(分钟)" desc="每隔多久审视一次项目状态">
+            <input
+              type="number"
+              value={config.heartbeatIntervalMin}
+              onChange={e => setConfig({ ...config, heartbeatIntervalMin: Math.max(5, parseInt(e.target.value) || 30) })}
+              min={5} max={1440}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+            />
+          </Field>
+          <Field label="活跃开始" desc="只在此时间后运行">
+            <input
+              value={config.activeHoursStart}
+              onChange={e => setConfig({ ...config, activeHoursStart: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              placeholder="08:00"
+            />
+          </Field>
+          <Field label="活跃结束" desc="此时间后停止运行">
+            <input
+              value={config.activeHoursEnd}
+              onChange={e => setConfig({ ...config, activeHoursEnd: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+              placeholder="24:00"
+            />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Field label="每日 Token 预算" desc="心跳+钩子+定时任务的每日总 token 上限">
+            <input
+              type="number"
+              value={config.dailyTokenBudget}
+              onChange={e => setConfig({ ...config, dailyTokenBudget: parseInt(e.target.value) || 50000 })}
+              min={1000} max={1000000} step={5000}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+            />
+          </Field>
+          {status && (
+            <div className="mt-1 text-[10px] text-slate-600">
+              今日已用: {status.todayTokens.toLocaleString()} / {config.dailyTokenBudget.toLocaleString()} tokens
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Event Hooks */}
+      <section>
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">🪝 事件钩子</h3>
+        <p className="text-[10px] text-slate-600 mb-3">关键事件发生时，管家自动判断是否需要通知你</p>
+        <div className="space-y-2">
+          {([
+            ['onFeatureFailed', 'Feature 失败', 'QA 审查未通过时通知'],
+            ['onProjectComplete', '项目完成', '项目开发完成时通知'],
+            ['onProjectStalled', '项目停滞', '项目长时间无进展时通知'],
+            ['onError', '严重错误', '出现严重错误时通知'],
+          ] as const).map(([key, label, desc]) => (
+            <div key={key} className="flex items-center justify-between bg-slate-800/30 rounded-lg px-4 py-2.5">
+              <div>
+                <span className="text-xs text-slate-300">{label}</span>
+                <span className="text-[10px] text-slate-600 ml-2">{desc}</span>
+              </div>
+              <button
+                onClick={() => setConfig({ ...config, hooks: { ...config.hooks, [key]: !config.hooks[key] } })}
+                className={`relative w-9 h-5 rounded-full transition-colors ${config.hooks[key] ? 'bg-forge-600' : 'bg-slate-700'}`}
+              >
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.hooks[key] ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Cron Jobs */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">⏰ 定时任务</h3>
+          <button
+            onClick={() => setShowAddCron(true)}
+            className="text-[10px] px-2.5 py-1 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-all"
+          >
+            + 新增
+          </button>
+        </div>
+
+        {showAddCron && (
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 space-y-3 mb-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="任务名称">
+                <input
+                  value={newCron.name}
+                  onChange={e => setNewCron({ ...newCron, name: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
+                  placeholder="每日进度报告"
+                />
+              </Field>
+              <Field label="执行时间" desc="daily:HH:MM / hourly / every:Nm">
+                <input
+                  value={newCron.schedule}
+                  onChange={e => setNewCron({ ...newCron, schedule: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
+                  placeholder="daily:09:00"
+                />
+              </Field>
+            </div>
+            <Field label="执行指令" desc="发给管家的任务描述">
+              <textarea
+                value={newCron.prompt}
+                onChange={e => setNewCron({ ...newCron, prompt: e.target.value })}
+                rows={3}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-forge-500 resize-y"
+                placeholder="请检查所有项目的进度，生成一份简短的日报..."
+              />
+            </Field>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowAddCron(false)} className="px-3 py-1 text-xs text-slate-500 hover:text-slate-300">取消</button>
+              <button
+                onClick={handleAddCron}
+                disabled={!newCron.name.trim() || !newCron.prompt.trim()}
+                className="px-3 py-1 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-xs disabled:opacity-40"
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        )}
+
+        {config.cronJobs.length === 0 ? (
+          <div className="py-4 text-center text-[11px] text-slate-600">暂无定时任务。可添加日报、周报、定时检查等。</div>
+        ) : (
+          <div className="space-y-2">
+            {config.cronJobs.map(job => (
+              <div key={job.id} className="flex items-center gap-3 bg-slate-800/30 rounded-lg px-4 py-2.5">
+                <button
+                  onClick={() => handleToggleCron(job.id)}
+                  className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${job.enabled ? 'bg-forge-600' : 'bg-slate-700'}`}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${job.enabled ? 'left-[16px]' : 'left-0.5'}`} />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-slate-300 truncate">{job.name}</div>
+                  <div className="text-[10px] text-slate-600">{job.schedule} · {job.prompt.slice(0, 40)}...</div>
+                </div>
+                <button
+                  onClick={() => handleRemoveCron(job.id)}
+                  className="text-[10px] text-slate-600 hover:text-red-400 transition-colors shrink-0"
+                >
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Save + Logs */}
+      <div className="flex justify-between items-center pt-2">
+        <button
+          onClick={refreshLogs}
+          className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          🔄 刷新日志
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+            saved
+              ? 'bg-emerald-600 text-white'
+              : 'bg-forge-600 hover:bg-forge-500 text-white disabled:bg-slate-700 disabled:text-slate-500'
+          }`}
+        >
+          {saved ? '✓ 已保存' : saving ? '保存中...' : '保存设置'}
+        </button>
+      </div>
+
+      {/* Recent Logs */}
+      {logs.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📋 最近活动</h3>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {logs.map((l, i) => (
+              <div key={l.id || i} className="flex items-start gap-2 text-[11px] px-3 py-1.5 rounded bg-slate-800/30">
+                <span className="shrink-0 mt-0.5">
+                  {l.type === 'heartbeat' ? '💓' : l.type === 'hook' ? '🪝' : '⏰'}
+                </span>
+                <span className={`shrink-0 w-12 ${
+                  l.result === 'ok' ? 'text-slate-600' : l.result === 'notified' ? 'text-amber-400' : 'text-red-400'
+                }`}>
+                  {l.result === 'ok' ? '静默' : l.result === 'notified' ? '已通知' : '错误'}
+                </span>
+                <span className="text-slate-400 flex-1 truncate">{l.message.slice(0, 80)}</span>
+                <span className="text-slate-600 shrink-0">{l.tokens_used}t</span>
+                {l.created_at && (
+                  <span className="text-slate-700 shrink-0">{new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -12,16 +12,14 @@ import { useAppStore } from '../stores/app-store';
 import { LlmTab } from './settings/LlmTab';
 import { McpTab } from './settings/McpTab';
 import { SkillTab } from './settings/SkillTab';
-import { PricingTab } from './settings/PricingTab';
 import { DisplayTab } from './settings/DisplayTab';
 
-type TabId = 'llm' | 'mcp' | 'skill' | 'pricing' | 'display';
+type TabId = 'llm' | 'mcp' | 'skill' | 'display';
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'llm',     label: 'LLM',       icon: '🧠' },
   { id: 'mcp',     label: 'MCP',       icon: '🔌' },
   { id: 'skill',   label: '技能',      icon: '🧩' },
-  { id: 'pricing', label: '定价',      icon: '💰' },
   { id: 'display', label: '显示',      icon: '🖥️' },
 ];
 
@@ -74,7 +72,6 @@ export function SettingsPage() {
         )}
         {activeTab === 'mcp' && <McpTab />}
         {activeTab === 'skill' && <SkillTab />}
-        {activeTab === 'pricing' && <PricingTab settings={settings} />}
         {activeTab === 'display' && <DisplayTab />}
       </div>
     </div>

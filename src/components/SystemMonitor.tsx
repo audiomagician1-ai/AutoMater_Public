@@ -84,7 +84,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} TB`;
 }
 
-export function SystemMonitor() {
+export function SystemMonitor({ inline }: { inline?: boolean }) {
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [memHistory, setMemHistory] = useState<number[]>([]);
   const [gpuHistory, setGpuHistory] = useState<number[]>([]);
@@ -110,8 +110,8 @@ export function SystemMonitor() {
 
   const m = latestMetrics;
 
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+  const cards = (
+    <>
       {/* CPU */}
       <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
         <div className="flex items-center justify-between">
@@ -169,6 +169,14 @@ export function SystemMonitor() {
           运行 {m?.process.uptimeS ? `${Math.floor(m.process.uptimeS / 60)}m ${m.process.uptimeS % 60}s` : '—'}
         </div>
       </div>
+    </>
+  );
+
+  if (inline) return cards;
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {cards}
     </div>
   );
 }

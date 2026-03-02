@@ -193,18 +193,43 @@ export async function phaseEnvironmentBootstrap(
     }
   }
 
-  // Supabase (简单验证 token 格式)
+  // Supabase (actual connection test)
   if (hasSecret(projectId, 'supabase_access_token')) {
     const token = getSecret(projectId, 'supabase_access_token');
-    result.credentialsValid['supabase'] = !!token && token.length > 20;
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ${result.credentialsValid['supabase'] ? '✅' : '❌'} Supabase: Token ${result.credentialsValid['supabase'] ? '已配置' : '格式异常'}` });
+    const projectRef = getSecret(projectId, 'supabase_project_ref');
+    if (token && projectRef) {
+      try {
+        const { testSupabaseConnection } = await import('../supabase-tools');
+        const testResult = await testSupabaseConnection(token, projectRef);
+        result.credentialsValid['supabase'] = testResult.success;
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ${testResult.success ? '✅' : '❌'} Supabase: ${testResult.message}` });
+      } catch (err) {
+        result.credentialsValid['supabase'] = false;
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ❌ Supabase: 连接测试异常 (${err instanceof Error ? err.message : String(err)})` });
+      }
+    } else {
+      result.credentialsValid['supabase'] = false;
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ❌ Supabase: 缺少 ${!token ? 'access_token' : 'project_ref'}` });
+    }
   }
 
-  // Cloudflare
+  // Cloudflare (actual API token verify)
   if (hasSecret(projectId, 'cloudflare_api_token')) {
     const token = getSecret(projectId, 'cloudflare_api_token');
-    result.credentialsValid['cloudflare'] = !!token && token.length > 10;
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ${result.credentialsValid['cloudflare'] ? '✅' : '❌'} Cloudflare: Token ${result.credentialsValid['cloudflare'] ? '已配置' : '格式异常'}` });
+    if (token) {
+      try {
+        const { testCloudflareConnection } = await import('../cloudflare-tools');
+        const testResult = await testCloudflareConnection(token);
+        result.credentialsValid['cloudflare'] = testResult.success;
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ${testResult.success ? '✅' : '❌'} Cloudflare: ${testResult.message}` });
+      } catch (err) {
+        result.credentialsValid['cloudflare'] = false;
+        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ❌ Cloudflare: 连接测试异常 (${err instanceof Error ? err.message : String(err)})` });
+      }
+    } else {
+      result.credentialsValid['cloudflare'] = false;
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ❌ Cloudflare: API Token 为空' });
+    }
   }
 
   // ═══════════════════════════════════════

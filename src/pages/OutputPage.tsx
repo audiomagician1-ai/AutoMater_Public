@@ -2,6 +2,8 @@
 import { useAppStore } from '../stores/app-store';
 import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
 import { createLogger } from '../utils/logger';
+import { toast } from '../stores/toast-store';
+import { EmptyState } from '../components/EmptyState';
 
 const log = createLogger('OutputPage');
 
@@ -92,7 +94,40 @@ function TreeNode({
   );
 }
 
-// ── 行号 ──
+// ── 轻量语法高亮 ──
+function highlightCode(line: string, lang: string): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let html = esc(line);
+
+  // 注释 — 大多数语言
+  html = html.replace(/(\/\/.*$)/gm, '<span class="text-slate-500 italic">$1</span>');
+  html = html.replace(/(#.*$)/gm, (m) => {
+    // 避免误匹配 CSS hex 颜色
+    if (/^#[0-9a-fA-F]{3,8}\b/.test(m.trim())) return m;
+    return `<span class="text-slate-500 italic">${m}</span>`;
+  });
+
+  // 字符串
+  html = html.replace(/(&quot;[^&]*&quot;|&#39;[^&]*&#39;|`[^`]*`)/g, '<span class="text-emerald-400">$1</span>');
+  html = html.replace(/("[^"]*"|'[^']*')/g, '<span class="text-emerald-400">$1</span>');
+
+  // 关键字 (JS/TS/Python/Rust/Go/Java)
+  const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|new|typeof|interface|type|enum|extends|implements|try|catch|throw|finally|switch|case|break|default|continue|yield|in|of|as|is|null|undefined|true|false|this|self|def|fn|pub|mod|use|struct|impl|trait|where|match|loop|mut|ref|move|super|package|func|go|chan|select|defer|map|range|lambda|pass|raise|with|elif|except|print|None|True|False|void|int|float|double|string|bool|byte|char|long|short|static|final|abstract|public|private|protected|override|virtual|readonly|declare|namespace|module)\b/g;
+  html = html.replace(keywords, '<span class="text-violet-400">$1</span>');
+
+  // 数字
+  html = html.replace(/\b(\d+\.?\d*(?:e[+-]?\d+)?)\b/g, '<span class="text-amber-400">$1</span>');
+
+  // 类型/大写开头标识符
+  html = html.replace(/\b([A-Z][a-zA-Z0-9]*)\b/g, '<span class="text-cyan-400">$1</span>');
+
+  // 装饰器/注解
+  html = html.replace(/(@\w+)/g, '<span class="text-yellow-400">$1</span>');
+
+  return html;
+}
+
+// ── 行号 + 语法高亮 ──
 function CodeView({ content, filename }: { content: string; filename: string }) {
   const lines = content.split('\n');
   const lang = detectLanguage(filename);
@@ -112,7 +147,8 @@ function CodeView({ content, filename }: { content: string; filename: string }) 
             {lines.map((line, i) => (
               <tr key={i} className="hover:bg-slate-800/30">
                 <td className="text-right text-slate-600 select-none px-3 py-0 w-12 border-r border-slate-800/50 align-top">{i + 1}</td>
-                <td className="px-4 py-0 text-slate-300 whitespace-pre-wrap break-all">{line || ' '}</td>
+                <td className="px-4 py-0 text-slate-300 whitespace-pre-wrap break-all"
+                  dangerouslySetInnerHTML={{ __html: highlightCode(line, lang) || ' ' }} />
               </tr>
             ))}
           </tbody>
@@ -199,21 +235,13 @@ export function OutputPage() {
   };
 
   const handleViewVersions = async (filePath: string) => {
-    // Placeholder — would query git log for this file
-    setVersionModal({
-      filePath,
-      versions: [
-        { hash: 'HEAD', date: new Date().toISOString(), summary: '当前版本' },
-        { hash: 'HEAD~1', date: new Date(Date.now() - 3600000).toISOString(), summary: '上一版本' },
-      ],
-    });
+    // TODO: 实现真正的 git log 版本查询 — 暂时隐藏此功能
+    toast.info('版本历史功能即将上线');
   };
 
   const handleRollback = async (filePath: string, hash: string) => {
-    // Placeholder — would run git checkout <hash> -- <file>
-    log.info(`Rollback ${filePath} to ${hash}`);
-    setVersionModal(null);
-    loadTree();
+    // TODO: 实现 git checkout <hash> -- <file>
+    toast.info('版本回退功能即将上线');
   };
 
   if (!currentProjectId) {
@@ -262,10 +290,7 @@ export function OutputPage() {
         {/* 左侧文件树 */}
         <div className="w-64 border-r border-slate-800 overflow-y-auto flex-shrink-0 py-2">
           {tree.length === 0 ? (
-            <div className="text-center py-12 text-slate-600 text-xs">
-              <p>暂无文件</p>
-              <p className="mt-1">Agent 开发中会自动生成</p>
-            </div>
+            <EmptyState icon="📂" title="暂无文件" description="Agent 开发过程中会自动生成代码文件" />
           ) : (
             tree.map(node => (
               <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedFile} onSelect={handleSelectFile} onRightClick={handleFileRightClick} />
@@ -276,11 +301,8 @@ export function OutputPage() {
         {/* 右侧代码预览 */}
         <div className="flex-1 overflow-hidden bg-slate-950">
           {!selectedFile ? (
-            <div className="h-full flex items-center justify-center text-slate-600 text-sm">
-              <div className="text-center space-y-2">
-                <p className="text-4xl">📄</p>
-                <p>选择左侧文件查看内容</p>
-              </div>
+            <div className="h-full flex items-center justify-center">
+              <EmptyState icon="📄" title="选择文件查看" description="在左侧文件树中选择一个文件预览内容" />
             </div>
           ) : loading ? (
             <div className="h-full flex items-center justify-center text-slate-500 text-sm">加载中...</div>

@@ -12,7 +12,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
 import { MetaAgentSettings } from './MetaAgentSettings';
 import { AgentWorkFeed } from './AgentWorkFeed';
-import { toErrorMessage } from '../utils/errors';
+import { friendlyErrorMessage } from '../utils/errors';
+import { renderMarkdown } from '../utils/markdown';
 
 const EMPTY_WORK_MSGS: readonly any[] = [];
 
@@ -85,7 +86,7 @@ export function MetaAgentPanel() {
         window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));
       }
     } catch (err: unknown) {
-      updateLastAssistant(chatKey, `❌ 错误: ${toErrorMessage(err) || '未知'}`);
+      updateLastAssistant(chatKey, `❌ 错误: ${friendlyErrorMessage(err) || '未知'}`);
     } finally {
       setSending(false);
     }
@@ -146,13 +147,16 @@ export function MetaAgentPanel() {
               {displayMessages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap ${
+                    className={`max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
                       msg.role === 'user'
-                        ? 'bg-forge-600/20 text-forge-200 rounded-br-sm'
+                        ? 'bg-forge-600/20 text-forge-200 rounded-br-sm whitespace-pre-wrap'
                         : 'bg-slate-800/80 text-slate-300 rounded-bl-sm'
                     }`}
                   >
-                    {msg.content}
+                    {msg.role === 'assistant'
+                      ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                      : msg.content
+                    }
                     {msg.triggeredWish && (
                       <div className="mt-0.5 text-[9px] text-emerald-400">✅ 已创建需求</div>
                     )}

@@ -9,4 +9,5 @@ export { phaseArchitect } from './architect-phase';
 export { phaseReqsAndTestSpecs, phaseIncrementalDocSync } from './docs-phase';
 export { workerLoop } from './worker-phase';
 export { phaseDevOpsBuild } from './devops-phase';
+export { phaseDeployPipeline } from './deploy-phase';
 export { phaseFinalize } from './finalize-phase';

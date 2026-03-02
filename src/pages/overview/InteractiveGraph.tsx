@@ -76,7 +76,7 @@ export function InteractiveGraph({
         const depGroups = new Set<string>();
         for (const f of feats) {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch {}
+          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
           for (const d of deps) {
             if (!groupFeatureIds.has(d)) {
               for (const [gn, gfeats] of groups) {
@@ -106,7 +106,7 @@ export function InteractiveGraph({
       if (subGroups.size <= 1) {
         const featureNodes = groupFeatures.map(f => {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch {}
+          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
           return { id: f.id, label: f.title || f.description, status: f.status, category: f.category, deps, feature: f };
         });
         return buildDagreGraph(featureNodes, 180, 56);
@@ -118,7 +118,7 @@ export function InteractiveGraph({
         const depSubs = new Set<string>();
         for (const f of feats) {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch {}
+          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
           for (const d of deps) {
             if (!subFeatureIds.has(d)) {
               for (const [sn, sfeats] of subGroups) {
@@ -148,7 +148,7 @@ export function InteractiveGraph({
 
     const featureNodes = filtered.map(f => {
       let deps: string[] = [];
-      try { deps = JSON.parse(f.depends_on || '[]'); } catch {}
+      try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
       return { id: f.id, label: f.title || f.description, status: f.status, category: f.category, deps, feature: f };
     });
     return buildDagreGraph(featureNodes, 180, 56);

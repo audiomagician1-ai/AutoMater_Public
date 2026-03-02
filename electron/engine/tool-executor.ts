@@ -42,8 +42,9 @@ import { skillEvolution } from './skill-evolution';
 import { configureImageGen, isImageGenAvailable, textToImage, editImage } from './image-gen';
 import {
   deployWithCompose, composeDown, pm2Start, pm2Status,
-  writeNginxConfig, writeDockerfile, healthCheck,
-  type ServiceConfig, type NginxSiteConfig, type DockerfileConfig,
+  generateComposeYaml, generateDockerfile, generatePM2Ecosystem, generateNginxConfig,
+  writeNginxConfig, writeDockerfile, healthCheck, findAvailablePort,
+  type ServiceConfig, type ComposeConfig, type PM2AppConfig, type NginxSiteConfig, type DockerfileConfig,
 } from './deploy-tools';
 
 const log = createLogger('tool-executor');
@@ -581,6 +582,13 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'deploy_compose_down':
       case 'deploy_health_check':
       case 'deploy_dockerfile':
+      // v15.0: Extended deploy tools (I4)
+      case 'deploy_compose_generate':
+      case 'deploy_dockerfile_generate':
+      case 'deploy_pm2_start':
+      case 'deploy_pm2_status':
+      case 'deploy_nginx_generate':
+      case 'deploy_find_port':
       case 'github_close_issue':
       case 'github_add_comment':
       case 'github_get_issue':
@@ -589,6 +597,21 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'github_list_prs':
       case 'github_get_pr':
       case 'github_merge_pr':
+      // v14.0: Supabase tools
+      case 'supabase_status':
+      case 'supabase_migration_create':
+      case 'supabase_migration_push':
+      case 'supabase_db_pull':
+      case 'supabase_deploy_function':
+      case 'supabase_gen_types':
+      case 'supabase_set_secret':
+      // v14.0: Cloudflare tools
+      case 'cloudflare_deploy_pages':
+      case 'cloudflare_deploy_worker':
+      case 'cloudflare_set_secret':
+      case 'cloudflare_dns_list':
+      case 'cloudflare_dns_create':
+      case 'cloudflare_status':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
 
       // Sync-only tools
@@ -1124,6 +1147,97 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     };
   }
 
+  // ── v15.0: Extended Deploy Tools (I4) ──
+  if (call.name === 'deploy_compose_generate') {
+    const services: ServiceConfig[] = (call.arguments.services || []).map((s: Record<string, unknown>) => ({
+      name: s.name as string,
+      image: s.image as string | undefined,
+      build: s.build as string | undefined,
+      ports: (s.ports as string[]) || [],
+      env: s.env as Record<string, string> | undefined,
+      volumes: s.volumes as string[] | undefined,
+      dependsOn: s.depends_on as string[] | undefined,
+      restart: s.restart as ServiceConfig['restart'],
+      command: s.command as string | undefined,
+    }));
+    const config: ComposeConfig = {
+      projectName: call.arguments.project_name,
+      services,
+      networkName: call.arguments.network_name,
+    };
+    const yaml = generateComposeYaml(config);
+    return { success: true, output: `docker-compose.yml 已生成:\n\n\`\`\`yaml\n${yaml}\n\`\`\``, action: 'read' };
+  }
+
+  if (call.name === 'deploy_dockerfile_generate') {
+    const config: DockerfileConfig = {
+      baseImage: call.arguments.base_image,
+      installCmd: call.arguments.install_cmd,
+      buildCmd: call.arguments.build_cmd,
+      startCmd: call.arguments.start_cmd,
+      exposePorts: call.arguments.expose_ports,
+      workDir: call.arguments.work_dir,
+    };
+    const content = generateDockerfile(config);
+    return { success: true, output: `Dockerfile 已生成:\n\n\`\`\`dockerfile\n${content}\n\`\`\``, action: 'read' };
+  }
+
+  if (call.name === 'deploy_pm2_start') {
+    const apps: PM2AppConfig[] = (call.arguments.apps || []).map((a: Record<string, unknown>) => ({
+      name: a.name as string,
+      script: a.script as string,
+      cwd: a.cwd as string | undefined,
+      args: a.args as string | undefined,
+      instances: a.instances as number | undefined,
+      env: a.env as Record<string, string> | undefined,
+      maxMemoryRestart: a.max_memory_restart as string | undefined,
+      watch: a.watch as boolean | undefined,
+    }));
+    const result = await pm2Start(apps, ctx.workspacePath);
+    return {
+      success: result.success,
+      output: result.success ? result.output : `PM2 启动失败: ${result.error}`,
+      action: 'shell',
+    };
+  }
+
+  if (call.name === 'deploy_pm2_status') {
+    const result = await pm2Status();
+    return { success: result.success, output: result.output, action: 'read' };
+  }
+
+  if (call.name === 'deploy_nginx_generate') {
+    const config: NginxSiteConfig = {
+      serverName: call.arguments.server_name,
+      upstream: call.arguments.upstream,
+      listenPort: call.arguments.listen_port,
+      staticRoot: call.arguments.static_root,
+      spaMode: call.arguments.spa_mode,
+      ssl: call.arguments.ssl_cert_path ? {
+        certPath: call.arguments.ssl_cert_path,
+        keyPath: call.arguments.ssl_key_path,
+      } : undefined,
+    };
+    const outputDir = call.arguments.output_dir
+      ? path.resolve(ctx.workspacePath, call.arguments.output_dir)
+      : ctx.workspacePath;
+    const result = await writeNginxConfig(config, outputDir);
+    return {
+      success: result.success,
+      output: result.success ? `Nginx 配置已生成: ${result.filePath}` : `生成失败: ${result.error}`,
+      action: 'write',
+    };
+  }
+
+  if (call.name === 'deploy_find_port') {
+    try {
+      const port = await findAvailablePort(call.arguments.start_port || 3000, call.arguments.end_port || 9999);
+      return { success: true, output: `可用端口: ${port}`, action: 'read' };
+    } catch (err: unknown) {
+      return { success: false, output: `端口检测失败: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
   // ── MCP 外部工具 ──
   if (call.name.startsWith('mcp_')) {
     return executeMcpTool(call);
@@ -1230,6 +1344,148 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
       output: `#${issue.number} [${issue.state}] ${issue.title}\n标签: ${issue.labels.join(', ') || '无'}\nURL: ${issue.html_url}\n\n${issue.body || '(无描述)'}`,
       action: 'github',
     };
+  }
+
+  // ── v14.0: Supabase Tools ──
+  if (call.name.startsWith('supabase_')) {
+    const { getSecret } = await import('./secret-manager');
+    const accessToken = getSecret(ctx.projectId, 'supabase_access_token');
+    const projectRef = getSecret(ctx.projectId, 'supabase_project_ref');
+
+    if (!accessToken) {
+      return { success: false, output: '❌ Supabase 未配置: 缺少 supabase_access_token (请在密钥管理中添加)', action: 'web' };
+    }
+
+    const sbConfig = {
+      accessToken,
+      projectRef: projectRef || '',
+      dbPassword: getSecret(ctx.projectId, 'supabase_db_password') || '',
+      workspacePath: ctx.workspacePath,
+    };
+
+    const sb = await import('./supabase-tools');
+
+    if (call.name === 'supabase_status') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const status = await sb.getProjectStatus(sbConfig);
+      return status
+        ? { success: true, output: `Supabase 项目状态:\n状态: ${status.status}\nAPI: ${status.apiUrl}\nDB: ${status.dbHost}\nAnon Key: ${status.anonKey ? status.anonKey.slice(0, 20) + '...' : '(未获取)'}`, action: 'web' }
+        : { success: false, output: '获取 Supabase 状态失败', action: 'web' };
+    }
+    if (call.name === 'supabase_migration_create') {
+      const result = await sb.createMigration(sbConfig, call.arguments.name);
+      return { success: result.success, output: result.success ? `迁移文件已创建:\n${result.output}` : `创建失败: ${result.error}`, action: 'shell' };
+    }
+    if (call.name === 'supabase_migration_push') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const result = await sb.pushMigration(sbConfig);
+      return { success: result.success, output: result.success ? `迁移推送成功:\n${result.output}` : `推送失败: ${result.error}\n${result.output}`, action: 'shell' };
+    }
+    if (call.name === 'supabase_db_pull') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const result = await sb.pullSchema(sbConfig);
+      return { success: result.success, output: result.success ? `Schema 拉取成功:\n${result.output}` : `拉取失败: ${result.error}`, action: 'shell' };
+    }
+    if (call.name === 'supabase_deploy_function') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const result = await sb.deployFunction(sbConfig, call.arguments.function_name);
+      return { success: result.success, output: result.success ? `Edge Function "${call.arguments.function_name}" 部署成功:\n${result.output}` : `部署失败: ${result.error}`, action: 'shell' };
+    }
+    if (call.name === 'supabase_gen_types') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const result = await sb.generateTypes(sbConfig, call.arguments.output_path || 'src/types/supabase.ts');
+      return { success: result.success, output: result.success ? result.output : `类型生成失败: ${result.error}`, action: 'write' };
+    }
+    if (call.name === 'supabase_set_secret') {
+      if (!projectRef) return { success: false, output: '❌ 缺少 supabase_project_ref', action: 'web' };
+      const ok = await sb.setSupabaseSecret(sbConfig, call.arguments.name, call.arguments.value);
+      return ok
+        ? { success: true, output: `Supabase Secret "${call.arguments.name}" 已设置`, action: 'web' }
+        : { success: false, output: `设置 Secret 失败`, action: 'web' };
+    }
+
+    return { success: false, output: `未知 Supabase 工具: ${call.name}`, action: 'web' };
+  }
+
+  // ── v14.0: Cloudflare Tools ──
+  if (call.name.startsWith('cloudflare_')) {
+    const { getSecret } = await import('./secret-manager');
+    const apiToken = getSecret(ctx.projectId, 'cloudflare_api_token');
+    const accountId = getSecret(ctx.projectId, 'cloudflare_account_id');
+
+    if (!apiToken || !accountId) {
+      return { success: false, output: '❌ Cloudflare 未配置: 缺少 cloudflare_api_token 或 cloudflare_account_id (请在密钥管理中添加)', action: 'web' };
+    }
+
+    const cfConfig = {
+      apiToken,
+      accountId,
+      zoneId: getSecret(ctx.projectId, 'cloudflare_zone_id') || undefined,
+      workspacePath: ctx.workspacePath,
+    };
+
+    const cf = await import('./cloudflare-tools');
+
+    if (call.name === 'cloudflare_deploy_pages') {
+      const result = await cf.deployPages(cfConfig, {
+        projectName: call.arguments.project_name,
+        directory: call.arguments.directory || 'dist',
+        branch: call.arguments.branch,
+      });
+      return {
+        success: result.success,
+        output: result.success
+          ? `Pages 部署成功 ✅\nURL: ${result.url}\n${result.output}`
+          : `部署失败: ${result.error}\n${result.output}`,
+        action: 'shell',
+      };
+    }
+    if (call.name === 'cloudflare_deploy_worker') {
+      const result = await cf.deployWorker(cfConfig, {
+        name: call.arguments.name,
+        entryPoint: call.arguments.entry_point,
+      });
+      return {
+        success: result.success,
+        output: result.success
+          ? `Worker 部署成功 ✅\nURL: ${result.url}\n${result.output}`
+          : `部署失败: ${result.error}\n${result.output}`,
+        action: 'shell',
+      };
+    }
+    if (call.name === 'cloudflare_set_secret') {
+      const ok = await cf.setWorkerSecret(cfConfig, call.arguments.worker_name, call.arguments.key, call.arguments.value);
+      return ok
+        ? { success: true, output: `Worker Secret "${call.arguments.key}" 已设置 (${call.arguments.worker_name})`, action: 'web' }
+        : { success: false, output: `设置 Worker Secret 失败`, action: 'web' };
+    }
+    if (call.name === 'cloudflare_dns_list') {
+      if (!cfConfig.zoneId) return { success: false, output: '❌ 缺少 cloudflare_zone_id (请在密钥管理中添加)', action: 'web' };
+      const records = await cf.listDNSRecords(cfConfig);
+      if (records.length === 0) return { success: true, output: '无 DNS 记录', action: 'web' };
+      const lines = records.map(r => `${r.type.padEnd(6)} ${r.name.padEnd(30)} → ${r.content} ${r.proxied ? '(proxied)' : ''}`);
+      return { success: true, output: `DNS 记录 (${records.length}):\n${lines.join('\n')}`, action: 'web' };
+    }
+    if (call.name === 'cloudflare_dns_create') {
+      if (!cfConfig.zoneId) return { success: false, output: '❌ 缺少 cloudflare_zone_id', action: 'web' };
+      const result = await cf.createDNSRecord(cfConfig, {
+        type: call.arguments.type,
+        name: call.arguments.name,
+        content: call.arguments.content,
+        proxied: call.arguments.proxied ?? true,
+      });
+      return result.success
+        ? { success: true, output: `DNS 记录已创建: ${call.arguments.type} ${call.arguments.name} → ${call.arguments.content} (ID: ${result.id})`, action: 'web' }
+        : { success: false, output: `DNS 创建失败: ${result.error}`, action: 'web' };
+    }
+    if (call.name === 'cloudflare_status') {
+      const status = await cf.getDeploymentStatus(cfConfig, call.arguments.project_name);
+      return status
+        ? { success: true, output: `Cloudflare 部署状态:\n项目: ${call.arguments.project_name}\nURL: ${status.url}\n状态: ${status.status}\n环境: ${status.environment}\n最后部署: ${status.lastDeploy}`, action: 'web' }
+        : { success: false, output: `获取部署状态失败`, action: 'web' };
+    }
+
+    return { success: false, output: `未知 Cloudflare 工具: ${call.name}`, action: 'web' };
   }
 
   // ── Skill 外部工具 ──

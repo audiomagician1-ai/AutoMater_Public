@@ -12,6 +12,7 @@ import fs from 'fs';
 import { ensureEventTable } from './engine/event-store';
 import { ensureCheckpointTable } from './engine/mission';
 import { ensureSessionsTable } from './engine/conversation-backup';
+import { ensureHeartbeatTable } from './engine/meta-agent-daemon';
 import { createLogger } from './engine/logger';
 
 const log = createLogger('db');
@@ -405,5 +406,6 @@ export async function initDatabase(): Promise<void> {
   ensureEventTable();
   ensureCheckpointTable();
   ensureSessionsTable();
-  log.info('v2.0+ tables ensured (events, checkpoints, sessions)');
+  ensureHeartbeatTable();
+  log.info('v2.0+ tables ensured (events, checkpoints, sessions, heartbeat)');
 }

@@ -40,13 +40,13 @@ body {
 
 /* 页面切换淡入 */
 main > * {
-  animation: pageEnter 0.3s ease-out;
+  animation: pageEnter 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes pageEnter {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -156,5 +156,43 @@ button:not(:disabled):active {
 }
 .animate-float {
   animation: float 4s ease-in-out infinite;
+}
+
+/* ═══ Toast / Confirm 动效 ═══ */
+
+/* Toast 从右侧滑入 */
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in-right {
+  animation: slideInFromRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 模态框淡入 */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* 模态框弹入 */
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.animate-scale-in {
+  animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ═══ 页面切换过渡 ═══ */
+@keyframes pageSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-page-enter {
+  animation: pageSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 

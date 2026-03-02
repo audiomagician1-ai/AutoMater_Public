@@ -20,7 +20,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { toErrorMessage } from '../utils/errors';
+import { friendlyErrorMessage } from '../utils/errors';
+import { toast } from '../stores/toast-store';
 
 // ═══════════════════════════════════════
 // Types
@@ -90,7 +91,8 @@ export function AcceptancePanel() {
       addLog({ projectId: currentProjectId, agentId: 'user', content: '✅ 用户验收通过' });
       setShowAcceptancePanel(false);
     } catch (err: unknown) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 验收失败: ${toErrorMessage(err)}` });
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 验收失败: ${friendlyErrorMessage(err)}` });
+      toast.error(`验收失败: ${friendlyErrorMessage(err)}`);
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +108,8 @@ export function AcceptancePanel() {
       setRejectReason('');
       setShowRejectForm(false);
     } catch (err: unknown) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 驳回失败: ${toErrorMessage(err)}` });
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 驳回失败: ${friendlyErrorMessage(err)}` });
+      toast.error(`驳回失败: ${friendlyErrorMessage(err)}`);
     } finally {
       setSubmitting(false);
     }

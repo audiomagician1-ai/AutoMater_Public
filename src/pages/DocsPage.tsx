@@ -16,6 +16,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
 import { createLogger } from '../utils/logger';
+import { toast } from '../stores/toast-store';
 
 const log = createLogger('DocsPage');
 
@@ -421,8 +422,8 @@ export function DocsPage() {
   };
 
   const handleRollbackDoc = (item: DocTreeItem, version: number) => {
-    // Placeholder — would call IPC to restore doc to specific version
-    log.info(`Rollback doc ${item.type}:${item.id} to v${version}`);
+    // TODO: 实现文档版本回退
+    toast.info('文档版本回退功能即将上线');
     setVersionModal(null);
   };
 

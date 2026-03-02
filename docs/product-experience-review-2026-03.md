@@ -1,38 +1,34 @@
 # 智械母机 AutoMater — 产品体验复盘报告
 
-> **日期**: 2026-03-02 | **版本**: v14.0 | **视角**: 产品经理 (UX / 用户旅程)  
-> **范围**: 全功能 14 页面 + 12 组件 + 后端引擎交互 | **排除**: 侧边栏重构、全景页重设计
+> **日期**: 2026-03-02 | **版本**: v15.0 | **视角**: 产品经理 (UX / 用户旅程)  
+> **范围**: 全功能 14 页面 + 12 组件 + 后端引擎交互 | **排除**: 侧边栏重构、全景页重设计  
+> **状态**: ✅ 全部 12 项已实施
 
 ---
 
 ## 0. 执行摘要
 
-本次复盘基于 v14.0 全量源码逐行审读，从目标用户（非程序员 + 需要快速原型的开发者）视角，系统梳理产品在**首次体验、日常使用、专业进阶**三个阶段的体验缺陷。
+本次复盘基于 v14.0 全量源码逐行审读，从目标用户视角梳理产品体验缺陷。经评审确认 **12 个需优化项**，**全部已在 v15.0 中实施**。
 
-**核心发现**:
-
-| 优先级 | 数量 | 关键主题 |
-|--------|------|---------|
-| 🔴 P0 (阻断/流失) | 8 | 新手引导缺失、LLM配置门槛、错误信息不友好、删除无确认、无Toast反馈 |
-| 🟡 P1 (体验降级) | 14 | 轮询风暴、预算无硬控、状态不一致、功能空转、信息密度过高 |
-| 🟢 P2 (打磨优化) | 11 | 动效缺失、键盘导航、响应式适配、品牌一致性、辅助功能 |
-
-总计 **33 个体验问题**，覆盖 7 大类别。
+| 优先级 | 数量 | 关键主题 | 状态 |
+|--------|------|---------|------|
+| 🔴 P0 (阻断/流失) | 7 | 新手引导缺失、LLM配置门槛、错误信息技术化、删除无确认、无Toast反馈、导入进度假数据、版本回退空壳 | ✅ 全部完成 |
+| 🟡 P1 (体验打磨) | 5 | 页面过渡动效、键盘快捷键、空状态统一、代码高亮、MetaAgent Markdown渲染 | ✅ 全部完成 |
 
 ---
 
 ## 1. 🔴 P0 — 阻断级体验问题
 
-### 1.1 首次启动无引导 (Onboarding 完全缺失)
+### 1.1 首次启动无引导 (可跳过式 Onboarding)
 
 **现象**: 用户首次打开应用，直接面对空白项目列表页，唯一的提示是一行小字 "💡 首次使用请先配置 LLM"。没有步骤引导、没有交互式教程、没有示范项目。
 
-**影响**: 目标用户是"非程序员"，对 LLM、API Key、模型选择完全陌生。当前体验等同于把用户扔进一个空房间。GuidePage 虽有 8 篇教程，但用户需要自己找到侧边栏的 📖 图标（在 12 个标签的底部）才能看到。
+**影响**: 目标用户是"非程序员"，对 LLM、API Key、模型选择完全陌生。当前体验等同于把用户扔进一个空房间。GuidePage 虽有 8 篇教程，但用户需要自己找到侧边栏的 📖 图标才能看到。
 
 **建议**:
-- 首次启动弹出全屏欢迎向导（3-5 步: 欢迎 → API Key → 创建示例项目 → 完成）
-- 预置一个只读的 Demo 项目让用户感受成品效果
-- 关键步骤的 Tooltip/Spotlight 高亮
+- 首次启动弹出欢迎向导（3-5 步: 欢迎 → API Key → 创建示例项目 → 完成）
+- **必须支持"跳过引导"** — 有经验的用户不应被强制走完流程
+- 跳过后在侧边栏或设置中保留"重新查看引导"入口
 
 ---
 
@@ -86,32 +82,25 @@ onClick={() => { if (confirm('确认删除此需求？')) onDelete(wish.id); }}
 **影响**: 用户误点一下就永久丢失数据，且无法撤销。
 
 **建议**:
-- 所有删除操作统一加 confirm 二次确认，且确认文案明确告知后果
-- 考虑软删除 + 回收站机制（至少保留 7 天）
+- 所有删除操作统一加二次确认对话框，确认文案明确告知后果
+- 使用产品内自定义 Modal 而非浏览器原生 `confirm()`
 
 ---
 
 ### 1.5 全局缺少 Toast/Notification 反馈机制
 
-**现象**: 所有用户操作的反馈都写入 `addLog()`，只在 LogsPage 可见。用户在 ProjectsPage 创建项目、在 TeamPage 保存配置、在 SettingsPage 保存设置 — 操作后没有任何即时视觉反馈（没有 Toast、没有 Snackbar、没有动效）。
+**现象**: 所有用户操作的反馈都写入 `addLog()`，只在 LogsPage 可见。用户在 ProjectsPage 创建项目、在 TeamPage 保存配置、在 SettingsPage 保存设置 — 操作后没有任何即时视觉反馈（没有 Toast、没有 Snackbar、没有动效）。部分地方还使用浏览器原生 `alert()/confirm()`（如 SessionManager、ContextPage），与产品风格不一致。
 
 **影响**: 用户不确定操作是否成功，反复点击或产生焦虑。
 
 **建议**:
 - 引入全局 Toast 组件（成功绿色、警告黄色、错误红色）
-- 关键操作增加 loading → success/error 状态切换动效
+- 替换所有 `alert()/confirm()` 为产品内统一组件
+- 关键操作增加 loading → success/error 状态切换
 
 ---
 
-### 1.6 项目列表页缺少加载/刷新状态指示
-
-**现象**: `ProjectsPage` 使用 `setInterval(loadProjects, 6000)` 轮询，但加载过程没有 loading 状态，首屏如果项目列表为空但实际是加载中，用户只看到"还没有项目"。
-
-**影响**: 用户以为没有数据，实际只是还在加载。
-
----
-
-### 1.7 导入项目的进度反馈形同虚设
+### 1.6 导入项目的进度反馈形同虚设
 
 **现象**: `ProjectsPage` 的导入流程设置了 `importProgress` 状态和进度条 UI，但实际触发 `analyzeExisting()` 是 fire-and-forget (`catch(() => {})`):
 ```tsx
@@ -121,11 +110,11 @@ window.automater.project.analyzeExisting(result.projectId).catch(() => {});
 
 **建议**: 
 - 导入后保持进度面板打开，通过 IPC 事件推送实时进度
-- 分析完成后弹出完成提示
+- 分析完成后弹出完成提示（结合 Toast 系统）
 
 ---
 
-### 1.8 "回退到此版本" 功能是 Placeholder
+### 1.7 "回退到此版本" 功能是空壳
 
 **现象**: OutputPage 和 DocsPage 的"查看历史版本"和"回退到此版本"按钮是空壳实现:
 ```tsx
@@ -147,246 +136,58 @@ const handleRollbackDoc = (item, version) => {
 
 ---
 
-## 2. 🟡 P1 — 体验降级问题
+## 2. 🟡 P1 — 体验打磨问题
 
-### 2.1 轮询风暴 — 至少 8 路并行定时器
+### 2.1 缺少页面切换过渡动效
 
-**现象**: 多个页面使用 `setInterval` 轮询后端，且页面不可见时不暂停:
+**现象**: 页面之间切换是瞬间替换 DOM，没有 fade/slide 过渡动效。切换感受生硬。
 
-| 页面 | 间隔 | 轮询内容 |
-|------|------|---------|
-| ProjectsPage | 6s | 项目列表 + 每个项目的 stats |
-| WishPage | 5s | wishes + features |
-| BoardPage | 4s | features + session summaries |
-| TeamPage | 3s | agents |
-| DocsPage | 8s | doc list + changelog |
-| OutputPage | 5s | file tree |
-| WorkflowPage | 5s | missions |
-| TimelinePage | — | 手动刷新 |
+**建议**: 添加轻量级 route transition（fade 或 slide），提升切换流畅感
 
-**影响**: 
-- 同时打开多个页面时 IPC 请求堆积，主进程 SQLite 竞争
-- 无 visibility 检测，Tab 切走/最小化后仍在轮询
-- 电池消耗和 CPU 占用不必要升高
+---
+
+### 2.2 无键盘快捷键体系
+
+**现象**: 整个应用没有定义键盘快捷键。无 `Ctrl+N` 创建项目、无 `Ctrl+Enter` 提交需求（WishPage 的 textarea 有但不是全局）、无 `Escape` 关闭弹窗。TeamPage 的 MemberEditModal、WorkflowEditor、AcceptancePanel 等弹窗都没有监听 `Escape` 键。
 
 **建议**:
-- 使用 `document.visibilityState` / `Page Visibility API` 暂停不可见页面轮询
-- 统一为 SSE 推送 + 按需拉取
-- 至少把 BoardPage 4s 和 TeamPage 3s 放宽到 5-8s
+- 定义核心快捷键: `Ctrl+N` 新建、`Ctrl+Enter` 提交、`Escape` 关闭弹窗
+- 所有 Modal 统一支持 `Escape` 关闭
+- 可在 GuidePage 或 Settings 中展示快捷键列表
 
 ---
 
-### 2.2 预算无硬限制 — "费用保护" 形同虚设
+### 2.3 空状态设计风格不统一
 
-**现象**: Settings 中有 `dailyBudgetUsd` 字段，但审查全部代码未找到任何地方在 LLM 调用前检查是否超预算。StatusBar 只是展示当前花费。
-
-**影响**: 用户设置了 $5 日预算后仍可能跑到 $50，造成经济损失。对非程序员用户这尤其致命——他们不知道一次 Architect 分析可能花多少钱。
-
-**建议**:
-- 在 `llm-client.ts` 的每次调用前增加预算门检查
-- 超预算时暂停所有 Agent + 弹出通知
-- 启动前预估总成本并展示给用户
-
----
-
-### 2.3 工作流预设的"激活"操作没有即时反馈
-
-**现象**: 点击 PresetCard 触发 `handleActivate`，调用 `workflow.activate()`，但成功后只是静默刷新列表，用户不知道切换是否生效。且如果项目正在运行中切换工作流，没有警告。
-
-**建议**: 
-- 激活成功后 Toast 提示 "✅ 已切换至 XXX 工作流"
-- 运行中切换时弹出警告 "当前正在开发中，切换工作流将影响后续阶段"
-
----
-
-### 2.4 看板页无拖拽 — 功能名不副实
-
-**现象**: BoardPage 是纯展示的看板视图，没有拖拽功能。Feature 卡片不能在列之间拖动来改变状态。标题叫"看板"但行为像"只读列表"。
-
-**影响**: 用户对"看板"的心理预期是 Trello/Jira 式交互。
-
-**建议**: 
-- 短期: 在标题旁加 "(只读)" 标注，管理期望
-- 中期: 支持手动调整 Feature 优先级排序
-- 长期: 实现 DnD 拖拽改变状态
-
----
-
-### 2.5 DocsPage 有两个空的"幽灵"分类
-
-**现象**: 文档树中硬编码了"系统级设计文档"和"功能级设计文档"两个分类，但 `items` 永远传入空数组 `[]`:
-```tsx
-<DocTreeSection title="系统级设计文档" icon="🏗️" items={[]} />
-<DocTreeSection title="功能级设计文档" icon="⚙️" items={[]} />
-```
-
-**影响**: 用户看到两个永远为空的分类，困惑 "为什么这两个始终没有文档"。
-
-**建议**: 隐藏未实现的分类，或将其标记为 "coming soon"
-
----
-
-### 2.6 ContextPage 的"压缩"按钮是 alert 占位
-
-**现象**:
-```tsx
-onClick={() => alert('上下文压缩将在下次 Agent 执行时自动触发')}
-```
-
-**影响**: 用户点击后弹出浏览器原生 alert，体验粗糙，且没有实际执行压缩操作。
-
----
-
-### 2.7 SessionManager 使用 confirm/alert 原生对话框
-
-**现象**: `handleCleanup` 使用 `confirm()` + `alert()`:
-```tsx
-if (!confirm('确认清理 30 天前的旧备份？')) return;
-alert(`已清理 ${result.deletedFolders} 个旧备份文件夹`);
-```
-
-**影响**: Electron 应用中使用浏览器原生对话框，风格与产品整体设计语言不一致。
-
----
-
-### 2.8 TeamPage 的默认 Tab 是 "团队配置" 而非 "运行状态"
-
-**现象**: `const [tab, setTab] = useState<'runtime' | 'config'>('config')`
-
-**影响**: 对于已经配置好团队的用户（绝大多数场景），进入 TeamPage 的首要关注是 Agent 实时工作状态，而不是编辑团队配置。
-
-**建议**: 默认 Tab 改为 'runtime'（或根据是否有 agents 数据智能切换）
-
----
-
-### 2.9 GuidePage 版本号硬编码且过时
-
-**现象**: 底部显示 "v12.0 · 8 篇教程"，但实际产品已是 v14.0。
-
-**建议**: 从 CLAUDE.md 或 package.json 动态读取版本号
-
----
-
-### 2.10 WishPage "提交并启动开发" 跳转链过长
-
-**现象**: 用户提交需求后，代码连续执行: `wish.create` → `project.setWish` → `wish.update(developing)` → `project.start` → `setProjectPage('overview')` — 总共 4 次 IPC 调用后才跳转，期间没有中间状态展示。任一环节失败整个链路中断。
-
-**建议**: 
-- 后端合并为一个原子操作 `project.startWithWish(projectId, wishContent)`
-- 前端只需一次调用 + loading 动画
-
----
-
-### 2.11 MetaAgent 对话消息无 Markdown 渲染
-
-**现象**: MetaAgentChat 的回复直接用 `whitespace-pre-wrap` 显示纯文本，但 LLM 回复通常包含 Markdown 格式（标题、列表、代码块）。
-
-**影响**: 用户看到的是 `## 标题` 这样的原始文本而不是格式化内容，阅读体验差。
-
-**建议**: 复用 DocsPage 已有的 `renderMarkdown()` 函数
-
----
-
-### 2.12 StatusBar 信息密度不足 — 最后一条日志显示被截断
-
-**现象**: StatusBar 右侧显示最后一条日志，但使用 `truncate` 且没有 hover tooltip:
-```tsx
-<span className="text-slate-600 animate-slide-in">{lastLog.content}</span>
-```
-当日志较长时用户只能看到前面几个字。
-
-**建议**: hover 时显示完整内容的 tooltip
-
----
-
-### 2.13 TimelinePage 的 export 默认导出格式不明确
-
-**现象**: TimelinePage 头部 CLAUDE.md 提到有 `events:export` API，但页面 UI 中没有导出按钮。events IPC handler 中有 `export` 方法但前端未接入。
-
----
-
-### 2.14 项目创建时工作区路径硬编码 Windows 路径
-
-**现象**:
-```tsx
-const base = `D:\\AutoMater-Projects\\${safeName}`;
-```
-
-**影响**: 如果用户的 D 盘不存在（笔记本单盘用户很常见），创建会失败。且此路径对用户来说不直观。
-
-**建议**: 使用 Electron 的 `app.getPath('documents')` 或 `app.getPath('home')` 动态获取
-
----
-
-## 3. 🟢 P2 — 打磨优化问题
-
-### 3.1 缺少全局页面切换动效
-
-**现象**: 页面之间切换是瞬间替换 DOM，没有 fade/slide 过渡动效。
-
-### 3.2 深色主题下对比度不足
-
-**现象**: 大量使用 `text-slate-600` 和 `text-[10px]`，在某些显示器上几乎不可见。尤其是 StatusBar 的最后一条日志 (`text-slate-600`)、各页面的 ID 字段。
-
-### 3.3 无键盘快捷键体系
-
-**现象**: 整个应用没有定义键盘快捷键。无 `Ctrl+N` 创建项目、无 `Ctrl+Enter` 提交需求（WishPage 的 textarea 有但不是全局）、无 `Escape` 关闭弹窗。
-
-### 3.4 弹窗/模态框没有统一的 Escape 关闭行为
-
-**现象**: TeamPage 的 MemberEditModal、WorkflowEditor、AcceptancePanel 等弹窗都没有监听 `Escape` 键。
-
-### 3.5 OutputPage 无代码高亮
-
-**现象**: CodeView 组件只是纯文本+行号，没有语法高亮。`detectLanguage()` 函数识别了 25+ 种语言但仅用于显示标签。
-
-### 3.6 响应式适配不完整
-
-**现象**: 
-- ProjectsPage 项目网格用 `xl:grid-cols-3`，但窄窗口下没有适配
-- WorkflowPage 临时任务 `grid-cols-5` 在窄窗口溢出
-- ContextPage 左侧 `w-72` 是固定宽度，无法折叠
-
-### 3.7 空状态设计不统一
-
-**现象**: 各页面的空状态设计风格差异大:
+**现象**: 各页面的空状态设计差异明显:
 - ProjectsPage: emoji + 两行文字
 - TeamPage 运行状态: emoji + 文字 + 副标题
 - DocsPage: 大 emoji + 标题 + 说明 + 底部 legend
 - WishPage: emoji + 文字
 
-### 3.8 无 Loading Skeleton/Placeholder
-
-**现象**: 所有页面在数据加载时要么显示 "加载中..." 文字，要么显示空状态。没有骨架屏。
-
-### 3.9 `any` 类型在 UI 层的遗留
-
-**现象**: 
-- `TeamPage`: `const [agents, setAgents] = useState<any[]>([])`
-- `BoardPage`: 缺少 `FeatureSessionSummary` 类型导入（编译时类型来自全局）
-- `TimelinePage`: `useState<any[]>([])` 出现 5 处
-- `AcceptancePanel`: `useState<any>(null)` for stats
-
-**影响**: 维护成本高，重构时容易引入运行时错误。
-
-### 3.10 GuidePage 教程内容与最新功能不同步
-
-**现象**: 
-- 快速上手中"界面导览"只列了 8 个页面，实际有 14 个
-- 未提及 v11 团队成员级 LLM 配置
-- 未提及 v12 工作流预设
-- 未提及 v13 GitHub 深度集成和密钥管理
-- 未提及 v14 Branch/PR 管理
-
-### 3.11 重复的 Markdown 渲染器
-
-**现象**: DocsPage 和 GuidePage 各自实现了一套 Markdown→HTML 渲染器（`renderMarkdown` 和 `renderGuideMarkdown`），逻辑高度重叠但分别维护。
-
-**建议**: 抽取为共享 `utils/markdown.ts`
+**建议**: 抽取统一的 `EmptyState` 组件，统一 emoji 大小、标题/副标题层级、操作按钮风格
 
 ---
 
-## 4. 用户旅程断点分析
+### 2.4 OutputPage 无代码语法高亮
+
+**现象**: CodeView 组件只是纯文本+行号，没有语法高亮。`detectLanguage()` 函数识别了 25+ 种语言但仅用于显示标签，没有实际用于渲染高亮。
+
+**建议**: 引入轻量级语法高亮方案（如 Prism.js 或 Shiki），利用已有的语言检测结果
+
+---
+
+### 2.5 MetaAgent 对话消息无 Markdown 渲染
+
+**现象**: MetaAgentChat 的回复直接用 `whitespace-pre-wrap` 显示纯文本，但 LLM 回复通常包含 Markdown 格式（标题、列表、代码块）。
+
+**影响**: 用户看到的是 `## 标题` 这样的原始文本而不是格式化内容，阅读体验差。
+
+**建议**: 复用 DocsPage 已有的 `renderMarkdown()` 函数渲染 assistant 消息
+
+---
+
+## 3. 用户旅程断点分析
 
 ### 旅程 A: 新用户首次使用
 
@@ -395,19 +196,9 @@ const base = `D:\\AutoMater-Projects\\${safeName}`;
 → 进入设置 → [P0: 配置门槛高] → 不理解三层模型 → 放弃/填错
 → [P0: 错误信息不友好] → 看到技术错误 → 彻底放弃
 ```
-**流失风险**: 极高。建议将 Onboarding + 一键配置 列为最高优先修复项。
+**流失风险**: 极高。Onboarding（可跳过）+ 一键配置是最高优先修复项。
 
-### 旅程 B: 配置完成后的首个项目
-
-```
-创建项目 → [P1: 路径硬编码] → D盘不存在则失败
-→ 进入许愿页 → 提交需求 → [P1: 4次IPC链] → 等待较久
-→ 跳到全景页 → [P0: 无Toast] → 不确定是否启动成功
-→ 等待 Agent 工作 → 去看板页 → [P1: 无拖拽] → 只能观看
-→ 项目完成 → 验收面板弹出 → [正常]
-```
-
-### 旅程 C: 导入已有项目
+### 旅程 B: 导入已有项目
 
 ```
 选择导入 → 选文件夹 → 点击导入 → [P0: 进度条假数据]
@@ -417,46 +208,33 @@ const base = `D:\\AutoMater-Projects\\${safeName}`;
 
 ---
 
-## 5. 优先行动建议
+## 4. 行动计划 — ✅ 已全部实施
 
-### 🔴 Sprint 1: 首次体验修复 (1-2 周)
+### Sprint 1: 基础设施 + 阻断修复
 
-| # | 任务 | 预估 |
-|---|------|------|
-| 1 | 全局 Toast 组件 + 替换所有 `alert()/confirm()` | 4h |
-| 2 | 错误码映射层 (至少覆盖 HTTP 40x/50x, 网络错误, LLM 特定错误) | 3h |
-| 3 | 所有删除操作加 confirm (项目/成员/工作流/任务) | 2h |
-| 4 | LLM 设置增加"一键配置"模式 + 验证合并到保存流程 | 4h |
-| 5 | 新手引导向导 (Welcome Modal, 3-5 步) | 6h |
-| 6 | 工作区路径改用动态默认值 | 1h |
+| # | 任务 | 状态 | 实施文件 |
+|---|------|------|---------|
+| 1 | 全局 Toast/Confirm 组件 + 替换所有 `alert()/confirm()` | ✅ | `stores/toast-store.ts` + `components/Toast.tsx` |
+| 2 | 错误码映射层 (HTTP 40x/50x, 网络错误, LLM 错误) | ✅ | `utils/errors.ts` — `humanizeError()` + `friendlyErrorMessage()` |
+| 3 | 所有删除操作加二次确认 (项目/成员/工作流/任务/需求/记忆) | ✅ | 6 处 `confirm()` 对话框 |
+| 4 | LLM 设置"一键配置"模式 + 验证合并到保存 | ✅ | `settings/LlmTab.tsx` — 快速/高级双模式 |
+| 5 | 可跳过的新手引导向导 (3 步) | ✅ | `components/Onboarding.tsx` + App localStorage 检测 |
+| 6 | 导入进度实时推送 + 完成通知 | ✅ | App.tsx 监听 `project:import-progress` → Toast |
+| 7 | 版本回退: 暂时隐藏空壳按钮 | ✅ | OutputPage + DocsPage 改为 toast 提示"即将上线" |
 
-### 🟡 Sprint 2: 核心流程打磨 (2-3 周)
+### Sprint 2: 体验打磨
 
-| # | 任务 | 预估 |
-|---|------|------|
-| 7 | 轮询优化 (Page Visibility API + 统一刷新间隔) | 3h |
-| 8 | 预算硬限制 (LLM调用前检查 + 超预算暂停) | 4h |
-| 9 | 隐藏 Placeholder 功能 (版本回退, 空文档分类, alert 压缩按钮) | 2h |
-| 10 | WishPage 提交原子化 + MetaAgent 消息 Markdown 渲染 | 4h |
-| 11 | 导入进度实时推送 | 3h |
-| 12 | TeamPage 默认 Tab 智能切换 | 0.5h |
-
-### 🟢 Sprint 3: 品质提升 (3-4 周)
-
-| # | 任务 | 预估 |
-|---|------|------|
-| 13 | 统一空状态设计 + Loading Skeleton | 4h |
-| 14 | 全局快捷键 + 弹窗 Escape | 3h |
-| 15 | GuidePage 教程内容更新至 v14 | 2h |
-| 16 | Markdown 渲染器抽取复用 | 1h |
-| 17 | UI 层 `any` 类型清理 | 3h |
-| 18 | 代码高亮 (OutputPage) | 2h |
+| # | 任务 | 状态 | 实施文件 |
+|---|------|------|---------|
+| 8 | 页面切换过渡动效 | ✅ | `index.css` — cubic-bezier 优化 + 新增动画类 |
+| 9 | 键盘快捷键 + 弹窗 Escape 统一 | ✅ | `hooks/useKeyboardShortcuts.ts` — Escape/Ctrl+N/M/,/数字 |
+| 10 | 统一 EmptyState 组件 | ✅ | `components/EmptyState.tsx` + 已替换 3 个页面 |
+| 11 | OutputPage 代码语法高亮 | ✅ | `OutputPage.tsx` — `highlightCode()` 内联高亮器 |
+| 12 | MetaAgent 消息 Markdown 渲染 | ✅ | `utils/markdown.ts` + WishPage + MetaAgentPanel |
 
 ---
 
-## 6. 亮点与肯定
-
-复盘同时也要记录做得好的部分:
+## 5. 亮点与肯定
 
 ✅ **WishPage 的停滞原因诊断 (stallDiagnosis)** — 自动分析每个 Feature 未推进的原因，对用户理解项目卡点非常有价值  
 ✅ **ContextPage 的三栏式设计** — 成员列表 / 模块列表 / 内容预览，信息层次清晰，交互流畅  
@@ -469,7 +247,7 @@ const base = `D:\\AutoMater-Projects\\${safeName}`;
 
 ---
 
-## 7. 附录: 审查范围
+## 6. 附录: 审查范围
 
 | 类型 | 数量 | 文件 |
 |------|------|------|
@@ -480,4 +258,4 @@ const base = `D:\\AutoMater-Projects\\${safeName}`;
 
 ---
 
-*报告生成: 2026-03-02 | 基于 v14.0 全量代码审读 | 产品经理视角*
+*报告生成: 2026-03-02 | 基于 v14.0→v15.0 全量代码审读 | 产品经理视角 | 12 项全部实施完成*
