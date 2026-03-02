@@ -322,7 +322,12 @@ interface BackupContent {
   totalCost?: number;
   model?: string;
   completed?: boolean;
-  messages?: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: Array<{ function?: { name: string; arguments: string } }> }>;
+  messages?: Array<{
+    role: string;
+    content: string;
+    tool_call_id?: string;
+    tool_calls?: Array<{ function?: { name: string; arguments: string } }>;
+  }>;
   metadata?: Record<string, unknown>;
 }
 
@@ -341,17 +346,28 @@ interface AutoMaterAPI {
     save(settings: AppSettings): Promise<{ success: boolean }>;
   };
   llm: {
-    testConnection(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; message: string }>;
+    testConnection(provider: {
+      type: string;
+      baseUrl: string;
+      apiKey: string;
+    }): Promise<{ success: boolean; message: string }>;
     chat(request: { model: string; messages: Array<{ role: string; content: string }> }): Promise<{ content: string }>;
-    listModels(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; models: string[] }>;
+    listModels(provider: {
+      type: string;
+      baseUrl: string;
+      apiKey: string;
+    }): Promise<{ success: boolean; models: string[] }>;
   };
   project: {
-    create(name: string, options?: {
-      workspacePath?: string;
-      gitMode?: string;
-      githubRepo?: string;
-      githubToken?: string;
-    }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
+    create(
+      name: string,
+      options?: {
+        workspacePath?: string;
+        gitMode?: string;
+        githubRepo?: string;
+        githubToken?: string;
+      },
+    ): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
     setWish(projectId: string, wish: string): Promise<{ success: boolean }>;
     start(projectId: string): Promise<{ success: boolean }>;
     list(): Promise<Array<ProjectRow>>;
@@ -359,9 +375,16 @@ interface AutoMaterAPI {
     getFeatures(projectId: string): Promise<Array<FeatureRow>>;
     resumeFeature(projectId: string, featureId: string): Promise<{ success: boolean; message?: string }>;
     getAgents(projectId: string): Promise<Array<TeamMember & { status?: string; current_task?: string }>>;
-    getLogs(projectId: string, options?: {
-      limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
-    }): Promise<{ rows: Array<LogRow>; total: number }>;
+    getLogs(
+      projectId: string,
+      options?: {
+        limit?: number;
+        offset?: number;
+        agentId?: string;
+        type?: string;
+        keyword?: string;
+      },
+    ): Promise<{ rows: Array<LogRow>; total: number }>;
     getStats(projectId: string): Promise<{ features: Record<string, number>; agents: Record<string, number> }>;
     /** 获取项目日志中出现过的所有 agent_id (不受筛选影响) */
     getLogAgentIds(projectId: string): Promise<string[]>;
@@ -375,9 +398,16 @@ interface AutoMaterAPI {
     getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
     getReactStates(projectId: string): Promise<Record<string, AgentReactState>>;
     /** v4.2: 用户验收 */
-    userAccept(projectId: string, accept: boolean, feedback?: string): Promise<{ success: boolean; status: string; feedback?: string }>;
+    userAccept(
+      projectId: string,
+      accept: boolean,
+      feedback?: string,
+    ): Promise<{ success: boolean; status: string; feedback?: string }>;
     /** v4.2: 获取 Feature 文档 (子需求 + 测试规格) */
-    getFeatureDocs(projectId: string, featureId: string): Promise<{ requirement: string | null; testSpec: string | null }>;
+    getFeatureDocs(
+      projectId: string,
+      featureId: string,
+    ): Promise<{ requirement: string | null; testSpec: string | null }>;
     /** v4.2: 获取设计文档 */
     getDesignDoc(projectId: string): Promise<string | null>;
     /** v4.2: 获取文档变更日志 */
@@ -402,25 +432,49 @@ interface AutoMaterAPI {
     getKnownIssues(projectId: string): Promise<{ success: boolean; issues?: string; error?: string }>;
     /** v7.0: 获取所有探针报告 */
     getProbeReports(projectId: string): Promise<{ success: boolean; reports?: unknown[]; error?: string }>;
+    /** v21.1: 查询当前导入进度（切页恢复用） */
+    getImportProgress(
+      projectId: string,
+    ): Promise<{ phase: number; step: string; progress: number; done?: boolean; error?: boolean } | null>;
     /** v9.1: 获取架构文档 (ARCHITECTURE.md) */
     getArchitectureDoc(projectId: string): Promise<{ success: boolean; content?: string; error?: string }>;
     /** v7.0: 检测增量变更 */
-    detectIncrementalChanges(projectId: string): Promise<{ success: boolean; changedFiles?: string[]; affectedProbeTypes?: string[]; needsFullReprobe?: boolean; reason?: string; error?: string }>;
+    detectIncrementalChanges(
+      projectId: string,
+    ): Promise<{
+      success: boolean;
+      changedFiles?: string[];
+      affectedProbeTypes?: string[];
+      needsFullReprobe?: boolean;
+      reason?: string;
+      error?: string;
+    }>;
     /** v7.0: 应用用户对模块图的校正 */
-    applyModuleCorrection(projectId: string, correction: Record<string, unknown>): Promise<{ success: boolean; graph?: unknown; error?: string }>;
+    applyModuleCorrection(
+      projectId: string,
+      correction: Record<string, unknown>,
+    ): Promise<{ success: boolean; graph?: unknown; error?: string }>;
     /** v7.0: 获取用户校正历史 */
     getUserCorrections(projectId: string): Promise<{ success: boolean; corrections?: unknown[]; error?: string }>;
     /** v16.0: 获取项目权限开关 */
-    getPermissions(projectId: string): Promise<{ externalRead: boolean; externalWrite: boolean; shellExec: boolean; readFileLineLimit?: number }>;
+    getPermissions(
+      projectId: string,
+    ): Promise<{ externalRead: boolean; externalWrite: boolean; shellExec: boolean; readFileLineLimit?: number }>;
     /** v16.0: 更新项目权限开关 */
-    updatePermissions(projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean; readFileLineLimit?: number }): Promise<{ success: boolean }>;
+    updatePermissions(
+      projectId: string,
+      permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean; readFileLineLimit?: number },
+    ): Promise<{ success: boolean }>;
   };
   /** v3.1: 需求队列 */
   wish: {
     create(projectId: string, content: string): Promise<{ success: boolean; wishId: string }>;
     list(projectId: string): Promise<WishItem[]>;
     get(wishId: string): Promise<WishItem | null>;
-    update(wishId: string, fields: Partial<{ status: string; pm_analysis: string; design_doc: string; content: string }>): Promise<{ success: boolean }>;
+    update(
+      wishId: string,
+      fields: Partial<{ status: string; pm_analysis: string; design_doc: string; content: string }>,
+    ): Promise<{ success: boolean }>;
     delete(wishId: string): Promise<{ success: boolean }>;
   };
   /** v3.1: 团队管理 */
@@ -432,28 +486,38 @@ interface AutoMaterAPI {
     delete(memberId: string): Promise<{ success: boolean }>;
     initDefaults(projectId: string): Promise<{ success: boolean; count?: number }>;
     /** v11.0: 测试成员级 LLM 连通性 (使用成员自己的配置, fallback 到全局) */
-    testMemberModel(memberId: string, config: MemberLLMConfig): Promise<{ success: boolean; message: string; model?: string }>;
+    testMemberModel(
+      memberId: string,
+      config: MemberLLMConfig,
+    ): Promise<{ success: boolean; message: string; model?: string }>;
   };
   workspace: {
     tree(projectId: string): Promise<{ success: boolean; tree: FileNode[] }>;
     readFile(projectId: string, relativePath: string): Promise<{ success: boolean; content: string }>;
     getPath(projectId: string): Promise<string | null>;
     /** v21.0: 项目内搜索 — 文件名 / 内容 (复用 Agent ripgrep 引擎) */
-    search(projectId: string, query: string, options?: {
-      mode?: 'filename' | 'content';
-      include?: string[];
-      caseSensitive?: boolean;
-      wholeWord?: boolean;
-      maxResults?: number;
-      context?: number;
-    }): Promise<WorkspaceSearchResult>;
+    search(
+      projectId: string,
+      query: string,
+      options?: {
+        mode?: 'filename' | 'content';
+        include?: string[];
+        caseSensitive?: boolean;
+        wholeWord?: boolean;
+        maxResults?: number;
+        context?: number;
+      },
+    ): Promise<WorkspaceSearchResult>;
     /** v21.0: 全局跨项目搜索 */
-    searchGlobal(query: string, options?: {
-      mode?: 'filename' | 'content';
-      caseSensitive?: boolean;
-      wholeWord?: boolean;
-      maxResultsPerProject?: number;
-    }): Promise<GlobalSearchResult>;
+    searchGlobal(
+      query: string,
+      options?: {
+        mode?: 'filename' | 'content';
+        caseSensitive?: boolean;
+        wholeWord?: boolean;
+        maxResultsPerProject?: number;
+      },
+    ): Promise<GlobalSearchResult>;
   };
   events: {
     query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<EventRow[]>;
@@ -488,8 +552,20 @@ interface AutoMaterAPI {
   /** v5.0: Skill 目录管理 */
   skill: {
     getDirectory(): Promise<string>;
-    setDirectory(dirPath: string): Promise<{ success: boolean; loaded: number; skills: SkillSummary[]; errors: Array<{ file: string; error: string }> }>;
-    reload(): Promise<{ success: boolean; loaded: number; skills: SkillSummary[]; errors: Array<{ file: string; error: string }> }>;
+    setDirectory(
+      dirPath: string,
+    ): Promise<{
+      success: boolean;
+      loaded: number;
+      skills: SkillSummary[];
+      errors: Array<{ file: string; error: string }>;
+    }>;
+    reload(): Promise<{
+      success: boolean;
+      loaded: number;
+      skills: SkillSummary[];
+      errors: Array<{ file: string; error: string }>;
+    }>;
     list(): Promise<SkillSummary[]>;
   };
 
@@ -528,8 +604,16 @@ interface AutoMaterAPI {
     saveConfig(config: Partial<MetaAgentConfig>): Promise<{ success: boolean; config: MetaAgentConfig }>;
     // Memory
     listMemories(category?: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
-    addMemory(memory: { category: string; content: string; source?: string; importance?: number }): Promise<MetaAgentMemoryRecord>;
-    updateMemory(id: string, updates: { content?: string; importance?: number; category?: string }): Promise<{ success: boolean }>;
+    addMemory(memory: {
+      category: string;
+      content: string;
+      source?: string;
+      importance?: number;
+    }): Promise<MetaAgentMemoryRecord>;
+    updateMemory(
+      id: string,
+      updates: { content?: string; importance?: number; category?: string },
+    ): Promise<{ success: boolean }>;
     deleteMemory(id: string): Promise<{ success: boolean }>;
     searchMemories(query: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
     getMemoryStats(): Promise<{ total: number; byCategory: Record<string, number> }>;
@@ -537,31 +621,57 @@ interface AutoMaterAPI {
     // Daemon (heartbeat/hooks/cron)
     getDaemonStatus(): Promise<MetaAgentDaemonStatus>;
     getDaemonConfig(): Promise<MetaAgentDaemonConfig>;
-    saveDaemonConfig(config: Partial<MetaAgentDaemonConfig>): Promise<{ success: boolean; config: MetaAgentDaemonConfig }>;
+    saveDaemonConfig(
+      config: Partial<MetaAgentDaemonConfig>,
+    ): Promise<{ success: boolean; config: MetaAgentDaemonConfig }>;
     startDaemon(): Promise<{ success: boolean }>;
     stopDaemon(): Promise<{ success: boolean }>;
     triggerHeartbeat(): Promise<{ success: boolean }>;
     getDaemonLogs(limit?: number): Promise<MetaAgentHeartbeatLog[]>;
     // v20.0: Chat Messages 持久化
     saveMessage(msg: {
-      id: string; sessionId: string; projectId: string | null;
-      role: 'user' | 'assistant' | 'system'; content: string;
-      triggeredWish?: boolean; attachments?: string;
+      id: string;
+      sessionId: string;
+      projectId: string | null;
+      role: 'user' | 'assistant' | 'system';
+      content: string;
+      triggeredWish?: boolean;
+      attachments?: string;
     }): Promise<{ success: boolean }>;
     updateMessage(id: string, updates: { content?: string; triggeredWish?: boolean }): Promise<{ success: boolean }>;
-    loadMessages(sessionId: string, limit?: number): Promise<Array<{
-      id: string; sessionId: string; projectId: string | null;
-      role: string; content: string; triggeredWish: boolean;
-      attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>;
-      createdAt: string;
-    }>>;
+    loadMessages(
+      sessionId: string,
+      limit?: number,
+    ): Promise<
+      Array<{
+        id: string;
+        sessionId: string;
+        projectId: string | null;
+        role: string;
+        content: string;
+        triggeredWish: boolean;
+        attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>;
+        createdAt: string;
+      }>
+    >;
     listChatSessions(projectId?: string | null, limit?: number): Promise<Array<SessionInfo & { title: string | null }>>;
     deleteSessionMessages(sessionId: string): Promise<{ success: boolean; deletedCount: number }>;
   };
 
   /** v6.0: 临时工作流 */
   ephemeralMission: {
-    create(projectId: string, type: string, config?: { scope?: string; tokenBudget?: number; ttlHours?: number; maxWorkers?: number; customInstruction?: string; archivePolicy?: 'keep-all' | 'keep-conclusion' | 'delete' }): Promise<{ success: boolean; missionId?: string; error?: string }>;
+    create(
+      projectId: string,
+      type: string,
+      config?: {
+        scope?: string;
+        tokenBudget?: number;
+        ttlHours?: number;
+        maxWorkers?: number;
+        customInstruction?: string;
+        archivePolicy?: 'keep-all' | 'keep-conclusion' | 'delete';
+      },
+    ): Promise<{ success: boolean; missionId?: string; error?: string }>;
     get(missionId: string): Promise<MissionRecord | null>;
     list(projectId: string): Promise<MissionRecord[]>;
     getTasks(missionId: string): Promise<MissionTaskRecord[]>;
@@ -577,8 +687,14 @@ interface AutoMaterAPI {
     getActive(projectId: string): Promise<WorkflowPresetInfo | null>;
     get(presetId: string): Promise<WorkflowPresetInfo | null>;
     activate(projectId: string, presetId: string): Promise<{ success: boolean }>;
-    create(projectId: string, data: { name: string; description?: string; icon?: string; stages: WorkflowStageInfo[] }): Promise<WorkflowPresetInfo>;
-    update(presetId: string, updates: { name?: string; description?: string; icon?: string; stages?: WorkflowStageInfo[] }): Promise<WorkflowPresetInfo | null>;
+    create(
+      projectId: string,
+      data: { name: string; description?: string; icon?: string; stages: WorkflowStageInfo[] },
+    ): Promise<WorkflowPresetInfo>;
+    update(
+      presetId: string,
+      updates: { name?: string; description?: string; icon?: string; stages?: WorkflowStageInfo[] },
+    ): Promise<WorkflowPresetInfo | null>;
     delete(presetId: string): Promise<{ success: boolean; error?: string }>;
     duplicate(presetId: string): Promise<WorkflowPresetInfo | { success: false; error: string }>;
     availableStages(): Promise<WorkflowStageInfo[]>;
@@ -604,7 +720,11 @@ interface AutoMaterAPI {
 
   /** v5.6: 上下文管理 */
   context: {
-    previewBaseline(projectId: string, role: string, tokenBudget?: number): Promise<{ success: boolean; snapshot?: ContextSnapshot; error?: string }>;
+    previewBaseline(
+      projectId: string,
+      role: string,
+      tokenBudget?: number,
+    ): Promise<{ success: boolean; snapshot?: ContextSnapshot; error?: string }>;
   };
 
   /** v8.0: Session 管理 + v8.1: Feature-Session 关联 */
@@ -616,10 +736,19 @@ interface AutoMaterAPI {
     listAll(limit?: number): Promise<SessionInfo[]>;
     readBackup(sessionId: string): Promise<BackupContent | null>;
     openBackupFolder(sessionId: string): Promise<{ success: boolean; error?: string }>;
-    backupStats(): Promise<{ totalSessions: number; totalBackupFiles: number; totalBackupSizeBytes: number; oldestBackup: string | null; newestBackup: string | null }>;
+    backupStats(): Promise<{
+      totalSessions: number;
+      totalBackupFiles: number;
+      totalBackupSizeBytes: number;
+      oldestBackup: string | null;
+      newestBackup: string | null;
+    }>;
     cleanup(keepDays?: number): Promise<{ success: boolean; deletedFolders: number }>;
     /** v8.1: 获取某个 Feature 关联的所有 Sessions */
-    featureSessions(projectId: string, featureId: string): Promise<Array<FeatureSessionLink & { session: SessionInfo | null }>>;
+    featureSessions(
+      projectId: string,
+      featureId: string,
+    ): Promise<Array<FeatureSessionLink & { session: SessionInfo | null }>>;
     /** v8.1: 获取某个 Session 关联的所有 Features */
     sessionFeatures(sessionId: string): Promise<FeatureSessionLink[]>;
     /** v8.1: 获取项目所有 Feature-Session 关联 */
@@ -744,9 +873,9 @@ interface TeamMember {
   role: string;
   name: string;
   model: string | null;
-  capabilities: string;  // JSON array string
+  capabilities: string; // JSON array string
   system_prompt: string | null;
-  context_files: string;  // JSON array string
+  context_files: string; // JSON array string
   max_context_tokens: number;
   created_at: string;
   /** v11.0: 成员级 LLM 配置 (JSON string or null) */
@@ -1036,4 +1165,3 @@ interface WorkflowPresetInfo {
   createdAt: string;
   updatedAt: string;
 }
-

@@ -8,17 +8,41 @@ import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { toErrorMessage, createLogger } from '../engine/logger';
-import { assertProjectId, assertNonEmptyString, assertString, assertObject, assertOptionalString } from './ipc-validator';
-import { runOrchestrator, stopOrchestrator, getContextSnapshots, getAgentReactStates, emitMemberAdded } from '../engine/orchestrator';
+import {
+  assertProjectId,
+  assertNonEmptyString,
+  assertString,
+  assertObject,
+  assertOptionalString,
+} from './ipc-validator';
+import {
+  runOrchestrator,
+  stopOrchestrator,
+  getContextSnapshots,
+  getAgentReactStates,
+  emitMemberAdded,
+} from '../engine/orchestrator';
 import { runChangeRequest } from '../engine/change-manager';
-import { initRepo, commit as gitCommit, getLog as gitLog, testGitHubConnection, type GitProviderConfig } from '../engine/git-provider';
+import {
+  initRepo,
+  commit as gitCommit,
+  getLog as gitLog,
+  testGitHubConnection,
+  type GitProviderConfig,
+} from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 import { importProject } from '../engine/project-importer';
 import { collectBaselineContext, loadModuleGraph, loadKnownIssues } from '../engine/context-collector';
-import { detectIncrementalChanges, applyUserCorrection, getUserCorrections, type UserCorrection } from '../engine/probe-cache';
+import {
+  detectIncrementalChanges,
+  applyUserCorrection,
+  getUserCorrections,
+  type UserCorrection,
+} from '../engine/probe-cache';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getSettings } from '../engine/llm-client';
+import { updateAgentStats, spawnAgent } from '../engine/agent-manager';
 import {
   setSecret as setSecretFn,
   getSecret as getSecretFn,
@@ -32,18 +56,36 @@ import { safeJsonParse } from '../engine/safe-json';
 const importAbortControllers = new Map<string, AbortController>();
 /** v7.1: Track active probe LLM streams for proper stream-start/end lifecycle */
 const activeProbeStreams = new Set<string>();
+/** v21.1: 跟踪当前导入进度，供前端切页回来后查询恢复 */
+const importProgressCache = new Map<
+  string,
+  { phase: number; step: string; progress: number; done?: boolean; error?: boolean }
+>();
 const log = createLogger('ipc:project');
 
 /** DB row types for typed queries */
 interface ProjectDbRow {
-  id: string; name: string; wish: string; status: string;
-  workspace_path: string | null; config: string;
-  git_mode: string; github_repo: string | null | undefined; github_token: string | null | undefined;
-  created_at: string; updated_at: string;
+  id: string;
+  name: string;
+  wish: string;
+  status: string;
+  workspace_path: string | null;
+  config: string;
+  git_mode: string;
+  github_repo: string | null | undefined;
+  github_token: string | null | undefined;
+  created_at: string;
+  updated_at: string;
 }
 interface ChangeRequestRow {
-  id: string; project_id: string; description: string; status: string;
-  impact_analysis: string | null; affected_features: string; created_at: string; completed_at: string | null;
+  id: string;
+  project_id: string;
+  description: string;
+  status: string;
+  impact_analysis: string | null;
+  affected_features: string;
+  created_at: string;
+  completed_at: string | null;
 }
 
 function generateId(): string {
@@ -55,7 +97,9 @@ function generateId(): string {
 // ═══════════════════════════════════════
 const DEFAULT_TEAM = [
   {
-    role: 'pm', name: '产品经理', model: '',
+    role: 'pm',
+    name: '产品经理',
+    model: '',
     capabilities: ['需求分析', '功能拆解', 'PRD 撰写', '验收标准', '风险评估', '用户故事'],
     system_prompt: `你是一位资深产品经理（CPO 级别），拥有 10+ 年软件产品全生命周期管理经验。
 
@@ -82,7 +126,9 @@ const DEFAULT_TEAM = [
 - 发现需求矛盾时必须标注并请求澄清`,
   },
   {
-    role: 'architect', name: '架构师', model: '',
+    role: 'architect',
+    name: '架构师',
+    model: '',
     capabilities: ['系统设计', '技术选型', 'API 设计', '目录结构', '编码规范', '性能预算'],
     system_prompt: `你是一位资深软件架构师（Principal Engineer 级别），擅长在简洁性与可扩展性之间取得平衡。
 
@@ -104,7 +150,9 @@ const DEFAULT_TEAM = [
 - 不引入用户未要求的组件或框架`,
   },
   {
-    role: 'developer', name: '前端开发者', model: '',
+    role: 'developer',
+    name: '前端开发者',
+    model: '',
     capabilities: ['前端开发', 'UI 实现', '组件开发', '状态管理', '响应式设计'],
     system_prompt: `你是一位专业的前端开发工程师，遵循 ReAct 工作流纪律。
 
@@ -126,7 +174,9 @@ const DEFAULT_TEAM = [
 - 变量名表意，函数不超过 50 行`,
   },
   {
-    role: 'developer', name: '后端开发者', model: '',
+    role: 'developer',
+    name: '后端开发者',
+    model: '',
     capabilities: ['后端开发', 'API 实现', '数据库', '业务逻辑', '错误处理'],
     system_prompt: `你是一位专业的后端开发工程师，遵循 ReAct 工作流纪律。
 
@@ -148,7 +198,9 @@ const DEFAULT_TEAM = [
 - SQL 查询参数化，禁止字符串拼接`,
   },
   {
-    role: 'developer', name: '全栈开发者', model: '',
+    role: 'developer',
+    name: '全栈开发者',
+    model: '',
     capabilities: ['全栈开发', '代码编写', '调试', '工具调用', '集成测试'],
     system_prompt: `你是一位全栈开发工程师，擅长端到端特性实现，遵循 ReAct 工作流纪律。
 
@@ -170,7 +222,9 @@ const DEFAULT_TEAM = [
 - 变量名表意，函数不超过 50 行`,
   },
   {
-    role: 'qa', name: 'QA 工程师', model: '',
+    role: 'qa',
+    name: 'QA 工程师',
+    model: '',
     capabilities: ['代码审查', '测试执行', 'Bug 检测', '安全扫描', '验收标准检查', '回归测试'],
     system_prompt: `你是一位严格的 QA 工程师，通过系统性检查确保代码质量。
 
@@ -194,7 +248,9 @@ const DEFAULT_TEAM = [
 - 分数 < 60 → fail`,
   },
   {
-    role: 'devops', name: 'DevOps 工程师', model: '',
+    role: 'devops',
+    name: 'DevOps 工程师',
+    model: '',
     capabilities: ['CI/CD', '部署配置', '构建脚本', '环境管理', '监控告警', '容器化'],
     system_prompt: `你是一位 DevOps 工程师，确保项目的构建、测试、部署流程顺畅。
 
@@ -218,11 +274,18 @@ const DEFAULT_TEAM = [
 ];
 
 /** 创建默认团队（复用于 project:create 和 team:init-defaults） */
-function initDefaultTeam(db: { prepare(sql: string): { run(...args: unknown[]): unknown; get(...args: unknown[]): unknown } }, projectId: string): { success: boolean; count: number; message?: string } {
-  const existing = db.prepare('SELECT COUNT(*) as count FROM team_members WHERE project_id = ?').get(projectId) as { count: number };
+function initDefaultTeam(
+  db: { prepare(sql: string): { run(...args: unknown[]): unknown; get(...args: unknown[]): unknown } },
+  projectId: string,
+): { success: boolean; count: number; message?: string } {
+  const existing = db.prepare('SELECT COUNT(*) as count FROM team_members WHERE project_id = ?').get(projectId) as {
+    count: number;
+  };
   if (existing.count > 0) return { success: true, count: existing.count, message: 'already initialized' };
 
-  const stmt = db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 256000)`);
+  const stmt = db.prepare(
+    `INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 256000)`,
+  );
   for (const d of DEFAULT_TEAM) {
     const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     stmt.run(id, projectId, d.role, d.name, d.model, JSON.stringify(d.capabilities), d.system_prompt);
@@ -230,14 +293,22 @@ function initDefaultTeam(db: { prepare(sql: string): { run(...args: unknown[]): 
   return { success: true, count: DEFAULT_TEAM.length };
 }
 
-function getGitConfig(project: { id?: string; git_mode?: string; workspace_path: string; github_repo?: string; github_token?: string }): GitProviderConfig {
+function getGitConfig(project: {
+  id?: string;
+  git_mode?: string;
+  workspace_path: string;
+  github_repo?: string;
+  github_token?: string;
+}): GitProviderConfig {
   // v13.0: Prefer encrypted token from secret-manager, fallback to legacy plaintext column
   let token = project.github_token || undefined;
   if (project.id) {
     try {
       const encrypted = getSecretFn(project.id, 'github_token');
       if (encrypted) token = encrypted;
-    } catch { /* secret-manager not available, use legacy */ }
+    } catch {
+      /* secret-manager not available, use legacy */
+    }
   }
   return {
     mode: (project.git_mode || 'local') as import('../engine/git-provider').GitMode,
@@ -248,15 +319,21 @@ function getGitConfig(project: { id?: string; git_mode?: string; workspace_path:
 }
 
 export function setupProjectHandlers() {
-
   // ── 启动时清理: 重置残留的 analyzing 状态 ──
   // 应用重启后，之前正在分析的项目进程已丢失，把状态改为 paused 让用户可重新启动
   try {
     const db = getDb();
-    const stuckProjects = db.prepare("SELECT id, name FROM projects WHERE status = 'analyzing'").all() as { id: string; name: string }[];
+    const stuckProjects = db.prepare("SELECT id, name FROM projects WHERE status = 'analyzing'").all() as {
+      id: string;
+      name: string;
+    }[];
     if (stuckProjects.length > 0) {
-      log.info(`Resetting ${stuckProjects.length} stuck analyzing project(s)`, { projects: stuckProjects.map(p => p.name) });
-      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE status = 'analyzing'").run();
+      log.info(`Resetting ${stuckProjects.length} stuck analyzing project(s)`, {
+        projects: stuckProjects.map(p => p.name),
+      });
+      db.prepare(
+        "UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE status = 'analyzing'",
+      ).run();
       for (const p of stuckProjects) {
         addLog(p.id, 'system', 'info', '🔄 应用重启：分析状态已重置，可点击"启动"重新分析');
       }
@@ -266,68 +343,84 @@ export function setupProjectHandlers() {
   }
 
   // ── 创建项目 ──
-  ipcMain.handle('project:create', async (_event, name: unknown, options?: {
-    workspacePath?: string;
-    gitMode?: string;
-    githubRepo?: string;
-    githubToken?: string;
-    importExisting?: boolean;
-    historyPath?: string;
-  }) => {
-    assertNonEmptyString('project:create', 'name', name);
-    const db = getDb();
-    const id = generateId();
-    const displayName = name.length > 50 ? name.slice(0, 50) + '...' : name;
-    const gitMode = options?.gitMode || 'local';
-    const githubRepo = options?.githubRepo || null;
-    const githubToken = options?.githubToken || null;
-    const isImport = options?.importExisting === true;
+  ipcMain.handle(
+    'project:create',
+    async (
+      _event,
+      name: unknown,
+      options?: {
+        workspacePath?: string;
+        gitMode?: string;
+        githubRepo?: string;
+        githubToken?: string;
+        importExisting?: boolean;
+        historyPath?: string;
+      },
+    ) => {
+      assertNonEmptyString('project:create', 'name', name);
+      const db = getDb();
+      const id = generateId();
+      const displayName = name.length > 50 ? name.slice(0, 50) + '...' : name;
+      const gitMode = options?.gitMode || 'local';
+      const githubRepo = options?.githubRepo || null;
+      const githubToken = options?.githubToken || null;
+      const isImport = options?.importExisting === true;
 
-    // 工作区目录: 用户指定 > 默认
-    let workspacePath: string;
-    if (options?.workspacePath?.trim()) {
-      workspacePath = options.workspacePath.trim();
-    } else {
-      const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
-      workspacePath = path.join(workspacesRoot, id);
-    }
-    fs.mkdirSync(workspacePath, { recursive: true });
+      // 工作区目录: 用户指定 > 默认
+      let workspacePath: string;
+      if (options?.workspacePath?.trim()) {
+        workspacePath = options.workspacePath.trim();
+      } else {
+        const workspacesRoot = path.join(app.getPath('userData'), 'workspaces');
+        workspacePath = path.join(workspacesRoot, id);
+      }
+      fs.mkdirSync(workspacePath, { recursive: true });
 
-    // 导入已有项目时不执行 git init（项目已有自己的 git）
-    if (!isImport) {
-      await initRepo({ mode: gitMode as GitProviderConfig['mode'], workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
-    }
+      // 导入已有项目时不执行 git init（项目已有自己的 git）
+      if (!isImport) {
+        await initRepo({
+          mode: gitMode as GitProviderConfig['mode'],
+          workspacePath,
+          githubRepo: githubRepo || undefined,
+          githubToken: githubToken || undefined,
+        });
+      }
 
-    // 导入项目用 analyzing 状态; 新项目用 initializing
-    const initialStatus = isImport ? 'analyzing' : 'initializing';
-    // v5.4: 持久标记项目类型, 用于 error 后重试时路由到正确流程
-    const configJson = isImport ? JSON.stringify({ importExisting: true }) : '{}';
+      // 导入项目用 analyzing 状态; 新项目用 initializing
+      const initialStatus = isImport ? 'analyzing' : 'initializing';
+      // v5.4: 持久标记项目类型, 用于 error 后重试时路由到正确流程
+      const configJson = isImport ? JSON.stringify({ importExisting: true }) : '{}';
 
-    db.prepare(`
+      db.prepare(
+        `
       INSERT INTO projects (id, name, wish, status, workspace_path, config, git_mode, github_repo)
       VALUES (?, ?, '', ?, ?, ?, ?, ?)
-    `).run(id, displayName, initialStatus, workspacePath, configJson, gitMode, githubRepo);
+    `,
+      ).run(id, displayName, initialStatus, workspacePath, configJson, gitMode, githubRepo);
 
-    // v13.0: Store github_token via secret-manager (encrypted) instead of plaintext in projects table
-    if (githubToken) {
-      try {
-        setSecretFn(id, 'github_token', githubToken, 'github');
-      } catch (err) {
-        log.warn('Failed to store github_token in secret-manager, falling back to projects table', { error: String(err) });
-        db.prepare('UPDATE projects SET github_token = ? WHERE id = ?').run(githubToken, id);
+      // v13.0: Store github_token via secret-manager (encrypted) instead of plaintext in projects table
+      if (githubToken) {
+        try {
+          setSecretFn(id, 'github_token', githubToken, 'github');
+        } catch (err) {
+          log.warn('Failed to store github_token in secret-manager, falling back to projects table', {
+            error: String(err),
+          });
+          db.prepare('UPDATE projects SET github_token = ? WHERE id = ?').run(githubToken, id);
+        }
       }
-    }
 
-    // ── 自动创建默认团队 ──
-    try {
-      const initResult = initDefaultTeam(db, id);
-      log.info(`Auto-initialized team for ${id}`, { count: initResult.count });
-    } catch (err) {
-      log.error('Failed to auto-init team', err);
-    }
+      // ── 自动创建默认团队 ──
+      try {
+        const initResult = initDefaultTeam(db, id);
+        log.info(`Auto-initialized team for ${id}`, { count: initResult.count });
+      } catch (err) {
+        log.error('Failed to auto-init team', err);
+      }
 
-    return { success: true, projectId: id, name: displayName, workspacePath };
-  });
+      return { success: true, projectId: id, name: displayName, workspacePath };
+    },
+  );
 
   // ── 设置/更新项目需求 (legacy: 更新 projects.wish 字段) ──
   ipcMain.handle('project:set-wish', async (_event, projectId: string, wish: string) => {
@@ -339,18 +432,34 @@ export function setupProjectHandlers() {
   });
 
   // v16.0: 更新项目权限开关 (存储在 config JSON 中)
-  ipcMain.handle('project:update-permissions', async (_event, projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }) => {
-    assertProjectId('project:update-permissions', projectId);
-    assertObject('project:update-permissions', 'permissions', permissions);
-    const db = getDb();
-    const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as { config: string } | undefined;
-    if (!row) return { success: false, error: 'Project not found' };
-    let config: Record<string, unknown> = {};
-    try { config = JSON.parse(row.config || '{}'); } catch { /* silent */ }
-    config.permissions = permissions;
-    db.prepare('UPDATE projects SET config = ?, updated_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(config), projectId);
-    return { success: true };
-  });
+  ipcMain.handle(
+    'project:update-permissions',
+    async (
+      _event,
+      projectId: string,
+      permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean },
+    ) => {
+      assertProjectId('project:update-permissions', projectId);
+      assertObject('project:update-permissions', 'permissions', permissions);
+      const db = getDb();
+      const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as
+        | { config: string }
+        | undefined;
+      if (!row) return { success: false, error: 'Project not found' };
+      let config: Record<string, unknown> = {};
+      try {
+        config = JSON.parse(row.config || '{}');
+      } catch {
+        /* silent */
+      }
+      config.permissions = permissions;
+      db.prepare("UPDATE projects SET config = ?, updated_at = datetime('now') WHERE id = ?").run(
+        JSON.stringify(config),
+        projectId,
+      );
+      return { success: true };
+    },
+  );
 
   // v16.0: 获取项目权限开关
   ipcMain.handle('project:get-permissions', async (_event, projectId: string) => {
@@ -361,7 +470,8 @@ export function setupProjectHandlers() {
     try {
       const config = JSON.parse(row.config || '{}');
       return config.permissions || { externalRead: false, externalWrite: false, shellExec: false };
-    } catch { /* silent: 权限config解析失败,使用默认值 */
+    } catch {
+      /* silent: 权限config解析失败,使用默认值 */
       return { externalRead: false, externalWrite: false, shellExec: false };
     }
   });
@@ -393,24 +503,46 @@ export function setupProjectHandlers() {
   });
 
   /** 更新需求状态 / PM 分析 / 设计文档 */
-  ipcMain.handle('wish:update', (_event, wishId: string, fields: {
-    status?: string; pm_analysis?: string; design_doc?: string; content?: string;
-  }) => {
-    assertNonEmptyString('wish:update', 'wishId', wishId);
-    assertObject('wish:update', 'fields', fields);
-    const db = getDb();
-    const sets: string[] = [];
-    const vals: Array<string | number | null> = [];
-    if (fields.status !== undefined) { sets.push('status = ?'); vals.push(fields.status); }
-    if (fields.pm_analysis !== undefined) { sets.push('pm_analysis = ?'); vals.push(fields.pm_analysis); }
-    if (fields.design_doc !== undefined) { sets.push('design_doc = ?'); vals.push(fields.design_doc); }
-    if (fields.content !== undefined) { sets.push('content = ?'); vals.push(fields.content); }
-    if (sets.length === 0) return { success: false };
-    sets.push("updated_at = datetime('now')");
-    vals.push(wishId);
-    db.prepare(`UPDATE wishes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    return { success: true };
-  });
+  ipcMain.handle(
+    'wish:update',
+    (
+      _event,
+      wishId: string,
+      fields: {
+        status?: string;
+        pm_analysis?: string;
+        design_doc?: string;
+        content?: string;
+      },
+    ) => {
+      assertNonEmptyString('wish:update', 'wishId', wishId);
+      assertObject('wish:update', 'fields', fields);
+      const db = getDb();
+      const sets: string[] = [];
+      const vals: Array<string | number | null> = [];
+      if (fields.status !== undefined) {
+        sets.push('status = ?');
+        vals.push(fields.status);
+      }
+      if (fields.pm_analysis !== undefined) {
+        sets.push('pm_analysis = ?');
+        vals.push(fields.pm_analysis);
+      }
+      if (fields.design_doc !== undefined) {
+        sets.push('design_doc = ?');
+        vals.push(fields.design_doc);
+      }
+      if (fields.content !== undefined) {
+        sets.push('content = ?');
+        vals.push(fields.content);
+      }
+      if (sets.length === 0) return { success: false };
+      sets.push("updated_at = datetime('now')");
+      vals.push(wishId);
+      db.prepare(`UPDATE wishes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+      return { success: true };
+    },
+  );
 
   /** 删除需求 */
   ipcMain.handle('wish:delete', (_event, wishId: string) => {
@@ -430,130 +562,210 @@ export function setupProjectHandlers() {
   });
 
   /** 新增成员 — v9.0: 成功后发 team:member-added 事件 (热加入) */
-  ipcMain.handle('team:add', (_event, projectId: string, member: {
-    role: string; name: string; model?: string;
-    capabilities?: string[]; system_prompt?: string; context_files?: string[];
-    max_context_tokens?: number;
-  }) => {
-    assertProjectId('team:add', projectId);
-    assertObject('team:add', 'member', member);
-    const db = getDb();
-    const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
-    db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      id, projectId, member.role, member.name,
-      member.model || null,
-      JSON.stringify(member.capabilities || []),
-      member.system_prompt || null,
-      JSON.stringify(member.context_files || []),
-      member.max_context_tokens || 256000,
-    );
+  ipcMain.handle(
+    'team:add',
+    (
+      _event,
+      projectId: string,
+      member: {
+        role: string;
+        name: string;
+        model?: string;
+        capabilities?: string[];
+        system_prompt?: string;
+        context_files?: string[];
+        max_context_tokens?: number;
+      },
+    ) => {
+      assertProjectId('team:add', projectId);
+      assertObject('team:add', 'member', member);
+      const db = getDb();
+      const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+      db.prepare(
+        `INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        projectId,
+        member.role,
+        member.name,
+        member.model || null,
+        JSON.stringify(member.capabilities || []),
+        member.system_prompt || null,
+        JSON.stringify(member.context_files || []),
+        member.max_context_tokens || 256000,
+      );
 
-    // v9.0: 事件驱动热加入 — 通知所有窗口 + 主进程编排器
-    const payload = { projectId, memberId: id, role: member.role, name: member.name };
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('team:member-added', payload);
-    }
-    // 触发主进程内部事件 — orchestrator 监听此事件决定是否 spawn worker
-    emitMemberAdded(payload);
+      // v9.0: 事件驱动热加入 — 通知所有窗口 + 主进程编排器
+      const payload = { projectId, memberId: id, role: member.role, name: member.name };
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('team:member-added', payload);
+      }
+      // 触发主进程内部事件 — orchestrator 监听此事件决定是否 spawn worker
+      emitMemberAdded(payload);
 
-    return { success: true, memberId: id };
-  });
+      return { success: true, memberId: id };
+    },
+  );
 
   /** 更新成员 — v11.0: +llm_config/mcp_servers/skills */
-  ipcMain.handle('team:update', (_event, memberId: string, fields: {
-    role?: string; name?: string; model?: string;
-    capabilities?: string[]; system_prompt?: string; context_files?: string[];
-    max_context_tokens?: number;
-    llm_config?: string | null;      // v11.0: JSON string or null
-    mcp_servers?: string | null;     // v11.0: JSON string or null
-    skills?: string | null;          // v11.0: JSON string or null
-    max_iterations?: number;         // v18.0: 成员级最大迭代轮数
-  }) => {
-    assertNonEmptyString('team:update', 'memberId', memberId);
-    assertObject('team:update', 'fields', fields);
-    const db = getDb();
-    const sets: string[] = [];
-    const vals: Array<string | number | null> = [];
-    if (fields.role !== undefined) { sets.push('role = ?'); vals.push(fields.role); }
-    if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
-    if (fields.model !== undefined) { sets.push('model = ?'); vals.push(fields.model); }
-    if (fields.capabilities !== undefined) { sets.push('capabilities = ?'); vals.push(JSON.stringify(fields.capabilities)); }
-    if (fields.system_prompt !== undefined) { sets.push('system_prompt = ?'); vals.push(fields.system_prompt); }
-    if (fields.context_files !== undefined) { sets.push('context_files = ?'); vals.push(JSON.stringify(fields.context_files)); }
-    if (fields.max_context_tokens !== undefined) { sets.push('max_context_tokens = ?'); vals.push(fields.max_context_tokens); }
-    // v11.0: 成员级独立配置
-    if (fields.llm_config !== undefined) { sets.push('llm_config = ?'); vals.push(fields.llm_config); }
-    if (fields.mcp_servers !== undefined) { sets.push('mcp_servers = ?'); vals.push(fields.mcp_servers); }
-    if (fields.skills !== undefined) { sets.push('skills = ?'); vals.push(fields.skills); }
-    // v18.0: 成员级最大迭代轮数
-    if (fields.max_iterations !== undefined) { sets.push('max_iterations = ?'); vals.push(fields.max_iterations); }
-    if (sets.length === 0) return { success: false };
-    vals.push(memberId);
-    db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    return { success: true };
-  });
+  ipcMain.handle(
+    'team:update',
+    (
+      _event,
+      memberId: string,
+      fields: {
+        role?: string;
+        name?: string;
+        model?: string;
+        capabilities?: string[];
+        system_prompt?: string;
+        context_files?: string[];
+        max_context_tokens?: number;
+        llm_config?: string | null; // v11.0: JSON string or null
+        mcp_servers?: string | null; // v11.0: JSON string or null
+        skills?: string | null; // v11.0: JSON string or null
+        max_iterations?: number; // v18.0: 成员级最大迭代轮数
+      },
+    ) => {
+      assertNonEmptyString('team:update', 'memberId', memberId);
+      assertObject('team:update', 'fields', fields);
+      const db = getDb();
+      const sets: string[] = [];
+      const vals: Array<string | number | null> = [];
+      if (fields.role !== undefined) {
+        sets.push('role = ?');
+        vals.push(fields.role);
+      }
+      if (fields.name !== undefined) {
+        sets.push('name = ?');
+        vals.push(fields.name);
+      }
+      if (fields.model !== undefined) {
+        sets.push('model = ?');
+        vals.push(fields.model);
+      }
+      if (fields.capabilities !== undefined) {
+        sets.push('capabilities = ?');
+        vals.push(JSON.stringify(fields.capabilities));
+      }
+      if (fields.system_prompt !== undefined) {
+        sets.push('system_prompt = ?');
+        vals.push(fields.system_prompt);
+      }
+      if (fields.context_files !== undefined) {
+        sets.push('context_files = ?');
+        vals.push(JSON.stringify(fields.context_files));
+      }
+      if (fields.max_context_tokens !== undefined) {
+        sets.push('max_context_tokens = ?');
+        vals.push(fields.max_context_tokens);
+      }
+      // v11.0: 成员级独立配置
+      if (fields.llm_config !== undefined) {
+        sets.push('llm_config = ?');
+        vals.push(fields.llm_config);
+      }
+      if (fields.mcp_servers !== undefined) {
+        sets.push('mcp_servers = ?');
+        vals.push(fields.mcp_servers);
+      }
+      if (fields.skills !== undefined) {
+        sets.push('skills = ?');
+        vals.push(fields.skills);
+      }
+      // v18.0: 成员级最大迭代轮数
+      if (fields.max_iterations !== undefined) {
+        sets.push('max_iterations = ?');
+        vals.push(fields.max_iterations);
+      }
+      if (sets.length === 0) return { success: false };
+      vals.push(memberId);
+      db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+      return { success: true };
+    },
+  );
 
   /** v11.0: 测试成员级 LLM 连通性 */
-  ipcMain.handle('team:test-member-model', async (_event, _memberId: string, config: {
-    provider?: string; apiKey?: string; baseUrl?: string; model?: string;
-  }) => {
-    assertObject('team:test-member-model', 'config', config);
-    // 合并: 成员配置 > 全局配置
-    const globalSettings = getSettings() || { llmProvider: 'openai' as const, apiKey: '', baseUrl: 'https://api.openai.com', strongModel: '', workerModel: '', workerCount: 0, dailyBudgetUsd: 0 };
-    const provider = config.provider || globalSettings.llmProvider;
-    const apiKey = config.apiKey || globalSettings.apiKey;
-    const baseUrl = (config.baseUrl || globalSettings.baseUrl).trim().replace(/\/+$/, '').replace(/\/v1$/, '');
-    const model = config.model || (provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : globalSettings.strongModel || 'gpt-4o-mini');
+  ipcMain.handle(
+    'team:test-member-model',
+    async (
+      _event,
+      _memberId: string,
+      config: {
+        provider?: string;
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+      },
+    ) => {
+      assertObject('team:test-member-model', 'config', config);
+      // 合并: 成员配置 > 全局配置
+      const globalSettings = getSettings() || {
+        llmProvider: 'openai' as const,
+        apiKey: '',
+        baseUrl: 'https://api.openai.com',
+        strongModel: '',
+        workerModel: '',
+        workerCount: 0,
+        dailyBudgetUsd: 0,
+      };
+      const provider = config.provider || globalSettings.llmProvider;
+      const apiKey = config.apiKey || globalSettings.apiKey;
+      const baseUrl = (config.baseUrl || globalSettings.baseUrl).trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+      const model =
+        config.model ||
+        (provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : globalSettings.strongModel || 'gpt-4o-mini');
 
-    if (!apiKey) {
-      return { success: false, message: '未配置 API Key (成员级或全局)', model };
-    }
-
-    try {
-      if (provider === 'anthropic') {
-        const res = await fetch(`${baseUrl}/v1/messages`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 10,
-            messages: [{ role: 'user', content: 'hi' }],
-          }),
-        });
-        if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
-        const text = await res.text();
-        return { success: false, message: `❌ ${res.status}: ${text.slice(0, 200)}`, model };
-      } else {
-        // OpenAI 兼容: 用指定模型发一条轻量 chat
-        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 5,
-            messages: [{ role: 'user', content: 'hi' }],
-          }),
-        });
-        if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
-        const text = await res.text();
-        if (res.status === 401 || res.status === 403) {
-          return { success: false, message: `❌ 认证失败 (${res.status}): ${text.slice(0, 200)}`, model };
-        }
-        // 404 model not found 等 — 认证OK但模型有问题
-        return { success: false, message: `⚠️ 连接OK但模型响应异常 (${res.status}): ${text.slice(0, 200)}`, model };
+      if (!apiKey) {
+        return { success: false, message: '未配置 API Key (成员级或全局)', model };
       }
-    } catch (err: unknown) {
-      return { success: false, message: `❌ 网络错误: ${toErrorMessage(err)}`, model };
-    }
-  });
+
+      try {
+        if (provider === 'anthropic') {
+          const res = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 10,
+              messages: [{ role: 'user', content: 'hi' }],
+            }),
+          });
+          if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          const text = await res.text();
+          return { success: false, message: `❌ ${res.status}: ${text.slice(0, 200)}`, model };
+        } else {
+          // OpenAI 兼容: 用指定模型发一条轻量 chat
+          const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 5,
+              messages: [{ role: 'user', content: 'hi' }],
+            }),
+          });
+          if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          const text = await res.text();
+          if (res.status === 401 || res.status === 403) {
+            return { success: false, message: `❌ 认证失败 (${res.status}): ${text.slice(0, 200)}`, model };
+          }
+          // 404 model not found 等 — 认证OK但模型有问题
+          return { success: false, message: `⚠️ 连接OK但模型响应异常 (${res.status}): ${text.slice(0, 200)}`, model };
+        }
+      } catch (err: unknown) {
+        return { success: false, message: `❌ 网络错误: ${toErrorMessage(err)}`, model };
+      }
+    },
+  );
 
   /** 删除成员 */
   ipcMain.handle('team:delete', (_event, memberId: string) => {
@@ -595,12 +807,18 @@ export function setupProjectHandlers() {
     assertProjectId('feature:resume', projectId);
     assertNonEmptyString('feature:resume', 'featureId', featureId);
     const db = getDb();
-    const feature = db.prepare("SELECT status, resume_snapshot FROM features WHERE id = ? AND project_id = ?").get(featureId, projectId) as { status: string; resume_snapshot: string | null } | undefined;
+    const feature = db
+      .prepare('SELECT status, resume_snapshot FROM features WHERE id = ? AND project_id = ?')
+      .get(featureId, projectId) as { status: string; resume_snapshot: string | null } | undefined;
     if (!feature) return { success: false, message: 'Feature 不存在' };
-    if (feature.status !== 'paused') return { success: false, message: `Feature 状态为 ${feature.status}，只有 paused 状态可以续跑` };
+    if (feature.status !== 'paused')
+      return { success: false, message: `Feature 状态为 ${feature.status}，只有 paused 状态可以续跑` };
 
     // 重置为 todo，清除锁定，保留 resume_snapshot 供 worker 参考
-    db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE id = ? AND project_id = ?").run(featureId, projectId);
+    db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE id = ? AND project_id = ?").run(
+      featureId,
+      projectId,
+    );
     return { success: true, message: `Feature ${featureId} 已重置为待执行，将在下次启动时继续` };
   });
 
@@ -615,58 +833,67 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-log-agent-ids', (_event, projectId: string) => {
     assertProjectId('project:get-log-agent-ids', projectId);
     const db = getDb();
-    const rows = db.prepare(
-      'SELECT DISTINCT agent_id FROM agent_logs WHERE project_id = ? ORDER BY agent_id ASC'
-    ).all(projectId) as Array<{ agent_id: string }>;
+    const rows = db
+      .prepare('SELECT DISTINCT agent_id FROM agent_logs WHERE project_id = ? ORDER BY agent_id ASC')
+      .all(projectId) as Array<{ agent_id: string }>;
     return rows.map(r => r.agent_id);
   });
 
   // ── 获取项目日志 (v4.0: 分页 + 过滤 + 搜索) ──
-  ipcMain.handle('project:get-logs', (_event, projectId: string, options?: {
-    limit?: number;
-    offset?: number;
-    agentId?: string;
-    type?: string;
-    keyword?: string;
-  }) => {
-    assertProjectId('project:get-logs', projectId);
-    const db = getDb();
-    const limit = Math.min(options?.limit ?? 200, 1000);
-    const offset = options?.offset ?? 0;
+  ipcMain.handle(
+    'project:get-logs',
+    (
+      _event,
+      projectId: string,
+      options?: {
+        limit?: number;
+        offset?: number;
+        agentId?: string;
+        type?: string;
+        keyword?: string;
+      },
+    ) => {
+      assertProjectId('project:get-logs', projectId);
+      const db = getDb();
+      const limit = Math.min(options?.limit ?? 200, 1000);
+      const offset = options?.offset ?? 0;
 
-    const conditions = ['project_id = ?'];
-    const params: Array<string | number> = [projectId];
+      const conditions = ['project_id = ?'];
+      const params: Array<string | number> = [projectId];
 
-    if (options?.agentId) {
-      conditions.push('agent_id = ?');
-      params.push(options.agentId);
-    }
-    if (options?.type) {
-      conditions.push('type = ?');
-      params.push(options.type);
-    }
-    if (options?.keyword) {
-      conditions.push('content LIKE ?');
-      params.push(`%${options.keyword}%`);
-    }
+      if (options?.agentId) {
+        conditions.push('agent_id = ?');
+        params.push(options.agentId);
+      }
+      if (options?.type) {
+        conditions.push('type = ?');
+        params.push(options.type);
+      }
+      if (options?.keyword) {
+        conditions.push('content LIKE ?');
+        params.push(`%${options.keyword}%`);
+      }
 
-    const where = conditions.join(' AND ');
-    const rows = db.prepare(
-      `SELECT * FROM agent_logs WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
-    ).all(...params, limit, offset);
+      const where = conditions.join(' AND ');
+      const rows = db
+        .prepare(`SELECT * FROM agent_logs WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
+        .all(...params, limit, offset);
 
-    const countRow = db.prepare(
-      `SELECT COUNT(*) as total FROM agent_logs WHERE ${where}`
-    ).get(...params) as { total: number };
+      const countRow = db.prepare(`SELECT COUNT(*) as total FROM agent_logs WHERE ${where}`).get(...params) as {
+        total: number;
+      };
 
-    return { rows: rows.reverse(), total: countRow.total };
-  });
+      return { rows: rows.reverse(), total: countRow.total };
+    },
+  );
 
   // ── 获取项目统计 ──
   ipcMain.handle('project:get-stats', (_event, projectId: string) => {
     assertProjectId('project:get-stats', projectId);
     const db = getDb();
-    const featureStats = db.prepare(`
+    const featureStats = db
+      .prepare(
+        `
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo,
@@ -675,14 +902,20 @@ export function setupProjectHandlers() {
         SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM features WHERE project_id = ?
-    `).get(projectId);
-    const agentStats = db.prepare(`
+    `,
+      )
+      .get(projectId);
+    const agentStats = db
+      .prepare(
+        `
       SELECT 
         COUNT(*) as total,
         SUM(total_input_tokens + total_output_tokens) as total_tokens,
         SUM(total_cost_usd) as total_cost
       FROM agents WHERE project_id = ?
-    `).get(projectId);
+    `,
+      )
+      .get(projectId);
     return { features: featureStats, agents: agentStats };
   });
 
@@ -694,7 +927,9 @@ export function setupProjectHandlers() {
     assertProjectId('project:start', projectId);
     const db = getDb();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
-    const proj = db.prepare('SELECT status, workspace_path, config, wish FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string; config: string; wish: string } | undefined;
+    const proj = db.prepare('SELECT status, workspace_path, config, wish FROM projects WHERE id = ?').get(projectId) as
+      | { status: string; workspace_path: string; config: string; wish: string }
+      | undefined;
 
     // 判断是否为导入项目: status=analyzing 或 config 中标记了 importExisting
     // v7.2: 增加 importCompleted 标记 — 已完成导入分析的项目走正常 orchestrator
@@ -715,14 +950,18 @@ export function setupProjectHandlers() {
             isImportProject = false;
           } else {
             // 真正未完成的导入 — 走导入流程
-            const featureCount = (db.prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?').get(projectId) as { c: number }).c;
+            const featureCount = (
+              db.prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?').get(projectId) as { c: number }
+            ).c;
             if (featureCount === 0) {
               isImportProject = true;
             }
           }
         }
         // importCompleted=true → 不走导入，走正常 orchestrator
-      } catch { /* non-critical: JSON parse fallback */ }
+      } catch {
+        /* non-critical: JSON parse fallback */
+      }
     }
 
     if (isImportProject) {
@@ -735,7 +974,10 @@ export function setupProjectHandlers() {
 
       // 取消之前的导入进程（如果有）
       const existingAc = importAbortControllers.get(projectId);
-      if (existingAc) { existingAc.abort(); importAbortControllers.delete(projectId); }
+      if (existingAc) {
+        existingAc.abort();
+        importAbortControllers.delete(projectId);
+      }
       const ac = new AbortController();
       importAbortControllers.set(projectId, ac);
 
@@ -749,6 +991,8 @@ export function setupProjectHandlers() {
             ac.signal,
             (phase: number, step: string, progress: number) => {
               log.debug(`Import progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
+              const cached = { phase, step, progress };
+              importProgressCache.set(projectId, cached);
               sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
             },
             // v7.1: Detailed log callback — probe thinking/content → agent:log
@@ -758,12 +1002,24 @@ export function setupProjectHandlers() {
                 const streamKey = entry.agentId ?? 'probe';
                 if (!activeProbeStreams.has(streamKey)) {
                   activeProbeStreams.add(streamKey);
-                  sendToUI(win, 'agent:stream-start', { projectId, agentId: streamKey, label: `${entry.probeId ?? streamKey} LLM 输出` });
+                  sendToUI(win, 'agent:stream-start', {
+                    projectId,
+                    agentId: streamKey,
+                    label: `${entry.probeId ?? streamKey} LLM 输出`,
+                  });
                 }
-                sendToUI(win, 'agent:stream', { projectId, agentId: streamKey, chunk: entry.content || entry.delta || '' });
+                sendToUI(win, 'agent:stream', {
+                  projectId,
+                  agentId: streamKey,
+                  chunk: entry.content || entry.delta || '',
+                });
               } else {
                 // info/thinking/error → agent:log
-                sendToUI(win, 'agent:log', { projectId, agentId: entry.agentId ?? 'probe', content: entry.content || '' });
+                sendToUI(win, 'agent:log', {
+                  projectId,
+                  agentId: entry.agentId ?? 'probe',
+                  content: entry.content || '',
+                });
                 // When a non-stream entry comes for an active stream, end the stream
                 const streamKey = entry.agentId ?? 'probe';
                 if (activeProbeStreams.has(streamKey) && (entry.type === 'info' || entry.type === 'error')) {
@@ -791,7 +1047,7 @@ export function setupProjectHandlers() {
                 for (const n of archTree.nodes) nodeById.set(n.id, n);
 
                 const insertArchFeature = db.prepare(
-                  `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, summary, depends_on, status, acceptance_criteria, affected_files, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arch_node', '[]', ?, ?, ?)`
+                  `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, summary, depends_on, status, acceptance_criteria, affected_files, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arch_node', '[]', ?, ?, ?)`,
                 );
 
                 db.transaction(() => {
@@ -807,26 +1063,31 @@ export function setupProjectHandlers() {
                       .map((e: any) => e.source);
 
                     insertArchFeature.run(
-                      comp.id,                           // id
-                      projectId,                         // project_id
-                      comp.type || 'infrastructure',     // category
-                      5,                                 // priority (low — arch nodes are index, not tasks)
-                      groupName,                         // group_name
-                      subGroup,                          // sub_group
-                      comp.name,                         // title
-                      comp.responsibility,               // description
-                      `[${comp.level}] ${comp.responsibility}`,  // summary
-                      JSON.stringify(deps),              // depends_on
-                      JSON.stringify(comp.files || []),  // affected_files
-                      `架构节点 | ${comp.fileCount || 0} 文件 | ${comp.loc || 0} LOC`,  // notes
-                      parentDomain?.id || parentModule?.id || 'arch',  // group_id
+                      comp.id, // id
+                      projectId, // project_id
+                      comp.type || 'infrastructure', // category
+                      5, // priority (low — arch nodes are index, not tasks)
+                      groupName, // group_name
+                      subGroup, // sub_group
+                      comp.name, // title
+                      comp.responsibility, // description
+                      `[${comp.level}] ${comp.responsibility}`, // summary
+                      JSON.stringify(deps), // depends_on
+                      JSON.stringify(comp.files || []), // affected_files
+                      `架构节点 | ${comp.fileCount || 0} 文件 | ${comp.loc || 0} LOC`, // notes
+                      parentDomain?.id || parentModule?.id || 'arch', // group_id
                     );
                   }
                 })();
 
                 const archNodeCount = componentNodes.length;
                 log.info(`Wrote ${archNodeCount} arch_node features from architecture-tree`);
-                addLog(projectId, 'project-importer', 'info', `🏛️ 已创建 ${archNodeCount} 个架构索引节点 (${domainNodes.length} 域, ${moduleNodes.length} 模块, ${archNodeCount} 组件)`);
+                addLog(
+                  projectId,
+                  'project-importer',
+                  'info',
+                  `🏛️ 已创建 ${archNodeCount} 个架构索引节点 (${domainNodes.length} 域, ${moduleNodes.length} 模块, ${archNodeCount} 组件)`,
+                );
               }
             }
           } catch (archErr) {
@@ -839,21 +1100,60 @@ export function setupProjectHandlers() {
             const existingCfg = JSON.parse(proj?.config || '{}');
             existingCfg.importCompleted = true;
             updatedConfig = JSON.stringify(existingCfg);
-          } catch { updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true }); }
-          db.prepare("UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?")
-            .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, updatedConfig, projectId);
-          sendToUI(win, 'project:import-progress', { projectId, phase: 2, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true });
+          } catch {
+            updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true });
+          }
+          db.prepare(
+            "UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?",
+          ).run(
+            `[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`,
+            updatedConfig,
+            projectId,
+          );
+
+          // v21.1: 将导入阶段的 token 消耗写入 agents 表
+          if (result.stats && result.stats.totalTokensUsed > 0) {
+            try {
+              const importerId = 'project-importer';
+              spawnAgent(projectId, importerId, 'importer', win);
+              // 粗略按 input:output = 4:1 拆分
+              const estInput = Math.round(result.stats.totalTokensUsed * 0.8);
+              const estOutput = result.stats.totalTokensUsed - estInput;
+              updateAgentStats(importerId, projectId, estInput, estOutput, result.stats.totalCostUsd);
+              log.info(
+                `Import token stats recorded: ${result.stats.totalTokensUsed} tokens, $${result.stats.totalCostUsd.toFixed(4)}`,
+              );
+            } catch (statErr) {
+              log.warn('Failed to record import token stats', { error: String(statErr) });
+            }
+          }
+
+          const doneProgress = { phase: 2, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true as const };
+          importProgressCache.set(projectId, doneProgress);
+          sendToUI(win, 'project:import-progress', { projectId, ...doneProgress });
           sendToUI(win, 'project:status', { projectId, status: 'paused' });
-          addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
+          addLog(
+            projectId,
+            'project-importer',
+            'info',
+            `📥 ${summary} | ${result.stats.totalTokensUsed} tokens, $${result.stats.totalCostUsd.toFixed(4)}`,
+          );
         } catch (err: unknown) {
           log.error('importProject FAILED', err);
           const status = ac.signal.aborted ? 'paused' : 'error';
-          db.prepare('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, projectId);
+          db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(
+            status,
+            projectId,
+          );
           const msg = ac.signal.aborted ? '⏸ 分析已中断' : `❌ 分析失败: ${toErrorMessage(err)}`;
-          sendToUI(win, 'project:import-progress', { projectId, phase: -1, step: msg, progress: 0, done: true, error: !ac.signal.aborted });
+          const errProgress = { phase: -1, step: msg, progress: 0, done: true as const, error: !ac.signal.aborted };
+          importProgressCache.set(projectId, errProgress);
+          sendToUI(win, 'project:import-progress', { projectId, ...errProgress });
           sendToUI(win, 'project:status', { projectId, status });
         } finally {
           importAbortControllers.delete(projectId);
+          // 完成后 30s 清除缓存（给前端足够时间查询）
+          setTimeout(() => importProgressCache.delete(projectId), 30_000);
         }
       })();
       return { success: true };
@@ -880,13 +1180,19 @@ export function setupProjectHandlers() {
 
     // 如果项目状态是 analyzing，强制改为 paused（兜底，防止卡死）
     const db = getDb();
-    const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+    const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as
+      | { status: string }
+      | undefined;
     if (proj?.status === 'analyzing') {
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
       const win = BrowserWindow.getAllWindows()[0] ?? null;
       sendToUI(win, 'project:status', { projectId, status: 'paused' });
       sendToUI(win, 'project:import-progress', {
-        projectId, phase: -1, step: '⏸ 分析已中断', progress: 0, done: true,
+        projectId,
+        phase: -1,
+        step: '⏸ 分析已中断',
+        progress: 0,
+        done: true,
       });
     }
 
@@ -900,7 +1206,9 @@ export function setupProjectHandlers() {
     stopOrchestrator(projectId);
     const db = getDb();
     // 获取 workspace 路径以清理磁盘
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     db.prepare('DELETE FROM agent_logs WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM agents WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM features WHERE project_id = ?').run(projectId);
@@ -916,7 +1224,9 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:open-workspace', async (_event, projectId: string) => {
     assertProjectId('project:open-workspace', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (project?.workspace_path && fs.existsSync(project.workspace_path)) {
       await shell.openPath(project.workspace_path);
       return { success: true };
@@ -934,7 +1244,15 @@ export function setupProjectHandlers() {
     }
 
     // 先 commit 最新状态
-    await gitCommit(getGitConfig({ ...project, workspace_path: project.workspace_path!, github_repo: project.github_repo ?? undefined, github_token: project.github_token ?? undefined }), 'Export snapshot');
+    await gitCommit(
+      getGitConfig({
+        ...project,
+        workspace_path: project.workspace_path!,
+        github_repo: project.github_repo ?? undefined,
+        github_token: project.github_token ?? undefined,
+      }),
+      'Export snapshot',
+    );
 
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     if (!win) return { success: false, error: '无窗口' };
@@ -959,7 +1277,15 @@ export function setupProjectHandlers() {
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { success: false };
-    const result = await gitCommit(getGitConfig({ ...project, workspace_path: project.workspace_path!, github_repo: project.github_repo ?? undefined, github_token: project.github_token ?? undefined }), message);
+    const result = await gitCommit(
+      getGitConfig({
+        ...project,
+        workspace_path: project.workspace_path!,
+        github_repo: project.github_repo ?? undefined,
+        github_token: project.github_token ?? undefined,
+      }),
+      message,
+    );
     return { success: result.success, hash: result.hash, pushed: result.pushed };
   });
 
@@ -967,7 +1293,9 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:git-log', async (_event, projectId: string) => {
     assertProjectId('project:git-log', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return [];
     return await gitLog(project.workspace_path);
   });
@@ -1021,13 +1349,18 @@ export function setupProjectHandlers() {
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
       if (feedback) {
         // 记录用户反馈到 agent_logs
-        db.prepare("INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, 'user', 'feedback', ?)")
-          .run(projectId, feedback);
+        db.prepare(
+          "INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, 'user', 'feedback', ?)",
+        ).run(projectId, feedback);
       }
       const win = BrowserWindow.getAllWindows()[0];
       if (win) {
         win.webContents.send('project:status', { projectId, status: 'paused' });
-        win.webContents.send('agent:log', { projectId, agentId: 'system', content: `⏸️ 用户拒绝验收${feedback ? ': ' + feedback.slice(0, 200) : ''}` });
+        win.webContents.send('agent:log', {
+          projectId,
+          agentId: 'system',
+          content: `⏸️ 用户拒绝验收${feedback ? ': ' + feedback.slice(0, 200) : ''}`,
+        });
       }
       return { success: true, status: 'paused', feedback };
     }
@@ -1099,17 +1432,19 @@ export function setupProjectHandlers() {
     assertNonEmptyString('project:submit-change', 'description', description);
     const db = getDb();
     const id = 'cr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
-    db.prepare("INSERT INTO change_requests (id, project_id, description) VALUES (?, ?, ?)")
-      .run(id, projectId, description);
+    db.prepare('INSERT INTO change_requests (id, project_id, description) VALUES (?, ?, ?)').run(
+      id,
+      projectId,
+      description,
+    );
 
     const win = BrowserWindow.getAllWindows()[0];
     const abortCtrl = new AbortController();
 
     // 异步执行变更流程
-    runChangeRequest(projectId, id, description, win, abortCtrl.signal)
-      .catch(err => {
-        log.error('ChangeRequest error', err);
-      });
+    runChangeRequest(projectId, id, description, win, abortCtrl.signal).catch(err => {
+      log.error('ChangeRequest error', err);
+    });
 
     return { success: true, changeRequestId: id };
   });
@@ -1118,15 +1453,16 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:list-changes', (_event, projectId: string) => {
     assertProjectId('project:list-changes', projectId);
     const db = getDb();
-    return db.prepare("SELECT * FROM change_requests WHERE project_id = ? ORDER BY created_at DESC")
-      .all(projectId);
+    return db.prepare('SELECT * FROM change_requests WHERE project_id = ? ORDER BY created_at DESC').all(projectId);
   });
 
   // ── v4.3: 获取影响分析 ──
   ipcMain.handle('project:get-impact-analysis', (_event, changeRequestId: string) => {
     assertNonEmptyString('project:get-impact-analysis', 'changeRequestId', changeRequestId);
     const db = getDb();
-    const row = db.prepare("SELECT * FROM change_requests WHERE id = ?").get(changeRequestId) as ChangeRequestRow | undefined;
+    const row = db.prepare('SELECT * FROM change_requests WHERE id = ?').get(changeRequestId) as
+      | ChangeRequestRow
+      | undefined;
     if (!row) return null;
     return {
       ...row,
@@ -1174,6 +1510,7 @@ export function setupProjectHandlers() {
           (phase: number, step: string, progress: number) => {
             // 推送实时进度到前端
             log.debug(`analyze-existing progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
+            importProgressCache.set(projectId, { phase, step, progress });
             sendToUI(win, 'project:import-progress', {
               projectId,
               phase,
@@ -1187,11 +1524,23 @@ export function setupProjectHandlers() {
               const streamKey = entry.agentId ?? 'probe';
               if (!activeProbeStreams.has(streamKey)) {
                 activeProbeStreams.add(streamKey);
-                sendToUI(win, 'agent:stream-start', { projectId, agentId: streamKey, label: `${entry.probeId ?? streamKey} LLM 输出` });
+                sendToUI(win, 'agent:stream-start', {
+                  projectId,
+                  agentId: streamKey,
+                  label: `${entry.probeId ?? streamKey} LLM 输出`,
+                });
               }
-              sendToUI(win, 'agent:stream', { projectId, agentId: streamKey, chunk: entry.content || entry.delta || '' });
+              sendToUI(win, 'agent:stream', {
+                projectId,
+                agentId: streamKey,
+                chunk: entry.content || entry.delta || '',
+              });
             } else {
-              sendToUI(win, 'agent:log', { projectId, agentId: entry.agentId ?? 'probe', content: entry.content || '' });
+              sendToUI(win, 'agent:log', {
+                projectId,
+                agentId: entry.agentId ?? 'probe',
+                content: entry.content || '',
+              });
               const streamKey = entry.agentId ?? 'probe';
               if (activeProbeStreams.has(streamKey) && (entry.type === 'info' || entry.type === 'error')) {
                 sendToUI(win, 'agent:stream-end', { projectId, agentId: streamKey });
@@ -1209,38 +1558,58 @@ export function setupProjectHandlers() {
           const existingCfg = JSON.parse(project.config || '{}');
           existingCfg.importCompleted = true;
           updatedConfig = JSON.stringify(existingCfg);
-        } catch { updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true }); }
-        db.prepare("UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?")
-          .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, updatedConfig, projectId);
-
-        sendToUI(win, 'project:import-progress', {
+        } catch {
+          updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true });
+        }
+        db.prepare(
+          "UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?",
+        ).run(
+          `[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`,
+          updatedConfig,
           projectId,
-          phase: 2,
-          step: `✅ 分析完成! ${summary}`,
-          progress: 1.0,
-          done: true,
-        });
+        );
+
+        // v21.1: 将导入阶段的 token 消耗写入 agents 表
+        if (result.stats && result.stats.totalTokensUsed > 0) {
+          try {
+            const importerId = 'project-importer';
+            spawnAgent(projectId, importerId, 'importer', win);
+            const estInput = Math.round(result.stats.totalTokensUsed * 0.8);
+            const estOutput = result.stats.totalTokensUsed - estInput;
+            updateAgentStats(importerId, projectId, estInput, estOutput, result.stats.totalCostUsd);
+            log.info(
+              `analyze-existing token stats recorded: ${result.stats.totalTokensUsed} tokens, $${result.stats.totalCostUsd.toFixed(4)}`,
+            );
+          } catch (statErr) {
+            log.warn('Failed to record analyze-existing token stats', { error: String(statErr) });
+          }
+        }
+
+        const doneProgress = { phase: 2, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true as const };
+        importProgressCache.set(projectId, doneProgress);
+        sendToUI(win, 'project:import-progress', { projectId, ...doneProgress });
         sendToUI(win, 'project:status', { projectId, status: 'paused' });
 
-        addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
+        addLog(
+          projectId,
+          'project-importer',
+          'info',
+          `📥 ${summary} | ${result.stats.totalTokensUsed} tokens, $${result.stats.totalCostUsd.toFixed(4)}`,
+        );
       } catch (err: unknown) {
         log.error('analyze-existing FAILED', err);
         // 被用户取消时不标记为 error，改为 paused 以允许重试
         const status = ac.signal.aborted ? 'paused' : 'error';
-        db.prepare('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, projectId);
+        db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, projectId);
         const msg = ac.signal.aborted ? '⏸ 分析已中断，可重新启动' : `❌ 分析失败: ${toErrorMessage(err)}`;
-        sendToUI(win, 'project:import-progress', {
-          projectId,
-          phase: -1,
-          step: msg,
-          progress: 0,
-          done: true,
-          error: !ac.signal.aborted,
-        });
+        const errProgress = { phase: -1, step: msg, progress: 0, done: true as const, error: !ac.signal.aborted };
+        importProgressCache.set(projectId, errProgress);
+        sendToUI(win, 'project:import-progress', { projectId, ...errProgress });
         sendToUI(win, 'project:status', { projectId, status });
         addLog(projectId, 'project-importer', ac.signal.aborted ? 'info' : 'error', msg);
       } finally {
         importAbortControllers.delete(projectId);
+        setTimeout(() => importProgressCache.delete(projectId), 30_000);
       }
     })();
 
@@ -1252,7 +1621,9 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-module-graph', (_event, projectId: string) => {
     assertProjectId('project:get-module-graph', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const graph = loadModuleGraph(project.workspace_path);
     if (!graph) return { success: false, error: 'Module graph not available (run import analysis first)' };
@@ -1263,10 +1634,13 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-arch-tree', (_event, projectId: string) => {
     assertProjectId('project:get-arch-tree', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const treePath = path.join(project.workspace_path, '.automater/analysis/architecture-tree.json');
-    if (!fs.existsSync(treePath)) return { success: false, error: 'Architecture tree not available (run import analysis first)' };
+    if (!fs.existsSync(treePath))
+      return { success: false, error: 'Architecture tree not available (run import analysis first)' };
     try {
       const tree = JSON.parse(fs.readFileSync(treePath, 'utf-8'));
       return { success: true, tree };
@@ -1278,17 +1652,27 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-known-issues', (_event, projectId: string) => {
     assertProjectId('project:get-known-issues', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const issues = loadKnownIssues(project.workspace_path);
     return { success: true, issues: issues || '' };
+  });
+
+  // v21.1: 查询当前导入进度（前端切页回来后恢复真实进度）
+  ipcMain.handle('project:get-import-progress', (_event, projectId: string) => {
+    assertProjectId('project:get-import-progress', projectId);
+    return importProgressCache.get(projectId) || null;
   });
 
   // v9.1: 获取导入产物 ARCHITECTURE.md
   ipcMain.handle('project:get-architecture-doc', (_event, projectId: string) => {
     assertProjectId('project:get-architecture-doc', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const archPath = path.join(project.workspace_path, '.automater/docs/ARCHITECTURE.md');
     if (!fs.existsSync(archPath)) return { success: false, error: 'Architecture doc not generated yet' };
@@ -1303,43 +1687,62 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-probe-reports', (_event, projectId: string) => {
     assertProjectId('project:get-probe-reports', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const probesDir = path.join(project.workspace_path, '.automater/analysis/probes');
     if (!fs.existsSync(probesDir)) return { success: true, reports: [] };
     try {
       const files = fs.readdirSync(probesDir).filter(f => f.endsWith('.json'));
-      const reports = files.map(f => {
-        try { return JSON.parse(fs.readFileSync(path.join(probesDir, f), 'utf-8')); } catch { return null; }
-      }).filter(Boolean);
+      const reports = files
+        .map(f => {
+          try {
+            return JSON.parse(fs.readFileSync(path.join(probesDir, f), 'utf-8'));
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
       return { success: true, reports };
-    } catch { return { success: true, reports: [] }; }
+    } catch {
+      return { success: true, reports: [] };
+    }
   });
 
   ipcMain.handle('project:detect-incremental-changes', (_event, projectId: string) => {
     assertProjectId('project:detect-incremental-changes', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const result = detectIncrementalChanges(project.workspace_path);
     return { success: true, ...result, affectedProbeTypes: [...result.affectedProbeTypes] };
   });
 
-  ipcMain.handle('project:apply-module-correction', (_event, projectId: string, correction: Omit<UserCorrection, 'timestamp'>) => {
-    assertProjectId('project:apply-module-correction', projectId);
-    assertObject('project:apply-module-correction', 'correction', correction);
-    const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
-    if (!project?.workspace_path) return { success: false, error: 'Project not found' };
-    const updatedGraph = applyUserCorrection(project.workspace_path, correction);
-    if (!updatedGraph) return { success: false, error: 'Failed to apply correction' };
-    return { success: true, graph: updatedGraph };
-  });
+  ipcMain.handle(
+    'project:apply-module-correction',
+    (_event, projectId: string, correction: Omit<UserCorrection, 'timestamp'>) => {
+      assertProjectId('project:apply-module-correction', projectId);
+      assertObject('project:apply-module-correction', 'correction', correction);
+      const db = getDb();
+      const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+        | { workspace_path?: string }
+        | undefined;
+      if (!project?.workspace_path) return { success: false, error: 'Project not found' };
+      const updatedGraph = applyUserCorrection(project.workspace_path, correction);
+      if (!updatedGraph) return { success: false, error: 'Failed to apply correction' };
+      return { success: true, graph: updatedGraph };
+    },
+  );
 
   ipcMain.handle('project:get-user-corrections', (_event, projectId: string) => {
     assertProjectId('project:get-user-corrections', projectId);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     return { success: true, corrections: getUserCorrections(project.workspace_path) };
   });
@@ -1362,7 +1765,9 @@ export function setupProjectHandlers() {
     assertProjectId('context:preview-baseline', projectId);
     assertNonEmptyString('context:preview-baseline', 'role', role);
     const db = getDb();
-    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
+    const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
     if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
       return { success: false, error: 'Workspace not found' };
     }
@@ -1470,7 +1875,3 @@ export function setupProjectHandlers() {
     }
   });
 }
-
-
-
-

@@ -25,10 +25,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import {
-  buildCodeGraph, type CodeGraph,
-  detectCommunities, getHubFiles, buildProjectProfile,
-} from './code-graph';
+import { buildCodeGraph, type CodeGraph, detectCommunities, getHubFiles, buildProjectProfile } from './code-graph';
 import { generateRepoMap } from './repo-map';
 import { callLLM, getSettings } from './llm-client';
 import { writeDoc } from './doc-manager';
@@ -36,9 +33,19 @@ import { createLogger } from './logger';
 import { planProbes, executeProbes, mergeFindings } from './probe-orchestrator';
 import { checkProbeCache, updateProbeCache, detectIncrementalChanges } from './probe-cache';
 import type {
-  ScanResult, SeedFile, ProbeReport, FuseOutput,
-  ModuleGraph, ArchTree, ArchNode, ArchEdge, ImportStats, ImportProgressCallbackV7,
-  ImportProgressEvent, ProbeProgress, MergedFindings,
+  ScanResult,
+  SeedFile,
+  ProbeReport,
+  FuseOutput,
+  ModuleGraph,
+  ArchTree,
+  ArchNode,
+  ArchEdge,
+  ImportStats,
+  ImportProgressCallbackV7,
+  ImportProgressEvent,
+  ProbeProgress,
+  MergedFindings,
   ImportLogCallback,
 } from './probe-types';
 
@@ -141,17 +148,48 @@ function resolveImportBudget(settings: { importBudgetUsd?: number; dailyBudgetUs
 
 // 忽略的目录
 const IGNORE_DIRS = new Set([
-  'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.automater', '.venv',
-  'venv', '.turbo', '.output', '.nuxt', '.svelte-kit',
+  'node_modules',
+  '.git',
+  '__pycache__',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  '.cache',
+  'target',
+  'vendor',
+  '.automater',
+  '.venv',
+  'venv',
+  '.turbo',
+  '.output',
+  '.nuxt',
+  '.svelte-kit',
 ]);
 
 // 代码文件扩展名
 const CODE_EXTS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.go', '.rs', '.java', '.kt', '.cs',
-  '.c', '.cpp', '.h', '.hpp', '.swift',
-  '.vue', '.svelte', '.rb', '.php',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+  '.go',
+  '.rs',
+  '.java',
+  '.kt',
+  '.cs',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.swift',
+  '.vue',
+  '.svelte',
+  '.rb',
+  '.php',
 ]);
 
 // 技术栈检测规则
@@ -178,21 +216,36 @@ const TECH_DETECTORS: Array<{ file: string; tech: string }> = [
   { file: 'docker-compose.yml', tech: 'Docker Compose' },
 ];
 
-
 // ═══════════════════════════════════════
 // Step 1: 轻量级项目快照收集 (<2s, 零 LLM)
 // ═══════════════════════════════════════
 
 /** 关键配置 / 文档文件 (优先读取，内容直接进 LLM prompt) */
 const KEY_FILES = [
-  'package.json', 'README.md', 'README', 'readme.md',
-  'tsconfig.json', 'vite.config.ts', 'vite.config.js',
-  'next.config.js', 'next.config.mjs', 'nuxt.config.ts',
-  'Cargo.toml', 'go.mod', 'pyproject.toml', 'requirements.txt',
-  'pom.xml', 'build.gradle', 'Gemfile', 'composer.json',
-  'Dockerfile', 'docker-compose.yml',
-  'electron-builder.yml', '.env.example',
-  'Makefile', 'CMakeLists.txt',
+  'package.json',
+  'README.md',
+  'README',
+  'readme.md',
+  'tsconfig.json',
+  'vite.config.ts',
+  'vite.config.js',
+  'next.config.js',
+  'next.config.mjs',
+  'nuxt.config.ts',
+  'Cargo.toml',
+  'go.mod',
+  'pyproject.toml',
+  'requirements.txt',
+  'pom.xml',
+  'build.gradle',
+  'Gemfile',
+  'composer.json',
+  'Dockerfile',
+  'docker-compose.yml',
+  'electron-builder.yml',
+  '.env.example',
+  'Makefile',
+  'CMakeLists.txt',
 ];
 
 /** 收集项目快照 — 轻量、快速、不读全部文件 */
@@ -239,7 +292,9 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
       if (content.length > remaining) content = content.slice(0, remaining) + '\n... [truncated]';
       keyFileContents += `\n### ${kf}\n\`\`\`\n${content}\n\`\`\`\n`;
       keyChars += content.length;
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
 
   // 4. Repo Map — 符号索引 (读文件但只提取签名，限制 100 文件)
@@ -248,11 +303,26 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
   // 5. 入口文件前 200 行
   const entrySnippets: string[] = [];
   const entryCandidates = [
-    'src/index.ts', 'src/index.tsx', 'src/main.ts', 'src/main.tsx',
-    'src/App.tsx', 'src/App.ts', 'index.ts', 'index.js',
-    'main.ts', 'main.js', 'app.ts', 'app.js',
-    'electron/main.ts', 'server.ts', 'server.js',
-    'main.py', 'app.py', 'cmd/main.go', 'main.go', 'src/main.rs',
+    'src/index.ts',
+    'src/index.tsx',
+    'src/main.ts',
+    'src/main.tsx',
+    'src/App.tsx',
+    'src/App.ts',
+    'index.ts',
+    'index.js',
+    'main.ts',
+    'main.js',
+    'app.ts',
+    'app.js',
+    'electron/main.ts',
+    'server.ts',
+    'server.js',
+    'main.py',
+    'app.py',
+    'cmd/main.go',
+    'main.go',
+    'src/main.rs',
   ];
   let entryChars = 0;
   const MAX_ENTRY_CHARS = 10000;
@@ -263,29 +333,47 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
     try {
       const content = fs.readFileSync(fp, 'utf-8');
       const lines = content.split('\n').slice(0, 200).join('\n');
-      const snippet = lines.length > MAX_ENTRY_CHARS - entryChars
-        ? lines.slice(0, MAX_ENTRY_CHARS - entryChars) + '\n... [truncated]'
-        : lines;
+      const snippet =
+        lines.length > MAX_ENTRY_CHARS - entryChars
+          ? lines.slice(0, MAX_ENTRY_CHARS - entryChars) + '\n... [truncated]'
+          : lines;
       entrySnippets.push(`### ${ef} (first 200 lines)\n\`\`\`\n${snippet}\n\`\`\``);
       entryChars += snippet.length;
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
 
   // 6. 快速文件数 + LOC 统计 (用 stat.size 估算行数，不读内容)
   const { fileCount, totalLOC, locByExtension } = quickFileStats(workspacePath);
 
-  log.info(`Step 1 snapshot collected in ${Date.now() - t0}ms`, { fileCount, totalLOC, techStack: techStack.join(',') });
+  log.info(`Step 1 snapshot collected in ${Date.now() - t0}ms`, {
+    fileCount,
+    totalLOC,
+    techStack: techStack.join(','),
+  });
 
   return {
-    techStack, packageFiles, directoryTree, keyFileContents,
-    repoMap, entryFileSnippets: entrySnippets.join('\n\n'),
-    fileCount, totalLOC, locByExtension,
+    techStack,
+    packageFiles,
+    directoryTree,
+    keyFileContents,
+    repoMap,
+    entryFileSnippets: entrySnippets.join('\n\n'),
+    fileCount,
+    totalLOC,
+    locByExtension,
   };
 }
 
 /** 快速统计文件数和 LOC (不读文件内容，用 stat.size 估算行数) */
-function quickFileStats(workspacePath: string, maxFiles = 5000): {
-  fileCount: number; totalLOC: number; locByExtension: Record<string, number>;
+function quickFileStats(
+  workspacePath: string,
+  maxFiles = 5000,
+): {
+  fileCount: number;
+  totalLOC: number;
+  locByExtension: Record<string, number>;
 } {
   let fileCount = 0;
   let totalLOC = 0;
@@ -294,7 +382,11 @@ function quickFileStats(workspacePath: string, maxFiles = 5000): {
   function walk(dir: string) {
     if (fileCount >= maxFiles) return;
     let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const e of entries) {
       if (fileCount >= maxFiles) return;
       if (e.name.startsWith('.') && e.name !== '.env') continue;
@@ -310,7 +402,9 @@ function quickFileStats(workspacePath: string, maxFiles = 5000): {
             const estimatedLines = Math.ceil(stat.size / 40);
             totalLOC += estimatedLines;
             locByExt[ext] = (locByExt[ext] || 0) + estimatedLines;
-          } catch { /* skip */ }
+          } catch {
+            /* skip */
+          }
         }
       }
     }
@@ -371,15 +465,25 @@ async function phase0Scan(
     const fp = path.join(workspacePath, name);
     if (fs.existsSync(fp)) {
       readmeExists = true;
-      try { readmeLength = fs.statSync(fp).size; } catch { /* skip */ }
+      try {
+        readmeLength = fs.statSync(fp).size;
+      } catch {
+        /* skip */
+      }
       break;
     }
   }
 
   // 9. Build project profile
   const profile = buildProjectProfile(
-    graph, snapshot.fileCount, snapshot.locByExtension,
-    communities, hubFiles, readmeExists, readmeLength, entryFiles,
+    graph,
+    snapshot.fileCount,
+    snapshot.locByExtension,
+    communities,
+    hubFiles,
+    readmeExists,
+    readmeLength,
+    entryFiles,
   );
 
   // 10. Build repo map
@@ -532,10 +636,7 @@ async function phase1Probe(
   let freshReports: ProbeReport[] = [];
 
   if (configsToRun.length > 0) {
-    broadcastProgress(
-      `启动 ${configsToRun.length} 个探针 (${cacheCheck.hits.length} 缓存命中)...`,
-      0.0,
-    );
+    broadcastProgress(`启动 ${configsToRun.length} 个探针 (${cacheCheck.hits.length} 缓存命中)...`, 0.0);
 
     // Build a modified exploration plan with only the probes that need running
     const runPlan = { ...scan.explorationPlan, probes: configsToRun };
@@ -547,7 +648,7 @@ async function phase1Probe(
       settings,
       onLog,
       probeTimeoutMs: 300_000, // 5 min per probe
-      onProbeComplete: (report) => {
+      onProbeComplete: report => {
         probeStatuses.set(report.probeId, {
           probeId: report.probeId,
           type: report.type,
@@ -555,12 +656,11 @@ async function phase1Probe(
           description: `${report.findings.length} 发现, ${report.filesExamined.length} 文件`,
           progress: 1.0,
         });
-        const completed = [...probeStatuses.values()].filter(p => p.status === 'completed' || p.status === 'failed').length;
+        const completed = [...probeStatuses.values()].filter(
+          p => p.status === 'completed' || p.status === 'failed',
+        ).length;
         const total = probeStatuses.size;
-        broadcastProgress(
-          `探针 ${completed}/${total} 完成`,
-          completed / total,
-        );
+        broadcastProgress(`探针 ${completed}/${total} 完成`, completed / total);
       },
       onProgress: (probeId, status, progress) => {
         const existing = probeStatuses.get(probeId);
@@ -603,11 +703,86 @@ async function phase1Probe(
 }
 
 // ═══════════════════════════════════════
-// Phase 2: Fuse (strong LLM, 1 call)
+// Phase 2: Fuse — Split into Step A (structure) + Step B (docs)
 // ═══════════════════════════════════════
 
 /**
- * Phase 2: 拼图合成 — 用 strong 模型综合所有探针报告，生成最终文档。
+ * Compress a probe report into a concise summary for the fuse prompt.
+ * Extracts structured data (findings, issues, files) instead of raw markdown.
+ */
+function compressProbeReport(report: ProbeReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `### ${report.probeId} (置信度: ${report.confidence}, 文件: ${report.filesExamined.length}, ${report.tokensUsed} tok)`,
+  );
+
+  // Key findings (max 8)
+  if (report.findings.length > 0) {
+    lines.push('发现:');
+    for (const f of report.findings.slice(0, 8)) {
+      const apis = f.publicAPI?.slice(0, 5).join(', ') || '';
+      const types = f.keyTypes?.slice(0, 5).join(', ') || '';
+      lines.push(
+        `- [${f.type}] ${f.id}: ${f.description.slice(0, 120)}${apis ? ` | API: ${apis}` : ''}${types ? ` | Types: ${types}` : ''}`,
+      );
+    }
+    if (report.findings.length > 8) lines.push(`  (+${report.findings.length - 8} more)`);
+  }
+
+  // Issues (max 5)
+  if (report.issues.length > 0) {
+    lines.push('问题: ' + report.issues.slice(0, 5).join('; '));
+  }
+
+  // Dependencies (max 8)
+  if (report.dependencies.length > 0) {
+    lines.push(
+      '依赖: ' +
+        report.dependencies
+          .slice(0, 8)
+          .map(d => `${d.source}→${d.target}(${d.type})`)
+          .join(', '),
+    );
+  }
+
+  // Files examined (max 10)
+  if (report.filesExamined.length > 0) {
+    lines.push(
+      '文件: ' +
+        report.filesExamined.slice(0, 10).join(', ') +
+        (report.filesExamined.length > 10 ? ` (+${report.filesExamined.length - 10})` : ''),
+    );
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Attempt to parse JSON from LLM output with repair strategies.
+ */
+function parseJsonRobust<T>(raw: string, label: string): T | null {
+  try {
+    return JSON.parse(raw);
+  } catch (e1) {
+    log.warn(`${label} JSON parse failed, attempting repair...`, { error: String(e1) });
+    try {
+      const repaired = raw
+        .replace(/,\s*([}\]])/g, '$1') // trailing commas
+        .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
+        .replace(/\n/g, '\\n') // escaped newlines in strings
+        .replace(/\\n/g, '\n'); // revert — only fix those in values
+      return JSON.parse(repaired);
+    } catch {
+      log.error(`${label} JSON repair also failed`);
+      return null;
+    }
+  }
+}
+
+/**
+ * Phase 2: 拼图合成 — 拆分为两步 LLM 调用:
+ *   Step A: 结构化输出 (architecture-tree + module-graph JSON)
+ *   Step B: 文档生成 (ARCHITECTURE.md + known-issues.md)
  */
 async function phase2Fuse(
   scan: ScanResult,
@@ -619,119 +794,125 @@ async function phase2Fuse(
   const settings = getSettings();
   if (!settings) throw new Error('未配置 LLM 设置');
 
-  onProgress?.({ phase: 'fuse', step: '综合所有探针报告...', progress: 0.1 });
-
   const model = settings.strongModel;
   const projectName = path.basename(scan.workspacePath);
-
-  // Build the fuse prompt with all probe reports
   const probesByType = groupProbesByType(reports);
   const merged = mergeFindings(reports, scan.snapshot.fileCount);
 
-  const prompt = buildFusePrompt(projectName, scan, probesByType, merged);
+  // Stream helper
+  const streamLog = (chunk: string) => {
+    onLog?.({ agentId: 'probe:fuse', content: chunk, type: 'stream' });
+  };
 
-  onProgress?.({ phase: 'fuse', step: `调用 ${model} 综合分析...`, progress: 0.3 });
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
+  // ── Step A: 结构化输出 (architecture-tree + module-graph) ──
+  onProgress?.({ phase: 'fuse', step: '综合所有探针报告...', progress: 0.05 });
   onLog?.({
     agentId: 'probe:fuse',
-    content: `🧩 Phase 2: 使用 ${model} 综合 ${reports.length} 个探针报告...`,
+    content: `🧩 Phase 2A: 使用 ${model} 生成结构化架构数据 (${reports.length} 个探针)...`,
     type: 'info',
   });
 
-  // Stream fuse LLM output for visibility
-  const fuseOnChunk = (chunk: string) => {
-    onLog?.({
-      agentId: 'probe:fuse',
-      content: chunk,
-      type: 'stream',
-    });
-  };
+  const structurePrompt = buildStructurePrompt(projectName, scan, probesByType, merged);
+  onProgress?.({ phase: 'fuse', step: `调用 ${model} 生成架构结构...`, progress: 0.15 });
 
-  const result = await callLLM(
-    settings, model,
+  const structResult = await callLLM(
+    settings,
+    model,
     [
       {
         role: 'system',
-        content: '你是一位资深软件架构分析师。你的任务是综合多个独立探针的分析报告，生成全面准确的项目架构文档、层级化架构树(architecture-tree)和结构化模块图。层级架构树是最重要的产物——它是对项目理解深度的证明。全部用中文回复。',
+        content:
+          '你是一位资深软件架构分析师。根据探针分析报告生成结构化的项目架构数据(JSON)。只输出要求的代码块，不要多余解释。全部用中文。',
       },
-      { role: 'user', content: prompt },
+      { role: 'user', content: structurePrompt },
     ],
     signal,
-    16384,
-    2,           // retries
-    fuseOnChunk, // stream output
+    8192,
+    2,
+    streamLog,
   );
+  totalInputTokens += structResult.inputTokens || 0;
+  totalOutputTokens += structResult.outputTokens || 0;
 
-  onProgress?.({ phase: 'fuse', step: '解析综合分析结果...', progress: 0.8 });
+  if (signal?.aborted) throw new Error('Import aborted');
 
-  // Parse output — v7.2: more robust regex patterns + retry JSON extraction
-  const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/)
-    || result.content.match(/```markdown\n([\s\S]*?)```/);
-  const archTreeMatch = result.content.match(/```architecture-tree\n([\s\S]*?)```/);
-  const moduleGraphMatch = result.content.match(/```module-graph\n([\s\S]*?)```/)
-    || result.content.match(/```json\n([\s\S]*?"edges"[\s\S]*?)```/)
-    || result.content.match(/```json\n([\s\S]*?)```/);
-  const issuesMatch = result.content.match(/```known-issues\n([\s\S]*?)```/)
-    || result.content.match(/```known.issues\n([\s\S]*?)```/);
+  // Parse Step A outputs
+  onProgress?.({ phase: 'fuse', step: '解析结构化数据...', progress: 0.4 });
 
-  const architectureMd = archMatch?.[1]?.trim() || result.content;
-  const knownIssuesMd = issuesMatch?.[1]?.trim() || '';
+  const archTreeMatch = structResult.content.match(/```architecture-tree\n([\s\S]*?)```/);
+  const moduleGraphMatch =
+    structResult.content.match(/```module-graph\n([\s\S]*?)```/) ||
+    structResult.content.match(/```json\n([\s\S]*?"edges"[\s\S]*?)```/);
 
-  // ── v10.0: Parse architecture-tree JSON ──
   let archTree: ArchTree = { nodes: [], edges: [] };
   if (archTreeMatch?.[1]) {
-    const rawJson = archTreeMatch[1].trim();
-    try {
-      archTree = JSON.parse(rawJson);
-    } catch (parseErr) {
-      log.warn('architecture-tree JSON parse failed, attempting repair...', { error: String(parseErr) });
-      try {
-        const repaired = rawJson
-          .replace(/,\s*([}\]])/g, '$1')
-          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
-        archTree = JSON.parse(repaired);
-        log.info('architecture-tree JSON repair successful');
-      } catch {
-        log.error('architecture-tree JSON repair also failed');
-      }
-    }
+    const parsed = parseJsonRobust<ArchTree>(archTreeMatch[1].trim(), 'architecture-tree');
+    if (parsed) archTree = parsed;
     if (!Array.isArray(archTree.nodes)) archTree.nodes = [];
     if (!Array.isArray(archTree.edges)) archTree.edges = [];
-    log.info(`Parsed architecture-tree: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`);
+    log.info(`Step A: architecture-tree: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`);
   }
 
-  // v10.0: If archTree is empty but moduleGraph has data, auto-derive archTree from moduleGraph
-  if (archTree.nodes.length === 0 && moduleGraphMatch?.[1]) {
-    log.info('architecture-tree empty, will derive from module-graph after parsing');
-  }
-
-  // Parse module graph JSON — with repair attempts for common LLM JSON issues
   let moduleGraph: ModuleGraph = { nodes: [], edges: [] };
   if (moduleGraphMatch?.[1]) {
-    const rawJson = moduleGraphMatch[1].trim();
-    try {
-      moduleGraph = JSON.parse(rawJson);
-    } catch (parseErr) {
-      log.warn('module-graph JSON parse failed, attempting repair...', { error: String(parseErr) });
-      // Attempt repair: remove trailing commas, fix unquoted keys
-      try {
-        const repaired = rawJson
-          .replace(/,\s*([}\]])/g, '$1')     // trailing commas
-          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');  // unquoted keys
-        moduleGraph = JSON.parse(repaired);
-        log.info('module-graph JSON repair successful');
-      } catch {
-        log.error('module-graph JSON repair also failed, writing raw to disk for debugging');
-        // Save raw output for debugging
-        try {
-          const debugPath = path.join(scan.workspacePath, ANALYSIS_DIR, 'fuse-raw-output.txt');
-          fs.writeFileSync(debugPath, result.content, 'utf-8');
-        } catch { /* best effort */ }
-      }
-    }
-    // Validate structure
+    const parsed = parseJsonRobust<ModuleGraph>(moduleGraphMatch[1].trim(), 'module-graph');
+    if (parsed) moduleGraph = parsed;
     if (!Array.isArray(moduleGraph.nodes)) moduleGraph.nodes = [];
     if (!Array.isArray(moduleGraph.edges)) moduleGraph.edges = [];
+    log.info(`Step A: module-graph: ${moduleGraph.nodes.length} nodes, ${moduleGraph.edges.length} edges`);
   }
+
+  // Save raw Step A output for debugging
+  try {
+    const debugPath = path.join(scan.workspacePath, ANALYSIS_DIR, 'fuse-step-a-raw.txt');
+    fs.mkdirSync(path.dirname(debugPath), { recursive: true });
+    fs.writeFileSync(debugPath, structResult.content, 'utf-8');
+  } catch {
+    /* best effort */
+  }
+
+  // ── Step B: 文档生成 (ARCHITECTURE.md + known-issues.md) ──
+  onProgress?.({ phase: 'fuse', step: `调用 ${model} 生成架构文档...`, progress: 0.5 });
+  onLog?.({ agentId: 'probe:fuse', content: `📝 Phase 2B: 使用 ${model} 生成架构文档...`, type: 'info' });
+
+  const docsPrompt = buildDocsPrompt(projectName, scan, probesByType, merged, archTree, moduleGraph);
+
+  const docsResult = await callLLM(
+    settings,
+    model,
+    [
+      {
+        role: 'system',
+        content:
+          '你是一位技术文档专家。根据项目分析数据生成清晰准确的架构文档和已知问题文档。只输出要求的代码块。全部用中文。',
+      },
+      { role: 'user', content: docsPrompt },
+    ],
+    signal,
+    8192,
+    2,
+    streamLog,
+  );
+  totalInputTokens += docsResult.inputTokens || 0;
+  totalOutputTokens += docsResult.outputTokens || 0;
+
+  if (signal?.aborted) throw new Error('Import aborted');
+
+  // Parse Step B outputs
+  onProgress?.({ phase: 'fuse', step: '解析文档输出...', progress: 0.8 });
+
+  const archDocMatch =
+    docsResult.content.match(/```architecture\n([\s\S]*?)```/) ||
+    docsResult.content.match(/```markdown\n([\s\S]*?)```/);
+  const issuesMatch =
+    docsResult.content.match(/```known-issues\n([\s\S]*?)```/) ||
+    docsResult.content.match(/```known.issues\n([\s\S]*?)```/);
+
+  const architectureMd = archDocMatch?.[1]?.trim() || docsResult.content;
+  const knownIssuesMd = issuesMatch?.[1]?.trim() || '';
 
   // Build enriched skeleton
   const modules = detectModules(scan.workspacePath, scan.allCodeFiles, scan.graph);
@@ -753,154 +934,26 @@ async function phase2Fuse(
     timestamp: Date.now(),
   };
 
-  // v10.0: Fallback — derive archTree from moduleGraph if LLM didn't produce architecture-tree
+  // Fallback — derive archTree from moduleGraph if LLM didn't produce architecture-tree
   if (archTree.nodes.length === 0 && moduleGraph.nodes.length > 0) {
     archTree = deriveArchTreeFromModuleGraph(moduleGraph, modules);
-    log.info(`Derived architecture-tree from module-graph: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`);
+    log.info(
+      `Derived architecture-tree from module-graph: ${archTree.nodes.length} nodes, ${archTree.edges.length} edges`,
+    );
   }
 
   // Calculate stats
   const stats: ImportStats = {
     totalProbes: reports.length,
     totalFilesRead: new Set(reports.flatMap(r => r.filesExamined)).size,
-    totalTokensUsed: reports.reduce((s, r) => s + r.tokensUsed, 0)
-      + (result.inputTokens || 0) + (result.outputTokens || 0),
-    totalCostUsd: 0, // Calculated below
+    totalTokensUsed: reports.reduce((s, r) => s + r.tokensUsed, 0) + totalInputTokens + totalOutputTokens,
+    totalCostUsd: 0,
     totalDurationMs: 0, // Set by caller
     coveragePercent: merged.coveragePercent,
   };
-  // Rough cost estimate
-  stats.totalCostUsd = (stats.totalTokensUsed / 1_000_000) * 0.50; // blended rate
+  stats.totalCostUsd = (stats.totalTokensUsed / 1_000_000) * 0.5;
 
-  return {
-    moduleGraph,
-    archTree,
-    architectureMd,
-    knownIssuesMd,
-    enrichedSkeleton,
-    stats,
-  };
-}
-
-/**
- * Build the Phase 2 fuse prompt.
- */
-function buildFusePrompt(
-  projectName: string,
-  scan: ScanResult,
-  probesByType: Map<string, ProbeReport[]>,
-  merged: { findings: any[]; conflicts: any[]; coveragePercent: number },
-): string {
-  const sections: string[] = [];
-
-  sections.push(`## 项目骨架 (Phase 0)
-- 名称: ${projectName}
-- 技术栈: ${scan.snapshot.techStack.join(', ')}
-- 文件数: ${scan.snapshot.fileCount}
-- 代码行数: ~${scan.snapshot.totalLOC}
-- Code Graph: ${scan.graph.fileCount} 节点, ${scan.graph.edgeCount} 边
-- 社区数: ${scan.communities.count}
-- Hub 文件: ${scan.hubFiles.slice(0, 5).map(h => h.file).join(', ')}
-- 项目画像: ${JSON.stringify(scan.profile)}`);
-
-  // Add probe reports grouped by type
-  const typeLabels: Record<string, string> = {
-    entry: '入口追踪', module: '模块纵深', 'api-boundary': 'API 边界',
-    'data-model': '数据模型', 'config-infra': '配置/基础设施', smell: '异常模式',
-  };
-
-  for (const [type, label] of Object.entries(typeLabels)) {
-    const probes = probesByType.get(type);
-    if (!probes || probes.length === 0) continue;
-    sections.push(`\n## ${label}探针报告`);
-    for (const probe of probes) {
-      sections.push(`### ${probe.probeId} (置信度: ${probe.confidence}, 文件: ${probe.filesExamined.length})`);
-      // Use markdown report, truncated to avoid token overflow
-      const md = probe.markdown.slice(0, 3000);
-      sections.push(md);
-    }
-  }
-
-  if (merged.conflicts.length > 0) {
-    sections.push(`\n## ⚠️ 探针矛盾\n${merged.conflicts.map(c => `- ${c.findingA} vs ${c.findingB}: ${c.resolution}`).join('\n')}`);
-  }
-
-  sections.push(`\n## 统计
-- 探针总数: ${[...probesByType.values()].flat().length}
-- 覆盖率: ${merged.coveragePercent}%
-- 发现总数: ${merged.findings.length}`);
-
-  sections.push(`\n---\n
-请综合以上所有探针报告，生成以下四个部分:
-
-\`\`\`architecture
-# ${projectName} — 系统架构文档
-
-## 1. 项目概述
-(一段话说清楚这个项目是什么、解决什么问题、面向谁)
-
-## 2. 技术栈
-(列出核心技术、框架、运行时)
-
-## 3. 系统架构
-(分层或分模块描述整体架构，引用具体文件名和函数名)
-
-## 4. 核心模块
-(每个核心模块的职责、公开 API、关键类型、交互关系)
-
-## 5. 数据流
-(描述主要数据流向，从入口到数据层)
-
-## 6. 关键设计决策
-(架构上的重要选择和理由)
-
-## 7. 扩展点与限制
-(如何扩展、当前局限)
-\`\`\`
-
-\`\`\`architecture-tree
-{
-  "nodes": [
-    {"id": "D01", "parentId": null, "level": "domain", "name": "域名称", "responsibility": "一句话职责", "type": "business-logic|entry-point|api-layer|data-layer|config|utility|ui|infrastructure", "files": [], "publicAPI": [], "keyTypes": [], "patterns": [], "issues": [], "loc": 0, "fileCount": 0},
-    {"id": "D01-M01", "parentId": "D01", "level": "module", "name": "模块名称", "responsibility": "职责", "type": "...", "files": ["src/xxx/"], "publicAPI": ["export1"], "keyTypes": ["Type1"], "patterns": [], "issues": [], "loc": 100, "fileCount": 5},
-    {"id": "D01-M01-C01", "parentId": "D01-M01", "level": "component", "name": "组件名称", "responsibility": "具体职责", "type": "...", "files": ["src/xxx/file.ts"], "publicAPI": ["func1"], "keyTypes": ["Interface1"], "patterns": ["singleton"], "issues": ["缺少错误处理"], "loc": 50, "fileCount": 1}
-  ],
-  "edges": [
-    {"source": "D01-M01", "target": "D02-M01", "type": "import|dataflow|event|config|ipc", "weight": 1, "label": "可选说明"}
-  ]
-}
-\`\`\`
-
-**architecture-tree 规则:**
-1. 严格三层: domain (D01, D02...) → module (D01-M01, D01-M02...) → component (D01-M01-C01...)
-2. domain 层按架构关注点分 (如: 表示层/业务层/数据层/基础设施), 至少 3 个 domain
-3. 每个 domain 下至少 2 个 module, 每个 module 下至少 1 个 component
-4. component 是叶子节点: files 必须列出具体文件路径, publicAPI 列出实际导出
-5. edges 仅在 module 或 component 层级之间, type 准确反映依赖类型
-6. 所有 files 使用相对于项目根的路径
-7. loc / fileCount 要尽量准确 (参考骨架数据)
-
-\`\`\`module-graph
-{
-  "nodes": [
-    {"id": "模块ID", "type": "module|entry-point|api-layer|data-layer|config|utility", "path": "相对路径", "responsibility": "职责", "publicAPI": ["导出接口"], "keyTypes": ["关键类型"], "patterns": ["设计模式"], "issues": ["技术债"], "fileCount": 0, "loc": 0}
-  ],
-  "edges": [
-    {"source": "源模块ID", "target": "目标模块ID", "type": "import|dataflow|event|config|ipc", "weight": 1}
-  ]
-}
-\`\`\`
-
-\`\`\`known-issues
-# ${projectName} — 已知问题与技术债
-
-(列出所有探针发现的问题，按严重度排序，包含具体位置和修复建议)
-\`\`\`
-
-当探针报告存在矛盾时，标注 [⚠️ 交叉验证冲突] 并给出最可能的解释。
-优先信任高置信度探针的发现。使用具体的函数名、类型名、文件路径。`);
-
-  return sections.join('\n');
+  return { moduleGraph, archTree, architectureMd, knownIssuesMd, enrichedSkeleton, stats };
 }
 
 /**
@@ -928,18 +981,18 @@ function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleI
     'entry-point': '入口层',
     'api-layer': 'API 层',
     'data-layer': '数据层',
-    'config': '配置/基础设施',
-    'utility': '工具层',
-    'module': '业务逻辑层',
+    config: '配置/基础设施',
+    utility: '工具层',
+    module: '业务逻辑层',
   };
 
   const TYPE_TO_ARCH: Record<string, ArchNode['type']> = {
     'entry-point': 'entry-point',
     'api-layer': 'api-layer',
     'data-layer': 'data-layer',
-    'config': 'config',
-    'utility': 'utility',
-    'module': 'business-logic',
+    config: 'config',
+    utility: 'utility',
+    module: 'business-logic',
   };
 
   // Group moduleGraph nodes by type → domain
@@ -1013,9 +1066,7 @@ function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleI
         const parts = file.split('/');
         // Use the first differing path segment as sub-group key
         const baseParts = mgNode.path ? mgNode.path.split('/') : [];
-        const subDir = parts.length > baseParts.length + 1
-          ? parts.slice(0, baseParts.length + 1).join('/')
-          : file;
+        const subDir = parts.length > baseParts.length + 1 ? parts.slice(0, baseParts.length + 1).join('/') : file;
         if (!subDirs.has(subDir)) subDirs.set(subDir, []);
         subDirs.get(subDir)!.push(file);
       }
@@ -1037,7 +1088,7 @@ function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleI
           keyTypes: [],
           patterns: [],
           issues: [],
-          loc: Math.round((mgNode.loc || 0) * files.length / Math.max(moduleFiles.length, 1)),
+          loc: Math.round(((mgNode.loc || 0) * files.length) / Math.max(moduleFiles.length, 1)),
           fileCount: files.length,
         });
       }
@@ -1083,6 +1134,7 @@ export async function importProject(
   summaries: ModuleSummary[];
   architectureMd: string;
   docsGenerated: number;
+  stats: ImportStats;
 }> {
   const t0 = Date.now();
   const projectName = path.basename(workspacePath);
@@ -1109,7 +1161,22 @@ export async function importProject(
         fullText: node.responsibility,
         tokensUsed: 0,
       }));
-      return { skeleton, summaries, architectureMd, docsGenerated: 2 };
+      // 尝试加载已有 stats
+      const statsPath = path.join(workspacePath, ANALYSIS_DIR, 'import-stats.json');
+      let cachedStats: ImportStats = {
+        totalProbes: 0,
+        totalFilesRead: 0,
+        totalTokensUsed: 0,
+        totalCostUsd: 0,
+        totalDurationMs: 0,
+        coveragePercent: 0,
+      };
+      try {
+        if (fs.existsSync(statsPath)) cachedStats = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+      } catch {
+        /* silent: stats parse */
+      }
+      return { skeleton, summaries, architectureMd, docsGenerated: 2, stats: cachedStats };
     } catch (err) {
       log.warn('Failed to load existing import artifacts, proceeding with fresh import', { error: String(err) });
     }
@@ -1143,22 +1210,13 @@ export async function importProject(
   fs.mkdirSync(docsDir, { recursive: true });
 
   // skeleton.json
-  fs.writeFileSync(
-    path.join(workspacePath, SKELETON_FILE),
-    JSON.stringify(fuse.enrichedSkeleton, null, 2), 'utf-8',
-  );
+  fs.writeFileSync(path.join(workspacePath, SKELETON_FILE), JSON.stringify(fuse.enrichedSkeleton, null, 2), 'utf-8');
 
   // module-graph.json
-  fs.writeFileSync(
-    path.join(workspacePath, MODULE_GRAPH_FILE),
-    JSON.stringify(fuse.moduleGraph, null, 2), 'utf-8',
-  );
+  fs.writeFileSync(path.join(workspacePath, MODULE_GRAPH_FILE), JSON.stringify(fuse.moduleGraph, null, 2), 'utf-8');
 
   // v10.0: architecture-tree.json
-  fs.writeFileSync(
-    path.join(workspacePath, ARCH_TREE_FILE),
-    JSON.stringify(fuse.archTree, null, 2), 'utf-8',
-  );
+  fs.writeFileSync(path.join(workspacePath, ARCH_TREE_FILE), JSON.stringify(fuse.archTree, null, 2), 'utf-8');
 
   // ARCHITECTURE.md
   fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), fuse.architectureMd, 'utf-8');
@@ -1172,10 +1230,7 @@ export async function importProject(
   if (fuse.architectureMd) docsGenerated++;
 
   // Import stats
-  fs.writeFileSync(
-    path.join(analysisDir, 'import-stats.json'),
-    JSON.stringify(fuse.stats, null, 2), 'utf-8',
-  );
+  fs.writeFileSync(path.join(analysisDir, 'import-stats.json'), JSON.stringify(fuse.stats, null, 2), 'utf-8');
 
   // Module summaries (for backward compat with orchestrator)
   const summaries: ModuleSummary[] = fuse.moduleGraph.nodes.map(node => ({
@@ -1221,6 +1276,7 @@ export async function importProject(
     summaries,
     architectureMd: fuse.architectureMd,
     docsGenerated,
+    stats: fuse.stats,
   };
 }
 
@@ -1258,10 +1314,16 @@ export async function scanProjectSkeleton(
 
   const skeleton: ProjectSkeleton = {
     name: path.basename(workspacePath),
-    techStack, packageFiles, fileCount: allFiles.length,
-    totalLOC, locByExtension: locByExt, directoryTree: dirTree,
+    techStack,
+    packageFiles,
+    fileCount: allFiles.length,
+    totalLOC,
+    locByExtension: locByExt,
+    directoryTree: dirTree,
     graphStats: { nodeCount: graph.fileCount, edgeCount: graph.edgeCount, buildTimeMs: graph.buildTimeMs },
-    entryFiles, modules, timestamp: Date.now(),
+    entryFiles,
+    modules,
+    timestamp: Date.now(),
   };
 
   const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
@@ -1310,13 +1372,21 @@ export async function incrementalUpdate(
 // ═══════════════════════════════════════
 
 function collectCodeFilesSync(
-  basePath: string, relative: string, result: string[],
-  locByExt: Record<string, number>, fileLOCMap: Map<string, number>, maxFiles: number,
+  basePath: string,
+  relative: string,
+  result: string[],
+  locByExt: Record<string, number>,
+  fileLOCMap: Map<string, number>,
+  maxFiles: number,
 ): void {
   if (result.length >= maxFiles) return;
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(fullPath, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = fs.readdirSync(fullPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const entry of entries) {
     if (result.length >= maxFiles) return;
     if (entry.name.startsWith('.') && entry.name !== '.env') continue;
@@ -1332,7 +1402,9 @@ function collectCodeFilesSync(
           const lines = content.split('\n').length;
           locByExt[ext] = (locByExt[ext] || 0) + lines;
           fileLOCMap.set(rel, lines);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     }
   }
@@ -1342,7 +1414,11 @@ function buildDirectoryTree(basePath: string, relative: string, depth: number, m
   if (depth >= maxDepth) return '';
   const fullPath = path.join(basePath, relative);
   let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(fullPath, { withFileTypes: true }); } catch { return ''; }
+  try {
+    entries = fs.readdirSync(fullPath, { withFileTypes: true });
+  } catch {
+    return '';
+  }
   const indent = '  '.repeat(depth);
   const lines: string[] = [];
   const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.') && !IGNORE_DIRS.has(e.name));
@@ -1363,19 +1439,39 @@ function buildDirectoryTree(basePath: string, relative: string, depth: number, m
 
 function inferEntryFiles(workspacePath: string, allFiles: string[]): string[] {
   const candidates = [
-    'src/index.ts', 'src/index.tsx', 'src/main.ts', 'src/main.tsx',
-    'src/App.tsx', 'src/App.ts', 'src/app.ts',
-    'index.ts', 'index.js', 'main.ts', 'main.js',
-    'app.ts', 'app.js', 'server.ts', 'server.js',
-    'electron/main.ts', 'electron/main.js',
-    'src/lib/index.ts', 'lib/index.ts',
-    'cmd/main.go', 'main.go', 'src/main.rs', 'main.py', 'app.py', 'manage.py',
+    'src/index.ts',
+    'src/index.tsx',
+    'src/main.ts',
+    'src/main.tsx',
+    'src/App.tsx',
+    'src/App.ts',
+    'src/app.ts',
+    'index.ts',
+    'index.js',
+    'main.ts',
+    'main.js',
+    'app.ts',
+    'app.js',
+    'server.ts',
+    'server.js',
+    'electron/main.ts',
+    'electron/main.js',
+    'src/lib/index.ts',
+    'lib/index.ts',
+    'cmd/main.go',
+    'main.go',
+    'src/main.rs',
+    'main.py',
+    'app.py',
+    'manage.py',
   ];
   return candidates.filter(c => allFiles.includes(c)).slice(0, 5) || allFiles.slice(0, 3);
 }
 
 function detectModules(
-  workspacePath: string, allFiles: string[], graph: CodeGraph,
+  workspacePath: string,
+  allFiles: string[],
+  graph: CodeGraph,
   fileLOCMap?: Map<string, number>,
 ): ModuleInfo[] {
   const groups = new Map<string, string[]>();
@@ -1408,7 +1504,13 @@ function detectModules(
     for (const f of files) moduleByFile.set(f, id);
     const loc = fileLOCMap
       ? files.reduce((s, f) => s + (fileLOCMap.get(f) || 0), 0)
-      : files.reduce((s, f) => { try { return s + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length; } catch { return s; } }, 0);
+      : files.reduce((s, f) => {
+          try {
+            return s + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length;
+          } catch {
+            return s;
+          }
+        }, 0);
     modules.push({ id, rootPath: root, files, loc, dependsOn: [], dependedBy: [] });
   }
 
