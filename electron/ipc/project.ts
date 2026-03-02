@@ -351,6 +351,7 @@ export function setupProjectHandlers() {
 
   // v16.0: 获取项目权限开关
   ipcMain.handle('project:get-permissions', async (_event, projectId: string) => {
+    assertProjectId('project:get-permissions', projectId);
     const db = getDb();
     const row = db.prepare('SELECT config FROM projects WHERE id = ?').get(projectId) as { config: string } | undefined;
     if (!row) return { externalRead: false, externalWrite: false, shellExec: false };
@@ -466,6 +467,8 @@ export function setupProjectHandlers() {
     skills?: string | null;          // v11.0: JSON string or null
     max_iterations?: number;         // v18.0: 成员级最大迭代轮数
   }) => {
+    assertNonEmptyString('team:update', 'memberId', memberId);
+    assertObject('team:update', 'fields', fields);
     const db = getDb();
     const sets: string[] = [];
     const vals: Array<string | number | null> = [];
@@ -492,6 +495,7 @@ export function setupProjectHandlers() {
   ipcMain.handle('team:test-member-model', async (_event, _memberId: string, config: {
     provider?: string; apiKey?: string; baseUrl?: string; model?: string;
   }) => {
+    assertObject('team:test-member-model', 'config', config);
     // 合并: 成员配置 > 全局配置
     const globalSettings = getSettings() || { llmProvider: 'openai' as const, apiKey: '', baseUrl: 'https://api.openai.com', strongModel: '', workerModel: '', workerCount: 0, dailyBudgetUsd: 0 };
     const provider = config.provider || globalSettings.llmProvider;
@@ -571,18 +575,22 @@ export function setupProjectHandlers() {
 
   // ── 获取单个项目 ──
   ipcMain.handle('project:get', (_event, id: string) => {
+    assertNonEmptyString('project:get', 'id', id);
     const db = getDb();
     return db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   });
 
   // ── 获取项目的 features ──
   ipcMain.handle('project:get-features', (_event, projectId: string) => {
+    assertProjectId('project:get-features', projectId);
     const db = getDb();
     return db.prepare('SELECT * FROM features WHERE project_id = ? ORDER BY priority ASC, id ASC').all(projectId);
   });
 
   // ── v18.0: Feature 续跑 — 将 paused feature 重置为 todo 状态 ──
   ipcMain.handle('feature:resume', (_event, projectId: string, featureId: string) => {
+    assertProjectId('feature:resume', projectId);
+    assertNonEmptyString('feature:resume', 'featureId', featureId);
     const db = getDb();
     const feature = db.prepare("SELECT status, resume_snapshot FROM features WHERE id = ? AND project_id = ?").get(featureId, projectId) as { status: string; resume_snapshot: string | null } | undefined;
     if (!feature) return { success: false, message: 'Feature 不存在' };
@@ -595,6 +603,7 @@ export function setupProjectHandlers() {
 
   // ── 获取项目的 agents ──
   ipcMain.handle('project:get-agents', (_event, projectId: string) => {
+    assertProjectId('project:get-agents', projectId);
     const db = getDb();
     return db.prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
@@ -607,6 +616,7 @@ export function setupProjectHandlers() {
     type?: string;
     keyword?: string;
   }) => {
+    assertProjectId('project:get-logs', projectId);
     const db = getDb();
     const limit = Math.min(options?.limit ?? 200, 1000);
     const offset = options?.offset ?? 0;
@@ -641,6 +651,7 @@ export function setupProjectHandlers() {
 
   // ── 获取项目统计 ──
   ipcMain.handle('project:get-stats', (_event, projectId: string) => {
+    assertProjectId('project:get-stats', projectId);
     const db = getDb();
     const featureStats = db.prepare(`
       SELECT 
@@ -789,6 +800,7 @@ export function setupProjectHandlers() {
 
   // ── 打开工作区文件夹 ──
   ipcMain.handle('project:open-workspace', async (_event, projectId: string) => {
+    assertProjectId('project:open-workspace', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (project?.workspace_path && fs.existsSync(project.workspace_path)) {
@@ -800,6 +812,7 @@ export function setupProjectHandlers() {
 
   // ── 导出项目为 zip ──
   ipcMain.handle('project:export', async (_event, projectId: string) => {
+    assertProjectId('project:export', projectId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
@@ -847,11 +860,14 @@ export function setupProjectHandlers() {
 
   // ── GitHub 连接测试 ──
   ipcMain.handle('project:test-github', async (_event, repo: string, token: string) => {
+    assertNonEmptyString('project:test-github', 'repo', repo);
+    assertNonEmptyString('project:test-github', 'token', token);
     return testGitHubConnection(repo, token);
   });
 
   // ── 获取上下文快照 (v1.1) ──
   ipcMain.handle('project:get-context-snapshots', (_event, projectId: string) => {
+    assertProjectId('project:get-context-snapshots', projectId);
     const snapshots = getContextSnapshots(projectId);
     const result: Record<string, any> = {};
     for (const [agentId, snap] of snapshots) {
@@ -862,6 +878,7 @@ export function setupProjectHandlers() {
 
   // ── 获取 Agent ReAct 状态 (v1.1) ──
   ipcMain.handle('project:get-react-states', (_event, projectId: string) => {
+    assertProjectId('project:get-react-states', projectId);
     const states = getAgentReactStates(projectId);
     const result: Record<string, any> = {};
     for (const [agentId, state] of states) {
@@ -872,6 +889,7 @@ export function setupProjectHandlers() {
 
   // ── v4.2: 用户验收 — 批量确认所有 awaiting 的 Feature ──
   ipcMain.handle('project:user-accept', (_event, projectId: string, accept: boolean, feedback?: string) => {
+    assertProjectId('project:user-accept', projectId);
     const db = getDb();
 
     if (accept) {
@@ -903,6 +921,8 @@ export function setupProjectHandlers() {
 
   // ── v4.2: 获取 Feature 文档信息 ──
   ipcMain.handle('project:get-feature-docs', (_event, projectId: string, featureId: string) => {
+    assertProjectId('project:get-feature-docs', projectId);
+    assertNonEmptyString('project:get-feature-docs', 'featureId', featureId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { requirement: null, testSpec: null };
@@ -915,6 +935,7 @@ export function setupProjectHandlers() {
 
   // ── v4.2: 获取设计文档 ──
   ipcMain.handle('project:get-design-doc', (_event, projectId: string) => {
+    assertProjectId('project:get-design-doc', projectId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return null;
@@ -924,6 +945,7 @@ export function setupProjectHandlers() {
 
   // ── v4.2: 获取文档变更日志 ──
   ipcMain.handle('project:get-doc-changelog', (_event, projectId: string) => {
+    assertProjectId('project:get-doc-changelog', projectId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return [];
@@ -933,6 +955,7 @@ export function setupProjectHandlers() {
 
   // ── v4.4: 列出所有文档元信息 ──
   ipcMain.handle('project:list-all-docs', (_event, projectId: string) => {
+    assertProjectId('project:list-all-docs', projectId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { design: [], requirements: [], testSpecs: [] };
@@ -946,6 +969,9 @@ export function setupProjectHandlers() {
 
   // ── v4.4: 读取单个文档内容 ──
   ipcMain.handle('project:read-doc', (_event, projectId: string, type: string, id: string) => {
+    assertProjectId('project:read-doc', projectId);
+    assertNonEmptyString('project:read-doc', 'type', type);
+    assertNonEmptyString('project:read-doc', 'id', id);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return null;
@@ -976,6 +1002,7 @@ export function setupProjectHandlers() {
 
   // ── v4.3: 获取变更请求列表 ──
   ipcMain.handle('project:list-changes', (_event, projectId: string) => {
+    assertProjectId('project:list-changes', projectId);
     const db = getDb();
     return db.prepare("SELECT * FROM change_requests WHERE project_id = ? ORDER BY created_at DESC")
       .all(projectId);
@@ -983,6 +1010,7 @@ export function setupProjectHandlers() {
 
   // ── v4.3: 获取影响分析 ──
   ipcMain.handle('project:get-impact-analysis', (_event, changeRequestId: string) => {
+    assertNonEmptyString('project:get-impact-analysis', 'changeRequestId', changeRequestId);
     const db = getDb();
     const row = db.prepare("SELECT * FROM change_requests WHERE id = ?").get(changeRequestId) as ChangeRequestRow | undefined;
     if (!row) return null;
@@ -995,6 +1023,7 @@ export function setupProjectHandlers() {
 
   // ── 分析已有项目 (v5.1: Project Importer) ──
   ipcMain.handle('project:analyze-existing', async (_event, projectId: string) => {
+    assertProjectId('project:analyze-existing', projectId);
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project) return { success: false, error: 'Project not found' };
@@ -1082,6 +1111,7 @@ export function setupProjectHandlers() {
   // ── v7.0: Module Graph + Probe Analysis API ──
 
   ipcMain.handle('project:get-module-graph', (_event, projectId: string) => {
+    assertProjectId('project:get-module-graph', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1091,6 +1121,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('project:get-known-issues', (_event, projectId: string) => {
+    assertProjectId('project:get-known-issues', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1099,6 +1130,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('project:get-probe-reports', (_event, projectId: string) => {
+    assertProjectId('project:get-probe-reports', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1114,6 +1146,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('project:detect-incremental-changes', (_event, projectId: string) => {
+    assertProjectId('project:detect-incremental-changes', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1122,6 +1155,8 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('project:apply-module-correction', (_event, projectId: string, correction: Omit<UserCorrection, 'timestamp'>) => {
+    assertProjectId('project:apply-module-correction', projectId);
+    assertObject('project:apply-module-correction', 'correction', correction);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1131,6 +1166,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('project:get-user-corrections', (_event, projectId: string) => {
+    assertProjectId('project:get-user-corrections', projectId);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
@@ -1152,6 +1188,8 @@ export function setupProjectHandlers() {
 
   // ── 基线上下文预览 (v5.6) ──
   ipcMain.handle('context:preview-baseline', (_event, projectId: string, role: string, tokenBudget?: number) => {
+    assertProjectId('context:preview-baseline', projectId);
+    assertNonEmptyString('context:preview-baseline', 'role', role);
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
@@ -1170,6 +1208,9 @@ export function setupProjectHandlers() {
   // ═══════════════════════════════════════
 
   ipcMain.handle('secrets:set', (_event, projectId: string, key: string, value: string, provider: string) => {
+    assertProjectId('secrets:set', projectId);
+    assertNonEmptyString('secrets:set', 'key', key);
+    assertNonEmptyString('secrets:set', 'value', value);
     try {
       setSecretFn(projectId, key, value, provider as SecretProvider);
       return { success: true };
@@ -1179,6 +1220,8 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('secrets:get', (_event, projectId: string, key: string) => {
+    assertProjectId('secrets:get', projectId);
+    assertNonEmptyString('secrets:get', 'key', key);
     try {
       const value = getSecretFn(projectId, key);
       return { success: true, value };
@@ -1188,6 +1231,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('secrets:list', (_event, projectId: string, provider?: string) => {
+    assertProjectId('secrets:list', projectId);
     try {
       const secrets = listSecretsFn(projectId, provider as SecretProvider | undefined);
       return { success: true, secrets };
@@ -1197,6 +1241,8 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('secrets:delete', (_event, projectId: string, key: string) => {
+    assertProjectId('secrets:delete', projectId);
+    assertNonEmptyString('secrets:delete', 'key', key);
     try {
       const deleted = deleteSecretFn(projectId, key);
       return { success: true, deleted };
@@ -1210,6 +1256,7 @@ export function setupProjectHandlers() {
   // ═══════════════════════════════════════
 
   ipcMain.handle('issues:sync', async (_event, projectId: string) => {
+    assertProjectId('issues:sync', projectId);
     try {
       const { syncIssuesToFeatures } = await import('../engine/issue-watcher');
       const result = await syncIssuesToFeatures(projectId);
@@ -1220,6 +1267,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('issues:list-features', (_event, projectId: string) => {
+    assertProjectId('issues:list-features', projectId);
     try {
       const { getIssueFeatures } = require('../engine/issue-watcher') as typeof import('../engine/issue-watcher');
       const features = getIssueFeatures(projectId);
@@ -1230,6 +1278,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('issues:start-polling', async (_event, projectId: string, intervalMinutes: number) => {
+    assertProjectId('issues:start-polling', projectId);
     try {
       const { startIssuePolling } = await import('../engine/issue-watcher');
       startIssuePolling(projectId, intervalMinutes || 10);
@@ -1240,6 +1289,7 @@ export function setupProjectHandlers() {
   });
 
   ipcMain.handle('issues:stop-polling', async (_event, projectId: string) => {
+    assertProjectId('issues:stop-polling', projectId);
     try {
       const { stopIssuePolling } = await import('../engine/issue-watcher');
       stopIssuePolling(projectId);

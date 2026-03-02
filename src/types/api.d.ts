@@ -349,9 +349,9 @@ interface AutoMaterAPI {
     /** v7.0: 获取用户校正历史 */
     getUserCorrections(projectId: string): Promise<{ success: boolean; corrections?: unknown[]; error?: string }>;
     /** v16.0: 获取项目权限开关 */
-    getPermissions(projectId: string): Promise<{ externalRead: boolean; externalWrite: boolean; shellExec: boolean }>;
+    getPermissions(projectId: string): Promise<{ externalRead: boolean; externalWrite: boolean; shellExec: boolean; readFileLineLimit?: number }>;
     /** v16.0: 更新项目权限开关 */
-    updatePermissions(projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean }): Promise<{ success: boolean }>;
+    updatePermissions(projectId: string, permissions: { externalRead?: boolean; externalWrite?: boolean; shellExec?: boolean; readFileLineLimit?: number }): Promise<{ success: boolean }>;
   };
   /** v3.1: 需求队列 */
   wish: {
