@@ -1,34 +1,44 @@
 ﻿/**
- * Project Importer — 快速项目理解
+ * Project Importer — v7.0 多探针并行探索 + 结构化拼图
  *
- * v6.0: 重写 — 从 4-phase 重量级流水线简化为 2-step 快速理解：
+ * 三阶段流水线:
  *
- * Step 1: 轻量收集 (~1s)
- *   - 目录树 (depth ≤ 4)
- *   - 关键配置文件内容 (package.json, README, tsconfig, etc.)
- *   - Repo Map 符号索引 (函数签名、类、export)
- *   - 入口文件前 200 行
- *   → 所有信息拼成一个紧凑的项目快照 (~5-15K tokens)
+ * Phase 0: 骨架扫描 (零 LLM, ~1-2s)
+ *   - 目录树 + 技术栈检测 + 文件统计
+ *   - Code Graph 构建 (import/export 依赖图)
+ *   - Repo Map (符号索引)
+ *   - 项目特征画像 (ProjectProfile)
+ *   - 社区检测 + Hub 文件识别 + 种子文件推断
+ *   → 产出: ScanResult + ExplorationPlan
  *
- * Step 2: 单次 LLM 调用 (~10-30s)
- *   - 将项目快照发给 strong 模型
- *   - 生成: ARCHITECTURE.md + 模块列表 + skeleton.json
- *   - 直接写入 .automater/ 目录
+ * Phase 1: 并行探测 (N 个探针, 每个 1-3 轮 LLM, fast 模型)
+ *   - 6 类探针: Entry / Module / API Boundary / Data Model / Config / Smell
+ *   - 每个探针独立 context, 自主探索 1-3 轮
+ *   → 产出: ProbeReport[] + 写入 .automater/analysis/probes/
  *
- * 设计理念: 模拟开发者"把项目丢给大模型"的自然工作流
- *           秒级完成，不做无谓的全量文件读取
+ * Phase 2: 拼图合成 (strong 模型, 1 次调用)
+ *   - 综合所有探针报告 + 骨架数据
+ *   → 产出: module-graph.json + ARCHITECTURE.md + known-issues.md
  *
  * @module project-importer
  */
 
 import fs from 'fs';
 import path from 'path';
-import { buildCodeGraph, type CodeGraph } from './code-graph';
+import {
+  buildCodeGraph, type CodeGraph,
+  detectCommunities, getHubFiles, buildProjectProfile,
+} from './code-graph';
 import { generateRepoMap } from './repo-map';
 import { callLLM, getSettings } from './llm-client';
-// model-selector no longer needed for import (v6.0 uses settings.strongModel directly)
 import { writeDoc } from './doc-manager';
 import { createLogger } from './logger';
+import { planProbes, executeProbes, mergeFindings } from './probe-orchestrator';
+import type {
+  ScanResult, SeedFile, ProbeReport, FuseOutput,
+  ModuleGraph, ImportStats, ImportProgressCallbackV7,
+  ImportProgressEvent, ProbeProgress,
+} from './probe-types';
 
 const log = createLogger('project-importer');
 
@@ -103,8 +113,11 @@ export type ImportProgressCallback = (phase: number, step: string, progress: num
 // ═══════════════════════════════════════
 
 const ANALYSIS_DIR = '.automater/analysis';
+const PROBES_DIR = '.automater/analysis/probes';
 const MODULES_DIR = '.automater/analysis/modules';
 const SKELETON_FILE = '.automater/analysis/skeleton.json';
+const MODULE_GRAPH_FILE = '.automater/analysis/module-graph.json';
+const KNOWN_ISSUES_FILE = '.automater/docs/KNOWN-ISSUES.md';
 const MAX_SCAN_FILES = 5000;
 
 // 忽略的目录
@@ -288,59 +301,396 @@ function quickFileStats(workspacePath: string, maxFiles = 5000): {
 }
 
 // ═══════════════════════════════════════
-// Step 2: 单次 LLM 调用 — 项目理解 + 架构文档生成
+// Phase 0: Enhanced Scan (zero LLM, ~1-2s)
 // ═══════════════════════════════════════
 
-interface ImportLLMResult {
-  architectureMd: string;
-  modules: Array<{ id: string; rootPath: string; responsibility: string }>;
-  designMd: string;
+/**
+ * Phase 0: 骨架扫描 — 收集项目快照 + Code Graph + 社区检测 + 种子推断。
+ * 零 LLM 调用，通常 1-2 秒。
+ */
+async function phase0Scan(
+  workspacePath: string,
+  onProgress?: (event: ImportProgressEvent) => void,
+): Promise<ScanResult> {
+  const t0 = Date.now();
+  onProgress?.({ phase: 'scan', step: '收集项目信息...', progress: 0.1 });
+
+  // 1. Collect basic snapshot (reuse v6.0 logic)
+  const snapshot = await collectProjectSnapshot(workspacePath);
+
+  onProgress?.({ phase: 'scan', step: '构建代码依赖图...', progress: 0.3 });
+
+  // 2. Build code graph
+  const graph = await buildCodeGraph(workspacePath, 2000);
+
+  onProgress?.({ phase: 'scan', step: '分析项目结构...', progress: 0.5 });
+
+  // 3. Collect all code files
+  const allCodeFiles: string[] = [];
+  const locByExt: Record<string, number> = {};
+  const fileLOCMap = new Map<string, number>();
+  collectCodeFilesSync(workspacePath, '', allCodeFiles, locByExt, fileLOCMap, MAX_SCAN_FILES);
+
+  // 4. Community detection
+  const communities = detectCommunities(graph);
+
+  // 5. Hub files
+  const hubFiles = getHubFiles(graph, communities, 20);
+
+  // 6. Entry files
+  const entryFiles = inferEntryFiles(workspacePath, allCodeFiles);
+
+  // 7. Seed files for probes
+  const seedFiles = buildSeedFiles(entryFiles, hubFiles, allCodeFiles, fileLOCMap);
+
+  onProgress?.({ phase: 'scan', step: '生成探针计划...', progress: 0.8 });
+
+  // 8. README check for project profile
+  let readmeExists = false;
+  let readmeLength = 0;
+  for (const name of ['README.md', 'README', 'readme.md']) {
+    const fp = path.join(workspacePath, name);
+    if (fs.existsSync(fp)) {
+      readmeExists = true;
+      try { readmeLength = fs.statSync(fp).size; } catch { /* skip */ }
+      break;
+    }
+  }
+
+  // 9. Build project profile
+  const profile = buildProjectProfile(
+    graph, snapshot.fileCount, snapshot.locByExtension,
+    communities, hubFiles, readmeExists, readmeLength, entryFiles,
+  );
+
+  // 10. Build repo map
+  const repoMap = snapshot.repoMap;
+
+  // 11. Create ScanResult (without explorationPlan — planProbes fills that)
+  const scanResult: ScanResult = {
+    snapshot,
+    graph,
+    repoMap,
+    profile,
+    seedFiles,
+    explorationPlan: { probes: [], estimatedTotalTokens: 0, estimatedDurationMs: 0 },
+    communities,
+    hubFiles,
+    allCodeFiles,
+    workspacePath,
+  };
+
+  // 12. Generate exploration plan
+  scanResult.explorationPlan = planProbes(scanResult);
+
+  const scanMs = Date.now() - t0;
+  log.info(`Phase 0 complete in ${scanMs}ms`, {
+    files: snapshot.fileCount,
+    graphNodes: graph.fileCount,
+    graphEdges: graph.edgeCount,
+    communities: communities.count,
+    hubs: hubFiles.length,
+    probes: scanResult.explorationPlan.probes.length,
+    profile: JSON.stringify(profile),
+  });
+
+  onProgress?.({
+    phase: 'scan',
+    step: `骨架完成: ${snapshot.fileCount} 文件, ${snapshot.totalLOC} LOC, ${snapshot.techStack.join('+')}, ${communities.count} 模块, ${scanResult.explorationPlan.probes.length} 探针`,
+    progress: 1.0,
+  });
+
+  return scanResult;
 }
 
-async function analyzeWithLLM(
-  snapshot: Awaited<ReturnType<typeof collectProjectSnapshot>>,
-  projectName: string,
+/**
+ * Build seed files from entry files, hubs, and largest files.
+ */
+function buildSeedFiles(
+  entryFiles: string[],
+  hubFiles: Array<{ file: string; importedByCount: number; importCount: number }>,
+  allCodeFiles: string[],
+  fileLOCMap: Map<string, number>,
+): SeedFile[] {
+  const seeds: SeedFile[] = [];
+  const seen = new Set<string>();
+
+  // Entry files
+  for (const file of entryFiles) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    seeds.push({ file, reason: 'entry', importCount: 0, importedByCount: 0 });
+  }
+
+  // Hub files
+  for (const hub of hubFiles.slice(0, 10)) {
+    if (seen.has(hub.file)) continue;
+    seen.add(hub.file);
+    seeds.push({
+      file: hub.file,
+      reason: 'hub',
+      importCount: hub.importCount,
+      importedByCount: hub.importedByCount,
+    });
+  }
+
+  // Largest files by LOC
+  const byLOC = allCodeFiles
+    .filter(f => !seen.has(f))
+    .sort((a, b) => (fileLOCMap.get(b) || 0) - (fileLOCMap.get(a) || 0));
+  for (const file of byLOC.slice(0, 5)) {
+    seeds.push({ file, reason: 'largest', importCount: 0, importedByCount: 0 });
+  }
+
+  return seeds;
+}
+
+// ═══════════════════════════════════════
+// Phase 1: Parallel Probing (fast LLM, ~30s-3min)
+// ═══════════════════════════════════════
+
+/**
+ * Phase 1: 并行探测 — 执行所有探针，收集 ProbeReport[]
+ */
+async function phase1Probe(
+  scan: ScanResult,
   signal?: AbortSignal,
-  onProgress?: ImportProgressCallback,
-): Promise<ImportLLMResult> {
+  onProgress?: (event: ImportProgressEvent) => void,
+): Promise<ProbeReport[]> {
   const settings = getSettings();
   if (!settings) throw new Error('未配置 LLM 设置，请先在设置页面配置 API');
-  if (!settings.strongModel?.trim()) throw new Error('未配置 Strong 模型，请先在设置页面配置');
+
+  const probeStatuses = new Map<string, ProbeProgress>();
+
+  // Initialize all probes as queued
+  for (const config of scan.explorationPlan.probes) {
+    probeStatuses.set(config.id, {
+      probeId: config.id,
+      type: config.type,
+      status: 'queued',
+      description: config.description,
+      progress: 0,
+    });
+  }
+
+  const broadcastProgress = (step: string, overallProgress: number) => {
+    onProgress?.({
+      phase: 'probe',
+      step,
+      progress: overallProgress,
+      probes: [...probeStatuses.values()],
+    });
+  };
+
+  broadcastProgress(
+    `启动 ${scan.explorationPlan.probes.length} 个探针...`,
+    0.0,
+  );
+
+  const reports = await executeProbes(scan, scan.explorationPlan, {
+    concurrency: Math.min(settings.workerCount || 3, 4),
+    signal,
+    budgetUsd: settings.dailyBudgetUsd > 0 ? Math.min(settings.dailyBudgetUsd, 1.0) : 1.0,
+    settings,
+    onProbeComplete: (report) => {
+      probeStatuses.set(report.probeId, {
+        probeId: report.probeId,
+        type: report.type,
+        status: report.findings.length > 0 ? 'completed' : 'failed',
+        description: `${report.findings.length} 发现, ${report.filesExamined.length} 文件`,
+        progress: 1.0,
+      });
+      const completed = [...probeStatuses.values()].filter(p => p.status === 'completed' || p.status === 'failed').length;
+      const total = probeStatuses.size;
+      broadcastProgress(
+        `探针 ${completed}/${total} 完成`,
+        completed / total,
+      );
+    },
+    onProgress: (probeId, status, progress) => {
+      const existing = probeStatuses.get(probeId);
+      if (existing) {
+        existing.status = 'running';
+        existing.description = status;
+        existing.progress = progress;
+      }
+    },
+  });
+
+  // Save probe reports to disk
+  const probesDir = path.join(scan.workspacePath, PROBES_DIR);
+  fs.mkdirSync(probesDir, { recursive: true });
+  for (const report of reports) {
+    const reportPath = path.join(probesDir, `${report.probeId}.json`);
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+    // Also save markdown version
+    const mdPath = path.join(probesDir, `${report.probeId}.md`);
+    fs.writeFileSync(mdPath, report.markdown, 'utf-8');
+  }
+
+  log.info(`Phase 1 complete`, {
+    probes: reports.length,
+    totalFindings: reports.reduce((s, r) => s + r.findings.length, 0),
+    totalTokens: reports.reduce((s, r) => s + r.tokensUsed, 0),
+  });
+
+  return reports;
+}
+
+// ═══════════════════════════════════════
+// Phase 2: Fuse (strong LLM, 1 call)
+// ═══════════════════════════════════════
+
+/**
+ * Phase 2: 拼图合成 — 用 strong 模型综合所有探针报告，生成最终文档。
+ */
+async function phase2Fuse(
+  scan: ScanResult,
+  reports: ProbeReport[],
+  signal?: AbortSignal,
+  onProgress?: (event: ImportProgressEvent) => void,
+): Promise<FuseOutput> {
+  const settings = getSettings();
+  if (!settings) throw new Error('未配置 LLM 设置');
+
+  onProgress?.({ phase: 'fuse', step: '综合所有探针报告...', progress: 0.1 });
 
   const model = settings.strongModel;
-  log.info(`Step 2: Calling LLM`, { model });
-  onProgress?.(1, `正在调用大模型分析项目... (${model})`, 0.1);
+  const projectName = path.basename(scan.workspacePath);
 
-  const prompt = `你是一位资深全栈架构师。我将给你一个项目的完整快照，请分析并生成结构化输出。
+  // Build the fuse prompt with all probe reports
+  const probesByType = groupProbesByType(reports);
+  const merged = mergeFindings(reports, scan.snapshot.fileCount);
 
-## 项目名称
-${projectName}
+  const prompt = buildFusePrompt(projectName, scan, probesByType, merged);
 
-## 技术栈
-${snapshot.techStack.join(', ') || '未检测到'}
+  onProgress?.({ phase: 'fuse', step: `调用 ${model} 综合分析...`, progress: 0.3 });
 
-## 目录结构
-\`\`\`
-${snapshot.directoryTree}
-\`\`\`
+  const result = await callLLM(
+    settings, model,
+    [
+      {
+        role: 'system',
+        content: '你是一位资深软件架构分析师。你的任务是综合多个独立探针的分析报告，生成全面准确的项目架构文档和结构化模块图。全部用中文回复。',
+      },
+      { role: 'user', content: prompt },
+    ],
+    signal,
+    8192,
+  );
 
-## 关键配置文件
-${snapshot.keyFileContents || '(无)'}
+  onProgress?.({ phase: 'fuse', step: '解析综合分析结果...', progress: 0.8 });
 
-## 代码结构索引 (函数/类/export 符号)
-${snapshot.repoMap || '(无)'}
+  // Parse output
+  const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/);
+  const moduleGraphMatch = result.content.match(/```module-graph\n([\s\S]*?)```/) || result.content.match(/```json\n([\s\S]*?)```/);
+  const issuesMatch = result.content.match(/```known-issues\n([\s\S]*?)```/);
 
-## 入口文件代码片段
-${snapshot.entryFileSnippets || '(无)'}
+  const architectureMd = archMatch?.[1]?.trim() || result.content;
+  const knownIssuesMd = issuesMatch?.[1]?.trim() || '';
 
-## 统计信息
-- 代码文件数: ${snapshot.fileCount}
-- 预估代码行数: ${snapshot.totalLOC}
-- 语言分布: ${Object.entries(snapshot.locByExtension).map(([k, v]) => `${k}: ~${v}`).join(', ')}
+  // Parse module graph JSON
+  let moduleGraph: ModuleGraph = { nodes: [], edges: [] };
+  if (moduleGraphMatch?.[1]) {
+    try {
+      moduleGraph = JSON.parse(moduleGraphMatch[1].trim());
+    } catch {
+      log.warn('Failed to parse module-graph JSON from LLM output');
+    }
+  }
 
----
+  // Build enriched skeleton
+  const modules = detectModules(scan.workspacePath, scan.allCodeFiles, scan.graph);
+  const enrichedSkeleton: ProjectSkeleton = {
+    name: projectName,
+    techStack: scan.snapshot.techStack,
+    packageFiles: scan.snapshot.packageFiles,
+    fileCount: scan.snapshot.fileCount,
+    totalLOC: scan.snapshot.totalLOC,
+    locByExtension: scan.snapshot.locByExtension,
+    directoryTree: scan.snapshot.directoryTree,
+    graphStats: {
+      nodeCount: scan.graph.fileCount,
+      edgeCount: scan.graph.edgeCount,
+      buildTimeMs: scan.graph.buildTimeMs,
+    },
+    entryFiles: scan.seedFiles.filter(s => s.reason === 'entry').map(s => s.file),
+    modules,
+    timestamp: Date.now(),
+  };
 
-请严格按以下格式输出三个部分:
+  // Calculate stats
+  const stats: ImportStats = {
+    totalProbes: reports.length,
+    totalFilesRead: new Set(reports.flatMap(r => r.filesExamined)).size,
+    totalTokensUsed: reports.reduce((s, r) => s + r.tokensUsed, 0)
+      + (result.inputTokens || 0) + (result.outputTokens || 0),
+    totalCostUsd: 0, // Calculated below
+    totalDurationMs: 0, // Set by caller
+    coveragePercent: merged.coveragePercent,
+  };
+  // Rough cost estimate
+  stats.totalCostUsd = (stats.totalTokensUsed / 1_000_000) * 0.50; // blended rate
+
+  return {
+    moduleGraph,
+    architectureMd,
+    knownIssuesMd,
+    enrichedSkeleton,
+    stats,
+  };
+}
+
+/**
+ * Build the Phase 2 fuse prompt.
+ */
+function buildFusePrompt(
+  projectName: string,
+  scan: ScanResult,
+  probesByType: Map<string, ProbeReport[]>,
+  merged: { findings: any[]; conflicts: any[]; coveragePercent: number },
+): string {
+  const sections: string[] = [];
+
+  sections.push(`## 项目骨架 (Phase 0)
+- 名称: ${projectName}
+- 技术栈: ${scan.snapshot.techStack.join(', ')}
+- 文件数: ${scan.snapshot.fileCount}
+- 代码行数: ~${scan.snapshot.totalLOC}
+- Code Graph: ${scan.graph.fileCount} 节点, ${scan.graph.edgeCount} 边
+- 社区数: ${scan.communities.count}
+- Hub 文件: ${scan.hubFiles.slice(0, 5).map(h => h.file).join(', ')}
+- 项目画像: ${JSON.stringify(scan.profile)}`);
+
+  // Add probe reports grouped by type
+  const typeLabels: Record<string, string> = {
+    entry: '入口追踪', module: '模块纵深', 'api-boundary': 'API 边界',
+    'data-model': '数据模型', 'config-infra': '配置/基础设施', smell: '异常模式',
+  };
+
+  for (const [type, label] of Object.entries(typeLabels)) {
+    const probes = probesByType.get(type);
+    if (!probes || probes.length === 0) continue;
+    sections.push(`\n## ${label}探针报告`);
+    for (const probe of probes) {
+      sections.push(`### ${probe.probeId} (置信度: ${probe.confidence}, 文件: ${probe.filesExamined.length})`);
+      // Use markdown report, truncated to avoid token overflow
+      const md = probe.markdown.slice(0, 3000);
+      sections.push(md);
+    }
+  }
+
+  if (merged.conflicts.length > 0) {
+    sections.push(`\n## ⚠️ 探针矛盾\n${merged.conflicts.map(c => `- ${c.findingA} vs ${c.findingB}: ${c.resolution}`).join('\n')}`);
+  }
+
+  sections.push(`\n## 统计
+- 探针总数: ${[...probesByType.values()].flat().length}
+- 覆盖率: ${merged.coveragePercent}%
+- 发现总数: ${merged.findings.length}`);
+
+  sections.push(`\n---\n
+请综合以上所有探针报告，生成以下三个部分:
 
 \`\`\`architecture
 # ${projectName} — 系统架构文档
@@ -352,13 +702,13 @@ ${snapshot.entryFileSnippets || '(无)'}
 (列出核心技术、框架、运行时)
 
 ## 3. 系统架构
-(分层或分模块描述整体架构)
+(分层或分模块描述整体架构，引用具体文件名和函数名)
 
 ## 4. 核心模块
-(每个核心模块的职责、交互关系)
+(每个核心模块的职责、公开 API、关键类型、交互关系)
 
 ## 5. 数据流
-(描述主要数据流向)
+(描述主要数据流向，从入口到数据层)
 
 ## 6. 关键设计决策
 (架构上的重要选择和理由)
@@ -367,74 +717,51 @@ ${snapshot.entryFileSnippets || '(无)'}
 (如何扩展、当前局限)
 \`\`\`
 
-\`\`\`modules
-- id: 模块ID | path: 相对路径 | 职责: 一句话描述
-- id: 模块ID | path: 相对路径 | 职责: 一句话描述
-(列出所有识别到的功能模块，每行一个)
+\`\`\`module-graph
+{
+  "nodes": [
+    {"id": "模块ID", "type": "module|entry-point|api-layer|data-layer|config|utility", "path": "相对路径", "responsibility": "职责", "publicAPI": ["导出接口"], "keyTypes": ["关键类型"], "patterns": ["设计模式"], "issues": ["技术债"], "fileCount": 0, "loc": 0}
+  ],
+  "edges": [
+    {"source": "源模块ID", "target": "目标模块ID", "type": "import|dataflow|event|config|ipc", "weight": 1}
+  ]
+}
 \`\`\`
 
-\`\`\`design
-# ${projectName} — 总览设计文档
+\`\`\`known-issues
+# ${projectName} — 已知问题与技术债
 
-## 项目背景
-(项目要解决的问题)
+(列出所有探针发现的问题，按严重度排序，包含具体位置和修复建议)
+\`\`\`
 
-## 核心功能
-(主要功能模块列表)
+当探针报告存在矛盾时，标注 [⚠️ 交叉验证冲突] 并给出最可能的解释。
+优先信任高置信度探针的发现。使用具体的函数名、类型名、文件路径。`);
 
-## 用户场景
-(典型使用场景)
+  return sections.join('\n');
+}
 
-## 技术选型
-(为什么选择这些技术)
-\`\`\``;
-
-  const result = await callLLM(settings, model, [
-    { role: 'system', content: '你是一位资深软件架构师，擅长快速理解代码项目并生成清晰的技术文档。全部用中文回复。' },
-    { role: 'user', content: prompt },
-  ], signal, 8192);
-
-  onProgress?.(1, '大模型分析完成，正在解析结果...', 0.9);
-  log.info(`Step 2: LLM responded`, { inputTokens: result.inputTokens, outputTokens: result.outputTokens });
-
-  // 解析三个代码块
-  const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/);
-  const modulesMatch = result.content.match(/```modules\n([\s\S]*?)```/);
-  const designMatch = result.content.match(/```design\n([\s\S]*?)```/);
-
-  const architectureMd = archMatch?.[1]?.trim() || result.content;
-  const designMd = designMatch?.[1]?.trim() || '';
-
-  // 解析模块列表
-  const modules: ImportLLMResult['modules'] = [];
-  if (modulesMatch?.[1]) {
-    const lines = modulesMatch[1].trim().split('\n');
-    for (const line of lines) {
-      const m = line.match(/id:\s*(.+?)\s*\|\s*path:\s*(.+?)\s*\|\s*职责:\s*(.+)/);
-      if (m) {
-        modules.push({ id: m[1].trim(), rootPath: m[2].trim(), responsibility: m[3].trim() });
-      } else {
-        const simple = line.match(/^-\s*(.+?)[:：]\s*(.+)/);
-        if (simple) {
-          const id = simple[1].trim().replace(/[\/\\\s]/g, '-').toLowerCase();
-          modules.push({ id, rootPath: simple[1].trim(), responsibility: simple[2].trim() });
-        }
-      }
-    }
+/**
+ * Group probe reports by type.
+ */
+function groupProbesByType(reports: ProbeReport[]): Map<string, ProbeReport[]> {
+  const groups = new Map<string, ProbeReport[]>();
+  for (const report of reports) {
+    if (!groups.has(report.type)) groups.set(report.type, []);
+    groups.get(report.type)!.push(report);
   }
-
-  return { architectureMd, modules, designMd };
+  return groups;
 }
 
 // ═══════════════════════════════════════
-// 主入口: importProject (v6.0 — 2步快速理解)
+// 主入口: importProject (v7.0 — 三阶段流水线)
 // ═══════════════════════════════════════
 
 /**
- * v6.0: 重写的项目导入 — 2步完成，通常 <30s
+ * v7.0: 三阶段项目导入
  *
- * Step 1: 轻量收集项目快照 (~1s)
- * Step 2: 单次 LLM 调用生成架构文档 (~10-30s)
+ * Phase 0: 骨架扫描 (~1-2s, 零 LLM)
+ * Phase 1: 并行探测 (~30s-3min, fast 模型)
+ * Phase 2: 拼图合成 (~10-30s, strong 模型)
  */
 export async function importProject(
   workspacePath: string,
@@ -449,89 +776,103 @@ export async function importProject(
 }> {
   const t0 = Date.now();
   const projectName = path.basename(workspacePath);
-  log.info(`=== Import Start (v6.0) ===`, { workspacePath, projectId });
-  log.info('=== Import Start (v6.0) ===', { workspacePath, projectId });
+  log.info(`=== Import Start (v7.0) ===`, { workspacePath, projectId });
 
-  // ── Step 1: 收集项目快照 ──
-  onProgress?.(0, '正在收集项目信息...', 0.1);
-  const snapshot = await collectProjectSnapshot(workspacePath);
-  const step1Ms = Date.now() - t0;
-  log.info(`Step 1 done in ${step1Ms}ms`);
-  onProgress?.(0, `已收集项目快照 (${snapshot.fileCount} 文件, ${snapshot.techStack.join(', ')})`, 1.0);
-
-  if (signal?.aborted) throw new Error('Import aborted');
-
-  // ── Step 2: LLM 分析 ──
-  const llmResult = await analyzeWithLLM(snapshot, projectName, signal, onProgress);
-  const step2Ms = Date.now() - t0;
-  log.info(`Step 2 done in ${step2Ms}ms`, { modules: llmResult.modules.length });
-
-  if (signal?.aborted) throw new Error('Import aborted');
-
-  // ── 写入结果 ──
-  onProgress?.(1, '正在保存分析结果...', 0.95);
-
-  const modules: ModuleInfo[] = llmResult.modules.map(m => ({
-    id: m.id,
-    rootPath: m.rootPath,
-    files: [],
-    loc: 0,
-    dependsOn: [],
-    dependedBy: [],
-  }));
-
-  const skeleton: ProjectSkeleton = {
-    name: projectName,
-    techStack: snapshot.techStack,
-    packageFiles: snapshot.packageFiles,
-    fileCount: snapshot.fileCount,
-    totalLOC: snapshot.totalLOC,
-    locByExtension: snapshot.locByExtension,
-    directoryTree: snapshot.directoryTree,
-    graphStats: { nodeCount: 0, edgeCount: 0, buildTimeMs: 0 },
-    entryFiles: [],
-    modules,
-    timestamp: Date.now(),
+  // Wrap legacy callback into v7.0 format
+  const emitProgress = (event: ImportProgressEvent) => {
+    const phaseNum = event.phase === 'scan' ? 0 : event.phase === 'probe' ? 1 : 2;
+    onProgress?.(phaseNum, event.step, event.progress);
   };
 
-  const summaries: ModuleSummary[] = llmResult.modules.map(m => ({
-    moduleId: m.id,
-    rootPath: m.rootPath,
-    responsibility: m.responsibility,
-    publicAPI: [],
-    keyTypes: [],
+  // ── Phase 0: Scan ──
+  const scan = await phase0Scan(workspacePath, emitProgress);
+  if (signal?.aborted) throw new Error('Import aborted');
+
+  // ── Phase 1: Probe ──
+  const reports = await phase1Probe(scan, signal, emitProgress);
+  if (signal?.aborted) throw new Error('Import aborted');
+
+  // ── Phase 2: Fuse ──
+  const fuse = await phase2Fuse(scan, reports, signal, emitProgress);
+  const totalMs = Date.now() - t0;
+  fuse.stats.totalDurationMs = totalMs;
+
+  // ── Write outputs ──
+  emitProgress({ phase: 'fuse', step: '正在保存分析结果...', progress: 0.95 });
+
+  const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
+  const docsDir = path.join(workspacePath, '.automater/docs');
+  fs.mkdirSync(analysisDir, { recursive: true });
+  fs.mkdirSync(docsDir, { recursive: true });
+
+  // skeleton.json
+  fs.writeFileSync(
+    path.join(workspacePath, SKELETON_FILE),
+    JSON.stringify(fuse.enrichedSkeleton, null, 2), 'utf-8',
+  );
+
+  // module-graph.json
+  fs.writeFileSync(
+    path.join(workspacePath, MODULE_GRAPH_FILE),
+    JSON.stringify(fuse.moduleGraph, null, 2), 'utf-8',
+  );
+
+  // ARCHITECTURE.md
+  fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), fuse.architectureMd, 'utf-8');
+
+  // KNOWN-ISSUES.md
+  let docsGenerated = 0;
+  if (fuse.knownIssuesMd) {
+    fs.writeFileSync(path.join(workspacePath, KNOWN_ISSUES_FILE), fuse.knownIssuesMd, 'utf-8');
+    docsGenerated++;
+  }
+  if (fuse.architectureMd) docsGenerated++;
+
+  // Import stats
+  fs.writeFileSync(
+    path.join(analysisDir, 'import-stats.json'),
+    JSON.stringify(fuse.stats, null, 2), 'utf-8',
+  );
+
+  // Module summaries (for backward compat with orchestrator)
+  const summaries: ModuleSummary[] = fuse.moduleGraph.nodes.map(node => ({
+    moduleId: node.id,
+    rootPath: node.path,
+    responsibility: node.responsibility,
+    publicAPI: node.publicAPI,
+    keyTypes: node.keyTypes,
     dependencies: '',
-    fullText: m.responsibility,
+    fullText: node.responsibility,
     tokensUsed: 0,
   }));
 
-  // 写入 skeleton.json
-  const analysisDir = path.join(workspacePath, ANALYSIS_DIR);
-  fs.mkdirSync(analysisDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(workspacePath, SKELETON_FILE),
-    JSON.stringify(skeleton, null, 2), 'utf-8',
-  );
+  log.info(`=== Import Complete (v7.0) ===`, {
+    totalMs,
+    probes: reports.length,
+    findings: reports.reduce((s, r) => s + r.findings.length, 0),
+    coverage: `${fuse.stats.coveragePercent}%`,
+    tokens: fuse.stats.totalTokensUsed,
+    cost: `$${fuse.stats.totalCostUsd.toFixed(4)}`,
+    docs: docsGenerated,
+    moduleGraphNodes: fuse.moduleGraph.nodes.length,
+    moduleGraphEdges: fuse.moduleGraph.edges.length,
+  });
 
-  // 写入 ARCHITECTURE.md
-  const docsDir = path.join(workspacePath, '.automater/docs');
-  fs.mkdirSync(docsDir, { recursive: true });
-  fs.writeFileSync(path.join(docsDir, 'ARCHITECTURE.md'), llmResult.architectureMd, 'utf-8');
+  emitProgress({
+    phase: 'fuse',
+    step: `✅ 分析完成! ${scan.snapshot.fileCount} 文件, ${fuse.moduleGraph.nodes.length} 模块, ${fuse.stats.coveragePercent}% 覆盖率, $${fuse.stats.totalCostUsd.toFixed(2)}`,
+    progress: 1.0,
+    done: true,
+    coveragePercent: fuse.stats.coveragePercent,
+    costUsd: fuse.stats.totalCostUsd,
+  });
 
-  // 写入设计文档
-  let docsGenerated = 0;
-  if (llmResult.designMd) {
-    writeDoc(workspacePath, 'design', llmResult.designMd, 'project-importer', '项目导入自动生成总览设计文档', 'design-overview');
-    docsGenerated++;
-  }
-  if (llmResult.architectureMd) docsGenerated++;
-
-  const totalMs = Date.now() - t0;
-  log.info(`=== Import Complete ===`, { totalMs, docsGenerated, modules: modules.length });
-  log.info('=== Import Complete (v6.0) ===', { ms: totalMs, files: skeleton.fileCount, modules: modules.length, docs: docsGenerated });
-  onProgress?.(1, `分析完成! ${skeleton.fileCount} 文件, ${modules.length} 模块, ${docsGenerated} 文档`, 1.0);
-
-  return { skeleton, summaries, architectureMd: llmResult.architectureMd, docsGenerated };
+  return {
+    skeleton: fuse.enrichedSkeleton,
+    summaries,
+    architectureMd: fuse.architectureMd,
+    docsGenerated,
+  };
 }
 
 // ═══════════════════════════════════════
