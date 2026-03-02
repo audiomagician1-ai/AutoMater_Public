@@ -1,11 +1,11 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-02 | 版本: v15.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-02 | 版本: v20.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v15.0 — 全自动 CI/CD Pipeline + ReAct DevOps Agent + 扩展部署工具集 + **UX 体验优化 Sprint**
-**最高优先级**: 代码质量治理 (类型安全, 测试覆盖, 文档同步)
+**当前阶段**: v20.0 — Agent 智能增强 + 能力差距分析15项改进 + 多模态交互 + 安全加固
+**最高优先级**: Agent 产出质量提升 (验证门控, 语义死循环检测, 自适应上下文)
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
 ## 2. PROJECT IDENTITY
@@ -23,9 +23,9 @@
 | State | Zustand 5 (单 Store, Map-based) |
 | Agent Engine | TypeScript (Electron Main Process, 全同步架构) |
 | LLM | 统一适配层: OpenAI 兼容 + Anthropic 原生双协议 |
-| Database | SQLite (better-sqlite3, 同步 API, **19 张表**, 10 版迁移) |
+| Database | SQLite (better-sqlite3, 同步 API, **19 张表**, 12 版迁移) |
 | Build | pnpm + Vite (renderer) + tsc (main/preload) + electron-builder |
-| Test | Vitest 4 + @vitest/coverage-v8 (31 测试文件) |
+| Test | Vitest 4 + @vitest/coverage-v8 (43 测试文件, 817 tests) |
 | Lint | ESLint 10 + Prettier 3 |
 | Package | ~355MB Windows installer (win:dir) |
 
@@ -36,7 +36,7 @@ AutoMater/
 ├── electron/                   # Electron 主进程
 │   ├── main.ts                 # 入口, 窗口管理, IPC 注册
 │   ├── preload.ts              # Context Bridge (22 个命名空间)
-│   ├── db.ts                   # SQLite 数据库 (19 张表, 10 版 Migration)
+│   ├── db.ts                   # SQLite 数据库 (19 张表, 12 版 Migration)
 │   ├── ipc/                    # IPC Handlers (11 个文件)
 │   │   ├── project.ts          # project:* (CRUD, start, stop, analyze, docs, changes)
 │   │   ├── meta-agent.ts       # meta-agent:* (chat, config, memory CRUD)
@@ -51,28 +51,22 @@ AutoMater/
 │   │   └── workspace.ts        # workspace:* (tree, read-file, get-path)
 │   └── engine/                 # Agent 引擎核心
 │       ├── phases/             # 编排器拆分阶段 (9 个文件)
-│       │   ├── index.ts        # 阶段注册入口
-│       │   ├── pm-phase.ts     # Phase 1: PM 需求分析
-│       │   ├── architect-phase.ts  # Phase 2: 架构设计
-│       │   ├── bootstrap-phase.ts  # Phase 3: 批量拆分
-│       │   ├── worker-phase.ts # Phase 4b: Developer + QA
-│       │   ├── devops-phase.ts # Phase 4e: 快速构建验证 (legacy)
-│       │   ├── deploy-phase.ts # Phase 4e: 全自动部署 Pipeline (v15.0, ReAct)
-│       │   ├── docs-phase.ts   # Phase 4d: 增量文档
-│       │   ├── finalize-phase.ts   # Phase 5: 汇总验收
-│       │   └── shared.ts       # 阶段共享工具
 │       ├── probes/             # 项目分析探针 (8 个文件)
 │       │   ├── index.ts, base-probe.ts
 │       │   ├── api-boundary-probe.ts, config-infra-probe.ts
 │       │   ├── data-model-probe.ts, entry-probe.ts
 │       │   ├── module-probe.ts, smell-probe.ts
 │       │   └──
-│       ├── __tests__/          # 单元测试 (31 个文件)
+│       ├── __tests__/          # 单元测试 (43 个文件, 817 tests)
 │       ├── orchestrator.ts     # 多阶段编排器 (入口, v12 可配置工作流)
-│       ├── react-loop.ts       # Developer ReAct 循环 (25 轮上限)
+│       ├── react-loop.ts       # Developer ReAct 循环 (50 轮上限, 验证门控)
 │       ├── qa-loop.ts          # QA 审查 (程序化 + LLM + TDD)
-│       ├── tool-registry.ts    # 84+ 工具定义 + 角色权限矩阵
-│       ├── tool-executor.ts    # 工具执行分发 (同步 + 异步)
+│       ├── tool-registry.ts    # 工具注册中心 + 角色权限矩阵
+│       ├── tool-definitions.ts # 84+ 工具定义 (JSON Schema)
+│       ├── tool-executor.ts    # 工具执行分发 (同步)
+│       ├── tool-handlers-async.ts  # 工具异步执行器
+│       ├── tool-handlers-external.ts # 外部工具执行器 (MCP/Skill)
+│       ├── tool-permissions.ts # 角色-工具权限矩阵
 │       ├── tool-system.ts      # 工具系统抽象层
 │       ├── llm-client.ts       # LLM 调用 (流式/非流式, Anthropic/OpenAI)
 │       ├── model-selector.ts   # strong/worker/fast 三层模型选择
@@ -102,7 +96,12 @@ AutoMater/
 │       ├── types.ts            # 共享类型定义
 │       ├── constants.ts        # 常量
 │       ├── logger.ts           # 结构化日志
-│       ├── guards.ts           # 安全防护 (路径/命令)
+│       ├── guards.ts           # 安全防护 (路径/命令) + 验证门控 + 语义死循环检测
+│       ├── scratchpad.ts       # Agent 工作记忆 (文件变更/进度/经验自动收集)
+│       ├── adaptive-tool-selector.ts  # 自适应工具选择 (项目 profile + 阶段感知)
+│       ├── sub-agent-compressor.ts    # 子Agent结果压缩 (防上下文膨胀)
+│       ├── iteration-learning.ts      # 迭代间学习 (失败模式提取+策略修正)
+│       ├── runtime-telemetry.ts       # 运行时遥测 (工具链/Token/成本追踪)
 │       ├── output-parser.ts    # LLM 输出解析
 │       ├── planner.ts          # 规划器
 │       ├── repo-map.ts         # 仓库结构映射
@@ -207,7 +206,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 - **功能**: 意图检测 (wish/query/control/general), 配置管理, **持久记忆 (CRUD + 语义搜索)**
 - **数据表**: `meta_agent_config` + `meta_agent_memories`
 
-### 数据库 (SQLite, 19 张表, schema_version 迁移体系)
+### 数据库 (SQLite, 19 张表, schema_version 迁移体系, 12 版)
 
 **核心建表** (initDatabase 创建):
 
@@ -234,6 +233,9 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | workflow_presets | v9 | id, project_id, name, stages, is_active | 工作流预设 (v12) |
 | project_secrets | v10 | project_id, key, value (加密), provider | 密钥安全存储 (v13) |
 
+v11: team_members 增加 max_iterations 列 (可配置 Agent 最大迭代数)
+v12: context_window 默认值从 128000 升级到 256000
+
 **模块自管理表** (ensureXxxTable):
 
 | 表 | 管理模块 | 用途 |
@@ -243,7 +245,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | sessions | conversation-backup.ts | 会话备份/恢复 |
 | feature_sessions | conversation-backup.ts | Feature↔Session 关联 (v8.1) |
 
-### 42+ 工具体系
+### 84+ 工具体系
 
 | 类别 | 工具名 | 状态 |
 |------|--------|------|
@@ -303,7 +305,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 
 ## 4. CURRENT STATE
 
-**版本**: v13.0 (全阶段流水线 + 可配置工作流 + GitHub 深度集成 + 密钥安全 + 会话管理)
+**版本**: v20.0 (Agent 智能增强 + 能力差距15项改进 + 多模态 + 安全加固)
 
 ### 版本演进总览
 
@@ -319,51 +321,66 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | v10 | 部署工具, 系统监控 |
 | v11 | 团队成员级独立 LLM/MCP/Skill 配置 |
 | v12 | 工作流预设 (可配置阶段), schema_version 迁移体系 |
-| v13 | GitHub 深度集成 (Issue/PR/Branch), 密钥加密存储, project_secrets 表 |
+| v13 | GitHub 深度集成 (Issue/PR/Branch), 密钥加密存储 |
+| v14-v15 | UX 体验 Sprint (Toast/错误映射/删除确认/Markdown 渲染) + CI/CD Pipeline |
+| v16-v17 | 代码质量治理 (any 清理 389→2, IPC 校验 50 断言, execSync→async) |
+| v18 | Agent 智能增强 5 大模块 (迭代学习/自适应工具/子Agent压缩/观察遮蔽/Scratchpad) |
+| v19 | 多模态交互 (图片/文件上传 + 网络图片搜索), 大文件拆分 (tool-registry/executor) |
+| v20 | Agent 能力差距15项改进 (验证门控/语义死循环/纯文本容忍/自适应Prompt/架构裁剪/经验提取) |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
-- [x] ReAct Developer 循环 (25 轮, 42+ 工具 + MCP 动态加载)
+- [x] ReAct Developer 循环 (50 轮, 84+ 工具 + MCP 动态加载)
 - [x] QA 程序化检查 + LLM 审查 + 硬规则评分 + TDD 模式
-- [x] 42+ 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy)
-- [x] 3 层上下文记忆 (Hot/Warm/Cold) + 压缩
+- [x] 84+ 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy/Docker/SubAgent)
+- [x] 3 层上下文记忆 (Hot/Warm/Cold) + 压缩 + Scratchpad 持久化
 - [x] 3 层持久记忆 (Global/Project/Role) + 元Agent 持久记忆
+- [x] **v20.0 验证门控** — task_complete 前强制验证 (写过文件必须 run_command/test)
+- [x] **v20.0 语义死循环检测** — 同一工具+文件连续失败→自动策略升级
+- [x] **v20.0 纯文本容忍** — LLM 偶发纯文本回复不立即终止 (容忍 3 次)
+- [x] **v20.0 自适应 Prompt** — 按 feature category 动态注入特定指导 + 工具列表裁剪
+- [x] **v20.0 架构裁剪** — 按 feature 关键词裁剪 ARCHITECTURE.md 注入相关段
+- [x] **v20.0 经验自动提取** — Feature 完成/QA reject 自动记录项目经验
+- [x] **v20.0 并行 Worker 信息共享** — 每 5 轮注入其他 Worker 变更摘要
+- [x] **v19.0 多模态交互** — 图片/文件上传 + 网络图片搜索下载
 - [x] 需求变更检测 + 级联更新 + RFC 机制
 - [x] 临时工作流 (5 种 Mission 类型) + 断点恢复
-- [x] 已有项目导入分析 (4-Phase Scanner + 增量更新 + 7 探针)
-- [x] 元Agent (跨项目管家, 意图检测, 配置管理, 持久记忆)
+- [x] 已有项目导入分析 (4-Phase Scanner + 增量更新 + 7 探针 + 缓存)
+- [x] 元Agent (跨项目管家, 意图检测, 配置管理, 持久记忆, 多会话)
 - [x] 技能进化系统 + 跨项目经验迁移
 - [x] MCP 协议动态工具加载 + 成员级 MCP 配置
 - [x] 会话备份/恢复 + Feature-Session 关联追踪
 - [x] 工作流预设管理 (可配置/内置/自定义阶段)
 - [x] GitHub 深度集成 (Issue 创建, Feature↔Issue/PR/Branch 关联)
 - [x] 密钥加密存储 (project_secrets + secret-manager)
-- [x] 14 个 UI 页面 + 12 个组件 + 科技感 Canvas 背景
+- [x] 14 个 UI 页面 + 16 个组件 + 科技感 Canvas 背景
 - [x] 系统监控 (CPU/GPU/内存/硬盘) + 活动时序图
-- [x] Electron 通知 + 用户验收面板
-- [x] 右键版本历史 + 文档 5 级树
-- [x] schema_version 迁移体系 (10 版迁移, 可审计)
+- [x] 全局 Toast/确认系统 + 错误码中文映射 + 删除二次确认
+- [x] IPC 输入校验 (50+ 断言覆盖关键 handlers)
+- [x] schema_version 迁移体系 (12 版迁移, 可审计)
 
 ### 已知差距 (低优先级)
 - [ ] Docker 容器级沙箱隔离 (当前用进程级+黑名单)
 - [ ] 游戏引擎集成 (Tier 5 工具)
-- [ ] IPC 运行时输入校验 (当前 preload 参数全为 `any`)
-- [ ] 大文件 code-splitting (OverviewPage 1457 LOC, context-collector 1061 LOC)
+- [ ] 跨 Session 学习闭环 (harness 层自动技能提取)
 
 ## 5. AGENT GUIDELINES
 
 ### 必读文件
 1. `CLAUDE.md` (本文件 — 项目大脑, **单一事实源**)
-2. `docs/CODE-QUALITY-REVIEW-2026-03-02.md` (代码质量复盘)
-3. `docs/DOC-DRIFT-ANALYSIS-2026-03-02.md` (文档漂移分析)
+2. `docs/agent-capability-gap-analysis-2026-03.md` (Agent 能力差距分析, v20.0 改进基准)
+3. `docs/CODE-QUALITY-REVIEW-2026-03-02.md` (代码质量复盘)
+4. `docs/ARCHITECTURE-AUDIT-2026-03-02.md` (架构审计报告)
 
 ### 提交规范
 - `feat:` 新功能 | `fix:` 修复 | `refactor:` 重构 | `docs:` 文档 | `test:` 测试
 
 ### Context 预算
-- 强模型任务: max 128K tokens (PM 分析, Architect 设计, QA 审查, PM 验收)
-- Worker 任务: max 128K tokens (Developer ReAct, Mission Worker)
+- 强模型任务: max 256K tokens (PM 分析, Architect 设计, QA 审查, PM 验收)
+- Worker 任务: max 256K tokens (Developer ReAct, Mission Worker)
 - 输出精简: tool result 通过 `trimToolResult()` 压缩, 长文件分页读取
+- 观察遮蔽: 旧 tool output → 结构化一行摘要 (节省 50%+ context)
+- Scratchpad 锚点: 压缩后自动注入 Agent 工作记忆恢复上下文
 
 ### 关键文件速查
 
@@ -372,16 +389,21 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | 流水线阶段 | `electron/engine/orchestrator.ts` + `electron/engine/phases/*.ts` |
 | Developer 工具循环 | `electron/engine/react-loop.ts` |
 | QA 审查逻辑 | `electron/engine/qa-loop.ts` |
-| 工具定义/权限 | `electron/engine/tool-registry.ts` |
-| 工具执行 | `electron/engine/tool-executor.ts` |
+| 工具定义 | `electron/engine/tool-definitions.ts` |
+| 工具权限 | `electron/engine/tool-permissions.ts` |
+| 工具执行 | `electron/engine/tool-executor.ts` + `tool-handlers-async.ts` |
+| 安全防护/门控 | `electron/engine/guards.ts` (验证门控, 语义循环, 终止策略) |
+| Agent 提示词 | `electron/engine/prompts.ts` (含 getCategoryGuidance) |
+| Agent 工作记忆 | `electron/engine/scratchpad.ts` (文件变更/进度/经验收集) |
+| 自适应工具选择 | `electron/engine/adaptive-tool-selector.ts` |
+| 子Agent压缩 | `electron/engine/sub-agent-compressor.ts` |
 | LLM 调用 | `electron/engine/llm-client.ts` |
-| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组) |
+| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 12 版) |
 | 密钥管理 | `electron/engine/secret-manager.ts` |
 | 会话管理 | `electron/engine/conversation-backup.ts` + `electron/ipc/sessions.ts` |
 | 工作流预设 | `electron/ipc/workflow.ts` |
-| 前端状态 | `src/stores/app-store.ts` |
+| 前端状态 | `src/stores/app-store.ts` + `src/stores/slices/*.ts` |
 | 元Agent 后端 | `electron/ipc/meta-agent.ts` |
-| 临时工作流 | `electron/engine/mission-runner.ts` |
 | 项目导入分析 | `electron/engine/project-importer.ts` + `electron/engine/probes/*.ts` |
 | 系统监控 | `electron/engine/system-monitor.ts` + `src/components/SystemMonitor.tsx` |
 
@@ -391,9 +413,10 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 
 | 指标 | 值 | 备注 |
 |------|-----|------|
-| tsc --noEmit 错误 | 72 | 7 个文件 |
-| `any` 使用量 | 157 | 36 个文件 |
-| 测试覆盖率 | 31/59 引擎模块有测试 | 部分模块无测试 |
-| IPC 输入校验 | 0/108 handlers | preload 参数无 runtime 验证 |
-| 空 catch 块 | ~5 | ~100 个 silent catch |
-| 最大文件 LOC | OverviewPage 1457 | 6 个文件 >600 LOC |
+| tsc --noEmit 错误 | **0** | 全量通过 |
+| `any` 使用量 | **2** | 从 389 → 2 (99.5% 消除) |
+| 测试文件/用例 | 43 / 817 | 50 skipped (native SQLite) |
+| IPC 输入校验 | 50+ 断言 | 覆盖关键 handlers |
+| 空 catch 块 | ~5 (标注意图) | 42 个 catch 已加注释 |
+| 主进程 main.js | 617 KB | Vite tree-shaking 后 |
+| 质量门禁 | pre-commit hook | tsc + vitest 自动运行 |
