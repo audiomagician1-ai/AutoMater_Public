@@ -79,10 +79,10 @@ const MINI_TOOLS: MiniTool[] = [
     name: 'search_files',
     async execute(args, ctx) {
       try {
-        const pattern = String(args.pattern || '').replace(/'/g, "''");
+        const pattern = String(args.pattern || '').replace(/'/g, "''").replace(/\$/g, '`$').replace(/[`(){}|]/g, '`$&');
         const cmd = process.platform === 'win32'
           ? `powershell -NoProfile -Command "Get-ChildItem -Recurse -File | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist' } | Select-String -Pattern '${pattern}' -Context 1,1 | Select-Object -First 15 | Out-String -Width 200"`
-          : `grep -rn --include="*" -C 1 "${pattern.replace(/"/g, '\\"')}" . 2>/dev/null | head -40`;
+          : `grep -rn --include="*" -C 1 "${String(args.pattern || '').replace(/"/g, '\\"')}" . 2>/dev/null | head -40`;
         const { stdout } = await execAsync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 });
         return stdout.trim().slice(0, 3000) || '无匹配';
       } catch { return '无匹配'; }

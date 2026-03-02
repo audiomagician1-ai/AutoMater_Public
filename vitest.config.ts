@@ -22,10 +22,10 @@ export default defineConfig({
         'electron/engine/types.ts',       // pure type defs
       ],
       thresholds: {
-        statements: 26,   // 2026-03-02: 27.1% actual → Layer 6 (tool-executor, react-loop, probes)
-        branches: 25,     // 26.4% actual
-        functions: 31,    // 31.6% actual (codebase grew: probes/ + phases/ expanded)
-        lines: 26,        // 27.2% actual
+        statements: 27,   // 2026-03-02: 27.1% actual → 守住底线, CI 防回归
+        branches: 26,     // 26.4% actual
+        functions: 31,    // 31.6% actual
+        lines: 27,        // 27.2% actual
       },
     },
   },

@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, globalShortcut, session } from 'electron';
 import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
@@ -102,6 +102,25 @@ function setupZoomShortcuts() {
 }
 
 app.whenReady().then(async () => {
+  // ── Content Security Policy ──
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self';" +
+          " script-src 'self' 'unsafe-inline' 'unsafe-eval';" +
+          " style-src 'self' 'unsafe-inline';" +
+          " img-src 'self' data: https:;" +
+          " connect-src 'self' https: http: ws: wss:;" +
+          " font-src 'self' data:;" +
+          " object-src 'none';" +
+          " base-uri 'self'"
+        ],
+      },
+    });
+  });
+
   // 初始化数据库
   await initDatabase();
 

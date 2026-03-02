@@ -1232,7 +1232,7 @@ const result = await callLLMWithTools(
       role: r.role as string,
       content: r.content as string,
       triggeredWish: !!(r.triggered_wish as number),
-      attachments: r.attachments ? JSON.parse(r.attachments as string) : undefined,
+      attachments: r.attachments ? (() => { try { return JSON.parse(r.attachments as string); } catch { return undefined; } })() : undefined,
       createdAt: r.created_at as string,
     }));
   });

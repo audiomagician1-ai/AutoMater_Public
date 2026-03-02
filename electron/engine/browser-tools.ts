@@ -7,8 +7,18 @@
  * 用于 QA Agent 的 E2E 黑盒测试、网页交互验证
  */
 
-import { chromium, type Browser, type Page, type BrowserContext, type Response as PwResponse } from 'playwright-core';
+import type { Browser, Page, BrowserContext, Response as PwResponse } from 'playwright-core';
 import type { A11yTreeNode } from './types';
+
+// ── 延迟加载 playwright-core (减少启动开销 + 未安装时不崩溃) ──
+let _chromium: typeof import('playwright-core')['chromium'] | null = null;
+async function getChromium() {
+  if (!_chromium) {
+    const pw = await import('playwright-core');
+    _chromium = pw.chromium;
+  }
+  return _chromium;
+}
 
 // ═══════════════════════════════════════
 // 单例浏览器管理
@@ -53,7 +63,7 @@ export async function launchBrowser(opts?: {
     // 查找系统浏览器：优先 Edge → Chrome
     const channel = process.platform === 'win32' ? 'msedge' : 'chrome';
 
-    _browser = await chromium.launch({
+    _browser = await (await getChromium()).launch({
       channel,
       headless: opts?.headless ?? false, // 默认有头模式（可以截图看到）
       args: [
