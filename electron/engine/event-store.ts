@@ -66,6 +66,8 @@ export type EventType =
   // Memory
   | 'memory:write'
   | 'lesson:extracted'
+  // v20.0: Decision audit trail
+  | 'decision:point'
   // Errors
   | 'error';
 

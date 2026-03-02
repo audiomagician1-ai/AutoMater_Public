@@ -39,6 +39,21 @@ import { analyzeImage, compareScreenshots, visualAssert, cacheScreenshot, getCac
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
 import { safeJsonParse } from './safe-json';
 import type { AppSettings } from './types';
+
+/**
+ * 安全路径解析 — 确保结果路径在 workspacePath 内, 防止路径穿越
+ * 返回 null 表示路径不安全
+ */
+function safeResolvePath(workspacePath: string, relativePath: string): string | null {
+  const resolved = path.resolve(workspacePath, relativePath);
+  const normalizedWorkspace = path.normalize(workspacePath) + path.sep;
+  const normalizedResolved = path.normalize(resolved);
+  // 允许恰好等于 workspace 或在其子目录内
+  if (normalizedResolved === path.normalize(workspacePath) || normalizedResolved.startsWith(normalizedWorkspace)) {
+    return resolved;
+  }
+  return null;
+}
 import { getDb } from '../db';
 import { textToImage, editImage } from './image-gen';
 import {
@@ -518,7 +533,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
       size: call.arguments.size,
       quality: call.arguments.quality,
       style: call.arguments.style,
-      savePath: call.arguments.save_path ? path.resolve(ctx.workspacePath, call.arguments.save_path) : undefined,
+      savePath: call.arguments.save_path ? safeResolvePath(ctx.workspacePath, call.arguments.save_path) ?? undefined : undefined,
     });
     if (!result.success) {
       return { success: false, output: `图像生成失败: ${result.error}`, action: 'web' };
@@ -546,7 +561,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
       maskBase64: maskBase64,
       prompt: call.arguments.prompt,
       size: call.arguments.size,
-      savePath: call.arguments.save_path ? path.resolve(ctx.workspacePath, call.arguments.save_path) : undefined,
+      savePath: call.arguments.save_path ? safeResolvePath(ctx.workspacePath, call.arguments.save_path) ?? undefined : undefined,
     });
     if (!result.success) {
       return { success: false, output: `图像编辑失败: ${result.error}`, action: 'web' };
@@ -600,7 +615,10 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
       startCmd: call.arguments.start_cmd,
       exposePorts: call.arguments.expose_ports,
     };
-    const outputPath = path.resolve(ctx.workspacePath, call.arguments.output_path || 'Dockerfile');
+    const outputPath = safeResolvePath(ctx.workspacePath, call.arguments.output_path || 'Dockerfile');
+    if (!outputPath) {
+      return { success: false, output: `路径不安全: ${call.arguments.output_path}`, action: 'write' };
+    }
     const result = await writeDockerfile(dockerConfig, outputPath);
     return {
       success: result.success,
@@ -698,7 +716,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
       } : undefined,
     };
     const outputDir = call.arguments.output_dir
-      ? path.resolve(ctx.workspacePath, call.arguments.output_dir)
+      ? (safeResolvePath(ctx.workspacePath, call.arguments.output_dir) ?? ctx.workspacePath)
       : ctx.workspacePath;
     const result = await writeNginxConfig(config, outputDir);
     return {

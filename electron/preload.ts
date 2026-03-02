@@ -229,6 +229,20 @@ contextBridge.exposeInMainWorld('automater', {
     stopDaemon: () => ipcRenderer.invoke('meta-agent:daemon:stop'),
     triggerHeartbeat: () => ipcRenderer.invoke('meta-agent:daemon:trigger'),
     getDaemonLogs: (limit?: number) => ipcRenderer.invoke('meta-agent:daemon:logs', limit),
+    // v20.0: Chat Messages 持久化
+    saveMessage: (msg: {
+      id: string; sessionId: string; projectId: string | null;
+      role: 'user' | 'assistant' | 'system'; content: string;
+      triggeredWish?: boolean; attachments?: string;
+    }) => ipcRenderer.invoke('meta-agent:messages:save', msg),
+    updateMessage: (id: string, updates: { content?: string; triggeredWish?: boolean }) =>
+      ipcRenderer.invoke('meta-agent:messages:update', id, updates),
+    loadMessages: (sessionId: string, limit?: number) =>
+      ipcRenderer.invoke('meta-agent:messages:load', sessionId, limit),
+    listChatSessions: (projectId?: string | null, limit?: number) =>
+      ipcRenderer.invoke('meta-agent:messages:list-sessions', projectId, limit),
+    deleteSessionMessages: (sessionId: string) =>
+      ipcRenderer.invoke('meta-agent:messages:delete-session', sessionId),
   },
 
   // ── 临时工作流 (v5.5) ──

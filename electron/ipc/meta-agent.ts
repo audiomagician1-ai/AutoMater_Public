@@ -695,6 +695,143 @@ const result = await callLLMWithTools(
   });
 
   // ═══════════════════════════════════════
+  // Chat Messages 持久化 — 应用级, 不跟随项目 (v20.0)
+  // ═══════════════════════════════════════
+
+  /** 保存一条对话消息到 DB */
+  ipcMain.handle('meta-agent:messages:save', (
+    _event,
+    msg: {
+      id: string;
+      sessionId: string;
+      projectId: string | null;
+      role: 'user' | 'assistant' | 'system';
+      content: string;
+      triggeredWish?: boolean;
+      attachments?: string; // JSON string
+    },
+  ) => {
+    assertNonEmptyString('meta-agent:messages:save', 'id', msg.id);
+    assertNonEmptyString('meta-agent:messages:save', 'sessionId', msg.sessionId);
+    assertNonEmptyString('meta-agent:messages:save', 'role', msg.role);
+    const db = getDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO meta_agent_chat_messages
+        (id, session_id, project_id, role, content, triggered_wish, attachments, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(
+      msg.id,
+      msg.sessionId,
+      msg.projectId || null,
+      msg.role,
+      msg.content,
+      msg.triggeredWish ? 1 : 0,
+      msg.attachments || null,
+    );
+    return { success: true };
+  });
+
+  /** 更新一条消息的内容 (用于 streaming 更新 assistant 回复) */
+  ipcMain.handle('meta-agent:messages:update', (
+    _event,
+    id: string,
+    updates: { content?: string; triggeredWish?: boolean },
+  ) => {
+    assertNonEmptyString('meta-agent:messages:update', 'id', id);
+    const db = getDb();
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    if (updates.content !== undefined) {
+      sets.push('content = ?');
+      params.push(updates.content);
+    }
+    if (updates.triggeredWish !== undefined) {
+      sets.push('triggered_wish = ?');
+      params.push(updates.triggeredWish ? 1 : 0);
+    }
+    if (sets.length === 0) return { success: true };
+    params.push(id);
+    db.prepare(`UPDATE meta_agent_chat_messages SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    return { success: true };
+  });
+
+  /** 加载指定 session 的所有消息 */
+  ipcMain.handle('meta-agent:messages:load', (
+    _event,
+    sessionId: string,
+    limit?: number,
+  ) => {
+    assertNonEmptyString('meta-agent:messages:load', 'sessionId', sessionId);
+    const db = getDb();
+    const sql = limit
+      ? 'SELECT * FROM meta_agent_chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?'
+      : 'SELECT * FROM meta_agent_chat_messages WHERE session_id = ? ORDER BY created_at ASC';
+    const rows = limit ? db.prepare(sql).all(sessionId, limit) : db.prepare(sql).all(sessionId);
+    return (rows as Array<Record<string, unknown>>).map(r => ({
+      id: r.id as string,
+      sessionId: r.session_id as string,
+      projectId: r.project_id as string | null,
+      role: r.role as string,
+      content: r.content as string,
+      triggeredWish: !!(r.triggered_wish as number),
+      attachments: r.attachments ? JSON.parse(r.attachments as string) : undefined,
+      createdAt: r.created_at as string,
+    }));
+  });
+
+  /** 列出管家的所有 session (含首条用户消息摘要作为标题) */
+  ipcMain.handle('meta-agent:messages:list-sessions', (
+    _event,
+    projectId?: string | null,
+    limit?: number,
+  ) => {
+    const db = getDb();
+    // 从 sessions 表中获取 meta-agent 的 session, LEFT JOIN 首条用户消息获取标题
+    const sql = `
+      SELECT
+        s.*,
+        (SELECT content FROM meta_agent_chat_messages m
+         WHERE m.session_id = s.id AND m.role = 'user'
+         ORDER BY m.created_at ASC LIMIT 1) as first_user_msg
+      FROM sessions s
+      WHERE s.agent_id = 'meta-agent'
+        AND (s.project_id = ? OR (s.project_id IS NULL AND ? IS NULL) OR ? = '__all__')
+      ORDER BY s.created_at DESC
+      LIMIT ?
+    `;
+    const pId = projectId === undefined || projectId === null ? null : projectId;
+    const rows = db.prepare(sql).all(pId, pId, pId ?? '__none__', limit || 100);
+    return (rows as Array<Record<string, unknown>>).map(r => {
+      const firstMsg = r.first_user_msg as string | null;
+      return {
+        id: r.id as string,
+        projectId: r.project_id as string | null,
+        agentId: r.agent_id as string,
+        agentRole: r.agent_role as string,
+        agentSeq: r.agent_seq as number,
+        status: r.status as string,
+        createdAt: r.created_at as string,
+        completedAt: r.completed_at as string | null,
+        messageCount: r.message_count as number,
+        totalTokens: r.total_tokens as number,
+        totalCost: r.total_cost as number,
+        title: firstMsg ? (firstMsg.length > 40 ? firstMsg.slice(0, 40) + '…' : firstMsg) : null,
+      };
+    });
+  });
+
+  /** 删除指定 session 的所有消息 */
+  ipcMain.handle('meta-agent:messages:delete-session', (
+    _event,
+    sessionId: string,
+  ) => {
+    assertNonEmptyString('meta-agent:messages:delete-session', 'sessionId', sessionId);
+    const db = getDb();
+    const result = db.prepare('DELETE FROM meta_agent_chat_messages WHERE session_id = ?').run(sessionId);
+    return { success: true, deletedCount: result.changes };
+  });
+
+  // ═══════════════════════════════════════
   // Daemon — 心跳/事件钩子/定时任务 管理
   // ═══════════════════════════════════════
 

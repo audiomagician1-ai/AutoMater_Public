@@ -467,6 +467,21 @@ interface AutoMaterAPI {
     stopDaemon(): Promise<{ success: boolean }>;
     triggerHeartbeat(): Promise<{ success: boolean }>;
     getDaemonLogs(limit?: number): Promise<MetaAgentHeartbeatLog[]>;
+    // v20.0: Chat Messages 持久化
+    saveMessage(msg: {
+      id: string; sessionId: string; projectId: string | null;
+      role: 'user' | 'assistant' | 'system'; content: string;
+      triggeredWish?: boolean; attachments?: string;
+    }): Promise<{ success: boolean }>;
+    updateMessage(id: string, updates: { content?: string; triggeredWish?: boolean }): Promise<{ success: boolean }>;
+    loadMessages(sessionId: string, limit?: number): Promise<Array<{
+      id: string; sessionId: string; projectId: string | null;
+      role: string; content: string; triggeredWish: boolean;
+      attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>;
+      createdAt: string;
+    }>>;
+    listChatSessions(projectId?: string | null, limit?: number): Promise<Array<SessionInfo & { title: string | null }>>;
+    deleteSessionMessages(sessionId: string): Promise<{ success: boolean; deletedCount: number }>;
   };
 
   /** v6.0: 临时工作流 */

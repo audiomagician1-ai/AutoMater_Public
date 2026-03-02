@@ -198,6 +198,106 @@ export function recordErrorResolved(
   saveScratchpad(workspacePath, pad);
 }
 
+/**
+ * v20.0: [Harness] 自动更新进度 — 每次文件写入时记录进度
+ * 用于 task_checkpoint: 即使上下文被压缩, 恢复后也能知道 "做到哪了"
+ */
+export function recordProgress(
+  workspacePath: string, agentId: string,
+  summary: string,
+): void {
+  const pad = loadScratchpad(workspacePath, agentId);
+  // 进度只保留最新 5 条
+  pad.progress.push({
+    content: summary,
+    timestamp: Date.now(),
+    source: 'harness',
+  });
+  if (pad.progress.length > 5) {
+    pad.progress = pad.progress.slice(-5);
+  }
+  saveScratchpad(workspacePath, pad);
+}
+
+/**
+ * v20.0: [Harness] 自动提取经验 — 当错误被修复时记录 "错误→修复" 模式到项目记忆
+ */
+export function extractExperience(
+  workspacePath: string,
+  agentId: string,
+  type: 'qa_reject' | 'error_fixed' | 'feature_done',
+  description: string,
+): void {
+  const pad = loadScratchpad(workspacePath, agentId);
+  pad.keyFacts.push({
+    content: `[${type}] ${description}`,
+    timestamp: Date.now(),
+    source: 'harness',
+  });
+  if (pad.keyFacts.length > 30) {
+    pad.keyFacts = pad.keyFacts.slice(-30);
+  }
+  saveScratchpad(workspacePath, pad);
+
+  // 同时写入项目记忆 (persistent across sessions)
+  try {
+    const memoryPath = path.join(workspacePath, '.automater', 'project-memory.md');
+    const dateStr = new Date().toISOString().split('T')[0];
+    const line = `\n- [${dateStr}] [${type}] ${description.slice(0, 200)}\n`;
+    if (fs.existsSync(memoryPath)) {
+      fs.appendFileSync(memoryPath, line, 'utf-8');
+    } else {
+      const dir = path.join(workspacePath, '.automater');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(memoryPath, `# 项目记忆\n\n## 自动提取的经验\n${line}`, 'utf-8');
+    }
+  } catch (err) {
+    log.warn('Failed to write experience to project memory', { error: String(err) });
+  }
+}
+
+/**
+ * v20.0: 获取所有 Worker 的 scratchpad 文件变更摘要 (用于跨 Worker 信息共享)
+ */
+export function getOtherWorkersChanges(
+  workspacePath: string,
+  currentAgentId: string,
+): string {
+  const dir = scratchpadDir(workspacePath);
+  try {
+    if (!fs.existsSync(dir)) return '';
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+    const sections: string[] = [];
+
+    for (const file of files) {
+      const agentId = file.replace('.json', '');
+      if (agentId === currentAgentId.replace(/[^a-zA-Z0-9_\-]/g, '_')) continue;
+
+      try {
+        const raw = fs.readFileSync(path.join(dir, file), 'utf-8');
+        const pad = JSON.parse(raw) as AgentScratchpad;
+        // 只取最近的变更
+        const recentFiles = pad.filesChanged.slice(-10);
+        const recentDecisions = pad.decisions.slice(-3);
+        if (recentFiles.length === 0 && recentDecisions.length === 0) continue;
+
+        const lines: string[] = [`### ${pad.agentId} 的最新变更`];
+        if (recentFiles.length > 0) {
+          lines.push(...recentFiles.map(e => `- ${e.content}`));
+        }
+        if (recentDecisions.length > 0) {
+          lines.push('决策:');
+          lines.push(...recentDecisions.map(e => `- ${e.content}`));
+        }
+        sections.push(lines.join('\n'));
+      } catch { continue; }
+    }
+
+    if (sections.length === 0) return '';
+    return `## 🔄 其他 Worker 的最新变更\n\n${sections.join('\n\n')}`;
+  } catch { return ''; }
+}
+
 // ═══════════════════════════════════════
 // Agent 工具接口 (scratchpad_write / scratchpad_read)
 // ═══════════════════════════════════════

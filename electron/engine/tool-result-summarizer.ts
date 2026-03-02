@@ -529,13 +529,28 @@ function summarizeResearchResult(output: string, maxChars: number): string {
 function summarizeWebPage(output: string, maxChars: number): string {
   const lines = output.split('\n');
 
-  // 过滤掉纯空行、CSS/JS 碎片、导航菜单等
+  // v20.0: 按内容价值分类 (P2-2 — 相关性摘要而非简单截断)
+  const headings: string[] = [];
+  const codeBlocks: string[] = [];
   const meaningful: string[] = [];
   const navigation: string[] = [];
+  let inCodeBlock = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+
+    // 代码块检测
+    if (trimmed.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      codeBlocks.push(line);
+      continue;
+    }
+    if (inCodeBlock) {
+      codeBlocks.push(line);
+      continue;
+    }
+
     // 跳过 CSS/JS 碎片
     if (/^[{}[\]();]$/.test(trimmed)) continue;
     if (/^(var |let |const |function|\.[\w-]+\s*\{|@media)/.test(trimmed)) continue;
@@ -544,40 +559,58 @@ function summarizeWebPage(output: string, maxChars: number): string {
       navigation.push(trimmed);
       continue;
     }
+
+    // Markdown 标题 → 高优先级
+    if (/^#{1,6}\s/.test(trimmed)) {
+      headings.push(line);
+    }
+    // 列表项和正文 → 中优先级
     meaningful.push(line);
   }
 
-  // 对有意义的行进行头部+尾部保留
-  if (meaningful.join('\n').length <= maxChars) {
-    return meaningful.join('\n');
+  // 预算分配: 标题 20%, 代码块 30%, 正文 50%
+  const headingBudget = Math.floor(maxChars * 0.15);
+  const codeBudget = Math.floor(maxChars * 0.35);
+  const textBudget = maxChars - headingBudget - codeBudget;
+
+  const parts: string[] = [];
+  let totalChars = 0;
+
+  // 1. 所有标题 (结构信息)
+  for (const h of headings) {
+    if (totalChars + h.length + 1 > headingBudget) break;
+    parts.push(h);
+    totalChars += h.length + 1;
   }
 
-  const headBudget = Math.floor(maxChars * 0.75);
-  const tailBudget = maxChars - headBudget - 50;
+  // 2. 代码块 (技术内容, 通常是用户需要的)
+  if (codeBlocks.length > 0) {
+    const codeText = codeBlocks.join('\n');
+    if (codeText.length <= codeBudget) {
+      parts.push('');
+      parts.push(...codeBlocks);
+      totalChars += codeText.length;
+    } else {
+      parts.push('');
+      parts.push(codeText.slice(0, codeBudget));
+      parts.push(`... [代码块已截断, 原始 ${codeBlocks.length} 行]`);
+      totalChars += codeBudget;
+    }
+  }
 
-  const head: string[] = [];
-  let headChars = 0;
+  // 3. 正文内容
+  parts.push('');
   for (const line of meaningful) {
-    if (headChars + line.length + 1 > headBudget) break;
-    head.push(line);
-    headChars += line.length + 1;
+    if (headings.includes(line)) continue; // 已经在标题部分
+    if (totalChars + line.length + 1 > maxChars - 50) {
+      parts.push(`... [省略剩余 ${meaningful.length - parts.length} 行正文]`);
+      break;
+    }
+    parts.push(line);
+    totalChars += line.length + 1;
   }
 
-  const tail: string[] = [];
-  let tailChars = 0;
-  for (let i = meaningful.length - 1; i >= 0; i--) {
-    if (tailChars + meaningful[i].length + 1 > tailBudget) break;
-    tail.unshift(meaningful[i]);
-    tailChars += meaningful[i].length + 1;
-  }
-
-  return [
-    ...head,
-    '',
-    `... [省略 ${meaningful.length - head.length - tail.length} 行]`,
-    '',
-    ...tail,
-  ].join('\n').slice(0, maxChars);
+  return parts.join('\n').slice(0, maxChars);
 }
 
 // ═══════════════════════════════════════

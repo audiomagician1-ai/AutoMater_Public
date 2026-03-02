@@ -143,7 +143,19 @@ export function calcCost(model: string, inputTokens: number, outputTokens: numbe
 export function getSettings(): AppSettings | null {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  return row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings, 'getSettings') : null;
+  const settings = row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings, 'getSettings') : null;
+  if (!settings) return null;
+
+  // v19.1: 解密 apiKey — 优先从 secret-manager 获取加密版本
+  if (!settings.apiKey) {
+    try {
+      const { getSecret } = require('./secret-manager'); // require-ok: 条件加载避免循环
+      const encrypted = getSecret('__global__', 'llm_api_key');
+      if (encrypted) settings.apiKey = encrypted;
+    } catch { /* silent: secret-manager 不可用时保留空 apiKey */ }
+  }
+
+  return settings;
 }
 
 // ═══════════════════════════════════════

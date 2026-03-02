@@ -43,7 +43,7 @@ export function renderMarkdown(md: string): string {
   const html: string[] = [];
   let inCodeBlock = false;
   let codeBuffer: string[] = [];
-  let codeLang = '';
+  let _codeLang = '';
   let inList: 'ul' | 'ol' | null = null;
 
   const closeList = () => {
@@ -59,7 +59,7 @@ export function renderMarkdown(md: string): string {
       if (!inCodeBlock) {
         closeList();
         inCodeBlock = true;
-        codeLang = line.trim().slice(3).trim();
+        _codeLang = line.trim().slice(3).trim();
         codeBuffer = [];
       } else {
         html.push(`<pre class="bg-slate-900 border border-slate-800 rounded-lg p-4 overflow-x-auto my-3"><code class="text-xs text-slate-300 leading-relaxed">${escapeHtml(codeBuffer.join('\n'))}</code></pre>`);

@@ -257,7 +257,7 @@ describe('tool-executor', () => {
     });
 
     afterEach(() => {
-      try { fs.unlinkSync(tmpFile); } catch {}
+      try { fs.unlinkSync(tmpFile); } catch { /* cleanup */ }
     });
 
     it('sync path returns file content via fallback', () => {
@@ -615,7 +615,7 @@ describe('tool-executor', () => {
         expect(r.success).toBe(true);
         expect(r.output.length).toBeGreaterThan(0);
       } finally {
-        try { fs.unlinkSync(bigFile); } catch {}
+        try { fs.unlinkSync(bigFile); } catch { /* cleanup */ }
       }
     });
   });

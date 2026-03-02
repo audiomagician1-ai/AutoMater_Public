@@ -337,6 +337,14 @@ export interface ReactState {
   recentCallSignatures: string[];
   taskCompleted: boolean;
   filesWritten: Set<string>;
+  /** v20.0: 是否执行过验证命令 (run_command/run_test/run_lint) */
+  hasRunVerification: boolean;
+  /** v20.0: 是否执行过写入操作 (write_file/edit_file) */
+  hasWrittenFiles: boolean;
+  /** v20.0: 连续纯文本回复计数 (无 tool_calls) */
+  consecutivePlainTextCount: number;
+  /** v20.0: 语义失败追踪 {toolName -> [{file, count}]} */
+  semanticFailures: Map<string, { file: string; count: number }[]>;
 }
 
 export type TerminationReason =
@@ -348,6 +356,7 @@ export type TerminationReason =
   | 'idle_loop'
   | 'error_loop'
   | 'repeat_loop'
+  | 'semantic_loop'
   | 'aborted'
   | 'budget_exceeded';
 
@@ -410,6 +419,130 @@ export function checkReactTermination(
   }
 
   return { shouldContinue: true };
+}
+
+// ═══════════════════════════════════════
+// 2.1 Verification Gate — task_complete 前置验证
+// ═══════════════════════════════════════
+
+export interface VerificationGateResult {
+  allowed: boolean;
+  /** 拦截时的提示消息 (注入给 Agent) */
+  message?: string;
+}
+
+/**
+ * v20.0: 验证门控 — 在 Agent 调用 task_complete 前检查是否执行过验证
+ * 
+ * 规则:
+ * - 如果 Agent 写过文件但从未执行 run_command/run_test/run_lint → 拦截
+ * - 如果 Agent 没有写任何文件 → 放行 (可能是分析型任务)
+ * - 拦截时不终止循环，而是注入提示消息让 Agent 先验证
+ */
+export function checkVerificationGate(state: ReactState): VerificationGateResult {
+  // 没写过文件 → 放行 (PM/Architect 等分析型角色)
+  if (!state.hasWrittenFiles && state.filesWritten.size === 0) {
+    return { allowed: true };
+  }
+
+  // 写过文件但没验证 → 拦截
+  if (!state.hasRunVerification) {
+    return {
+      allowed: false,
+      message: '⚠️ 你已经写入/修改了文件，但还没有执行任何验证命令。在调用 task_complete 之前，请先执行 run_command 验证代码能否正常编译和运行（如 `npm run build`、`tsc --noEmit`、`python -m py_compile` 等）。如果项目有测试，也请运行测试。',
+    };
+  }
+
+  return { allowed: true };
+}
+
+// ═══════════════════════════════════════
+// 2.2 Semantic Dead Loop Detection — 语义级死循环
+// ═══════════════════════════════════════
+
+export interface SemanticLoopResult {
+  detected: boolean;
+  /** 强制性策略升级指令 (注入给 Agent) */
+  escalation?: string;
+}
+
+/**
+ * v20.0: 语义死循环检测 — 检测 Agent 对同一文件反复使用同类工具失败
+ * 
+ * 场景: edit_file 反复失败 (old_string 不匹配), 同一文件 run_command 反复超时等
+ * 触发条件: 同一工具 + 同一目标文件 连续失败 2 次
+ * 
+ * 与 repeat_loop 的区别: repeat_loop 检测完全相同的调用签名,
+ * semantic_loop 检测同一工具+同一文件但参数不同的失败 (更宽泛)
+ */
+export function checkSemanticLoop(
+  state: ReactState,
+  toolName: string,
+  targetFile: string,
+  success: boolean,
+): SemanticLoopResult {
+  if (!state.semanticFailures) {
+    state.semanticFailures = new Map();
+  }
+
+  if (success) {
+    // 成功时清除该工具+文件的失败计数
+    const entries = state.semanticFailures.get(toolName);
+    if (entries) {
+      const idx = entries.findIndex(e => e.file === targetFile);
+      if (idx >= 0) entries.splice(idx, 1);
+    }
+    return { detected: false };
+  }
+
+  // 记录失败
+  if (!state.semanticFailures.has(toolName)) {
+    state.semanticFailures.set(toolName, []);
+  }
+  const entries = state.semanticFailures.get(toolName)!;
+  const existing = entries.find(e => e.file === targetFile);
+  if (existing) {
+    existing.count++;
+  } else {
+    entries.push({ file: targetFile, count: 1 });
+  }
+
+  const failCount = existing ? existing.count : 1;
+
+  // 连续失败 2 次 → 触发策略升级
+  if (failCount >= 2) {
+    // 根据不同工具给出不同的策略升级指令
+    let escalation: string;
+    switch (toolName) {
+      case 'edit_file':
+      case 'batch_edit':
+        escalation = `🔴 强制策略升级: 你已经对文件 "${targetFile}" 的 edit_file/batch_edit 操作连续失败 ${failCount} 次。\n` +
+          `请立即执行以下步骤:\n` +
+          `1. 使用 read_file 重新读取 "${targetFile}" 的完整最新内容\n` +
+          `2. 如果改动范围较大 (>30% 的文件内容)，直接使用 write_file 重写整个文件\n` +
+          `3. 如果改动范围较小，仔细核对 old_string 确保与文件内容完全一致（包括空格和缩进）\n` +
+          `⚠️ 禁止在不 read_file 的情况下再次尝试 edit_file`;
+        break;
+      case 'run_command':
+      case 'run_test':
+        escalation = `🔴 强制策略升级: 对 "${targetFile}" 相关的命令已连续失败 ${failCount} 次。\n` +
+          `建议:\n` +
+          `1. 检查命令拼写和参数是否正确\n` +
+          `2. 如果命令超时，添加 timeout 参数或拆成更小的命令\n` +
+          `3. 如果命令找不到，检查依赖是否安装 (npm install/pip install)\n` +
+          `4. 考虑换一种验证方式`;
+        break;
+      default:
+        escalation = `🔴 ${toolName} 对 "${targetFile}" 已连续失败 ${failCount} 次。请换一种方法或跳过此步骤。`;
+    }
+
+    // 清除计数防止重复触发（给一次新的机会）
+    if (existing) existing.count = 0;
+
+    return { detected: true, escalation };
+  }
+
+  return { detected: false };
 }
 
 /** 生成工具调用签名 (用于重复检测) */

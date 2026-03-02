@@ -40,7 +40,18 @@ function normalizeBaseUrl(url: string): string {
 function getSettings() {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  return row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings) : {} as AppSettings;
+  const settings = row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings) : {} as AppSettings;
+
+  // v19.1: 解密 apiKey — 优先从 secret-manager 获取加密版本
+  if (!settings.apiKey) {
+    try {
+      const { getSecret } = require('../engine/secret-manager'); // require-ok: 避免循环导入
+      const encrypted = getSecret('__global__', 'llm_api_key');
+      if (encrypted) settings.apiKey = encrypted;
+    } catch { /* silent: secret-manager 不可用 */ }
+  }
+
+  return settings;
 }
 
 export function setupLLMHandlers() {

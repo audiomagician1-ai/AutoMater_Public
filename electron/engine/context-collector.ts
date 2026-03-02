@@ -282,6 +282,69 @@ export interface ContextResult {
 }
 
 /**
+ * v20.0: 按 feature 裁剪架构文档 — 只保留相关章节
+ * 
+ * 策略:
+ * - 始终保留: 技术栈、目录结构、编码规范 (通用部分)
+ * - 按关键词匹配: 保留包含 feature 关键词的章节
+ * - 架构文档 < 3000 字符时不裁剪 (已经足够小)
+ */
+function trimArchitectureForFeature(
+  archContent: string,
+  feature: FeatureRow,
+): { content: string; trimmed: boolean } {
+  // 小文档不裁剪
+  if (archContent.length < 3000) {
+    return { content: archContent, trimmed: false };
+  }
+
+  const keywords = extractKeywords(`${feature.title} ${feature.description || ''} ${feature.category || ''}`);
+  if (keywords.length === 0) {
+    return { content: archContent, trimmed: false };
+  }
+
+  // 按 ## 标题分割章节
+  const sections = archContent.split(/^(##\s+.+)$/m);
+  if (sections.length <= 1) {
+    return { content: archContent, trimmed: false };
+  }
+
+  // 始终保留的章节关键词
+  const alwaysKeep = ['技术栈', '目录结构', '编码规范', '错误处理', 'tech stack', 'directory', 'structure', 'coding', 'convention'];
+
+  const kept: string[] = [sections[0]]; // 保留前言部分
+  let trimmed = false;
+
+  for (let i = 1; i < sections.length; i += 2) {
+    const heading = sections[i] || '';
+    const body = sections[i + 1] || '';
+    const sectionText = (heading + body).toLowerCase();
+
+    // 始终保留通用章节
+    const isAlwaysKept = alwaysKeep.some(k => sectionText.includes(k));
+    // 关键词匹配
+    const isRelevant = keywords.some(kw => sectionText.includes(kw));
+
+    if (isAlwaysKept || isRelevant) {
+      kept.push(heading + body);
+    } else {
+      trimmed = true;
+    }
+  }
+
+  // 如果裁剪后太短 (< 500 字符) 说明关键词匹配率低, 返回原文
+  const result = kept.join('');
+  if (result.length < 500) {
+    return { content: archContent, trimmed: false };
+  }
+
+  return {
+    content: result + (trimmed ? '\n\n> 💡 架构文档已裁剪为与当前 feature 相关的部分。完整文档见 ARCHITECTURE.md' : ''),
+    trimmed,
+  };
+}
+
+/**
  * 为某个 Feature 收集开发上下文
  * v1.1: 内部使用 ContextSection[] 结构化构建, 同时返回 ContextSnapshot
  */
@@ -339,20 +402,22 @@ export async function collectDeveloperContext(
     }
   }
 
-  // ─── 1. 架构文档 (最高优先) ───
+  // ─── 1. 架构文档 (v20.0: 按 feature 裁剪相关部分) ───
   const archContent = readWorkspaceFile(workspacePath, 'ARCHITECTURE.md');
   if (archContent) {
-    const archFull = `## 项目架构文档\n${archContent}`;
+    // v20.0: 尝试提取与当前 feature 相关的架构部分
+    const trimmedArch = trimArchitectureForFeature(archContent, feature);
+    const archFull = `## 项目架构文档${trimmedArch.trimmed ? ' (已裁剪为相关部分)' : ''}\n${trimmedArch.content}`;
     if (totalChars + archFull.length < charBudget * 0.4) {
       addSection({
         id: 'architecture', name: '架构文档 ARCHITECTURE.md', source: 'architecture',
-        content: archFull, truncated: false, files: ['ARCHITECTURE.md'],
+        content: archFull, truncated: trimmedArch.trimmed, files: ['ARCHITECTURE.md'],
       });
     } else {
       const maxLen = Math.floor(charBudget * 0.3);
       addSection({
         id: 'architecture', name: '架构文档 ARCHITECTURE.md (截断)', source: 'architecture',
-        content: `## 项目架构文档 (已截断)\n${archContent.slice(0, maxLen)}\n... [截断]`,
+        content: `## 项目架构文档 (已截断)\n${trimmedArch.content.slice(0, maxLen)}\n... [截断]`,
         truncated: true, files: ['ARCHITECTURE.md'],
       });
     }

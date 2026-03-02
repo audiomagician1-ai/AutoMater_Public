@@ -198,6 +198,16 @@ export async function workerLoop(
 
         completeFeatureSessionLink(devLinkId, `完成: ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代, $${reactResult.totalCost.toFixed(4)}`, true);
 
+        // v20.0: Feature 级成本异常预警 (P3-3) — 成本超过 $1 或 30 轮迭代
+        if (reactResult.totalCost > 1.0 || reactResult.iterations > 30) {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `💰 ${feature.id} 成本预警: $${reactResult.totalCost.toFixed(4)}, ${reactResult.iterations} 迭代, ${reactResult.totalInputTokens + reactResult.totalOutputTokens} tokens`,
+          });
+          addLog(projectId, workerId, 'warning',
+            `[${feature.id}] 成本异常: $${reactResult.totalCost.toFixed(4)}, ${reactResult.iterations} 迭代`);
+        }
+
         if (reactResult.filesWritten.length > 0 && workspacePath) {
           sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'reviewing', agentId: localQaId });
           db.prepare("UPDATE features SET status = 'reviewing' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
@@ -230,6 +240,15 @@ export async function workerLoop(
             sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `❌ ${feature.id} QA 未通过 (${qaResult.score}): ${qaResult.summary}` });
             sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔄 ${feature.id} 重做 (${qaAttempt}/${maxQARetries})` });
             db.prepare("UPDATE features SET status = 'in_progress' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
+
+            // v20.0: 自动经验提取 (P2-1) — QA reject 时记录失败原因到项目记忆
+            if (workspacePath) {
+              try {
+                const { extractExperience } = await import('../scratchpad');
+                extractExperience(workspacePath, workerId, 'qa_reject',
+                  `${feature.id} QA 未通过 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`);
+              } catch { /* silent */ }
+            }
           }
         } else {
           passed = true;

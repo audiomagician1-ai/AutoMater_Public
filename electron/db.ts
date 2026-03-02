@@ -274,6 +274,14 @@ const MIGRATIONS: Migration[] = [
         // 非致命: 首次安装时 projects 表可能为空
         log.debug('GitHub token migration skipped (likely first install)', { error: String(err) });
       }
+
+      // v19.1: 迁移全局 API Key 到加密存储
+      try {
+        const { migrateApiKeyToSecretManager } = require('./ipc/settings') as typeof import('./ipc/settings');
+        migrateApiKeyToSecretManager();
+      } catch (err) {
+        log.debug('API key migration skipped', { error: String(err) });
+      }
     },
   },
   {
@@ -282,6 +290,26 @@ const MIGRATIONS: Migration[] = [
     up: () => {
       safeAddColumn('ALTER TABLE team_members ADD COLUMN max_iterations INTEGER');
       safeAddColumn('ALTER TABLE features ADD COLUMN resume_snapshot TEXT');
+    },
+  },
+  {
+    version: 12,
+    description: 'v20.0: meta_agent_chat_messages — 管家对话持久化 (应用级, 不跟随项目)',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meta_agent_chat_messages (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          project_id TEXT,
+          role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+          content TEXT NOT NULL,
+          triggered_wish INTEGER NOT NULL DEFAULT 0,
+          attachments TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_macm_session ON meta_agent_chat_messages(session_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_macm_project ON meta_agent_chat_messages(project_id, created_at);
+      `);
     },
   },
 ];

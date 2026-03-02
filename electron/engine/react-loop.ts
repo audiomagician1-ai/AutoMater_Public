@@ -18,14 +18,16 @@ import { collectDeveloperContext, collectLightContext, loadKnownIssues, type Con
 import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { safeJsonParse, safeParseToolArgs } from './safe-json';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
-import { DEVELOPER_REACT_PROMPT } from './prompts';
+import { DEVELOPER_REACT_PROMPT, getCategoryGuidance } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
 import { parseStructuredOutput, PLAN_STEPS_SCHEMA } from './output-parser';
 import {
   guardToolCall, checkReactTermination, toolCallSignature, hasToolSideEffect,
+  checkVerificationGate, checkSemanticLoop,
   DEFAULT_REACT_CONFIG, type ReactState as GuardReactState, type TerminationReason,
 } from './guards';
 import { selectModelTier, resolveModel, estimateFeatureComplexity, type TaskComplexity } from './model-selector';
+import { selectTools, detectProjectProfile, type TaskContext as ToolTaskContext } from './adaptive-tool-selector';
 import { runResearcher } from './sub-agent';
 import { buildCodeGraph, graphSummary } from './code-graph';
 import { readRecentDecisions, formatDecisionsForContext, appendSharedDecision } from './memory-system';
@@ -40,6 +42,7 @@ import {
 import {
   recordFileChange, recordToolError, recordErrorResolved,
   buildScratchpadAnchor, maskOldToolOutputs,
+  recordProgress, extractExperience, getOtherWorkersChanges,
 } from './scratchpad';
 import { compressSubAgentResult } from './sub-agent-compressor';
 import { summarizeToolResult } from './tool-result-summarizer';
@@ -184,6 +187,11 @@ export async function reactDeveloperLoop(
     recentCallSignatures: [],
     taskCompleted: false,
     filesWritten: new Set<string>(),
+    // v20.0: 新增验证追踪
+    hasRunVerification: false,
+    hasWrittenFiles: false,
+    consecutivePlainTextCount: 0,
+    semanticFailures: new Map(),
   };
 
   // v18.0: 迭代间学习
@@ -215,7 +223,30 @@ export async function reactDeveloperLoop(
       : `🤖 ${feature.id} 模型选择: ${model} (${modelSelection.tier}) — ${modelSelection.reason}`,
   });
 
-  const tools = getToolsForRole('developer', gitConfig.mode);
+  const allTools = getToolsForRole('developer', gitConfig.mode);
+
+  // v20.0: 自适应工具选择 — 根据项目 profile 和任务类型动态裁剪工具列表
+  let tools = allTools;
+  let toolTaskContext: ToolTaskContext = { phase: 'coding', description: `${feature.title} ${feature.description}`, iteration: 0, recentTools: [], failedTools: [] };
+  try {
+    if (workspacePath) {
+      const fs = await import('fs');
+      const fileList = fs.readdirSync(workspacePath, { recursive: true }) as string[];
+      const projectProfile = detectProjectProfile(fileList.map(String).slice(0, 500));
+      projectProfile.needsWebSearch = /api|http|外部|third.?party|接口|调研/.test(`${feature.title} ${feature.description}`.toLowerCase());
+      const selection = selectTools(allTools, projectProfile, toolTaskContext);
+      tools = selection.tools;
+      if (selection.removed.length > 0) {
+        sendToUI(win, 'agent:log', {
+          projectId, agentId: workerId,
+          content: `🔧 ${feature.id} 自适应工具选择: ${selection.tools.length}/${allTools.length} 工具 (移除: ${selection.removed.slice(0, 5).join(', ')}${selection.removed.length > 5 ? '...' : ''})`,
+        });
+      }
+    }
+  } catch {
+    // 自适应工具选择失败时使用完整工具列表
+    tools = allTools;
+  }
 
   const toolCtx: ToolContext = {
     workspacePath: workspacePath || '',
@@ -315,7 +346,10 @@ export async function reactDeveloperLoop(
   }
 
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
-  const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
+  const baseDevPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
+  // v20.0: 按 feature category 注入特定指导
+  const categoryGuidance = getCategoryGuidance(feature.category || '');
+  const devSystemPrompt = categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt;
 
   const messages: LLMMessage[] = [
     { role: 'system', content: devSystemPrompt },
@@ -342,6 +376,19 @@ export async function reactDeveloperLoop(
   for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
     // v3.0: 程序化终止检查 (每轮迭代前)
     guardState.iteration = iter;
+
+    // v20.0: 阶段感知工具过滤 — 根据当前迭代动态调整工具列表
+    if (iter <= 3) {
+      toolTaskContext.phase = 'planning';  // 前3轮: 理解+规划
+    } else if (iter >= MAX_ITERATIONS - 3) {
+      toolTaskContext.phase = 'testing';   // 最后3轮: 验证
+    } else {
+      toolTaskContext.phase = 'coding';    // 中间: 编码
+    }
+    toolTaskContext.iteration = iter;
+    toolTaskContext.recentTools = guardState.recentCallSignatures.slice(-5).map(s => s.split(':')[0]);
+    toolTaskContext.failedTools = learningState.failures.slice(-5).map(f => f.toolName);
+
     const termCheck = checkReactTermination(guardState, DEFAULT_REACT_CONFIG, signal.aborted);
     if (!termCheck.shouldContinue) {
       terminationReason = termCheck.reason;
@@ -400,12 +447,34 @@ export async function reactDeveloperLoop(
             completed = true;
           }
         }
+
+        // v20.0: 纯文本回复容忍 — 不立即 break，注入修复消息后继续循环
+        guardState.consecutivePlainTextCount++;
+        if (!completed && guardState.consecutivePlainTextCount < 3) {
+          sendToUI(win, 'agent:log', {
+            projectId, agentId: workerId,
+            content: `⚠️ ${feature.id} 纯文本回复 (${guardState.consecutivePlainTextCount}/3)，注入工具使用提示`,
+          });
+          messages.push({
+            role: 'assistant',
+            content: msg.content,
+          });
+          messages.push({
+            role: 'user',
+            content: '你需要使用工具来完成任务。请调用合适的工具（如 read_file、write_file、edit_file、run_command 等）。如果任务已全部完成，请调用 task_complete 工具。不要只输出文本，必须使用工具。',
+          });
+          continue;
+        }
+
         sendToUI(win, 'agent:log', {
           projectId, agentId: workerId,
           content: `🔚 ${feature.id} ReAct 循环结束 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
         });
         break;
       }
+
+      // v20.0: 有 tool_calls 时重置纯文本计数
+      guardState.consecutivePlainTextCount = 0;
 
       // ── 执行 tool calls ──
       messages.push({
@@ -460,6 +529,21 @@ export async function reactDeveloperLoop(
 
         // ── task_complete ──
         if (tc.function.name === 'task_complete') {
+          // v20.0: 验证门控 — 写过文件但没验证过 → 拦截并提示
+          const vGate = checkVerificationGate(guardState);
+          if (!vGate.allowed) {
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `🚧 ${feature.id} task_complete 被验证门控拦截: 尚未执行验证命令`,
+            });
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: vGate.message || '请先验证代码再完成任务。',
+            });
+            continue;
+          }
+
           completed = true;
           guardState.taskCompleted = true;
           const summary = toolArgs.summary || '完成';
@@ -590,6 +674,20 @@ export async function reactDeveloperLoop(
           type: 'tool:call',
           data: { tool: tc.function.name, args: argsSummary, success: toolResult.success },
         });
+        // v20.0: 决策审计追踪 (P3-2) — 副作用工具调用自动记录 why/what/result
+        if (hasToolSideEffect([tc.function.name]) && workspacePath) {
+          const lastThought = msg.content ? msg.content.slice(0, 200) : '';
+          emitEvent({
+            projectId, agentId: workerId, featureId: feature.id,
+            type: 'decision:point',
+            data: {
+              why: lastThought,
+              what: `${tc.function.name}(${argsSummary})`,
+              result: toolResult.success ? 'success' : `failed: ${toolResult.output.slice(0, 100)}`,
+              iteration: iter,
+            },
+          });
+        }
         sendToUI(win, 'agent:log', {
           projectId, agentId: workerId,
           content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
@@ -598,6 +696,7 @@ export async function reactDeveloperLoop(
         // 记录写入/编辑的文件
         if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && toolResult.success) {
           filesWritten.add(toolArgs.path);
+          guardState.hasWrittenFiles = true;
           sendToUI(win, 'workspace:changed', { projectId });
           if (workspacePath) {
             appendSharedDecision(workspacePath, {
@@ -608,6 +707,8 @@ export async function reactDeveloperLoop(
             });
             // v19.0: Harness 自动收集文件变更到 scratchpad
             recordFileChange(workspacePath, workerId, toolArgs.path, tc.function.name === 'write_file' ? 'created' : 'modified');
+            // v20.0: 自动更新进度 (P2-3)
+            recordProgress(workspacePath, workerId, `[迭代 ${iter}] ${tc.function.name === 'write_file' ? '创建' : '修改'} ${toolArgs.path}`);
           }
         }
 
@@ -619,6 +720,31 @@ export async function reactDeveloperLoop(
           const lastFail = learningState.failures[learningState.failures.length - 1];
           if (lastFail && lastFail.toolName === tc.function.name) {
             recordErrorResolved(workspacePath, workerId, tc.function.name, `重试后成功`);
+            // v20.0: 自动经验提取 (P2-1) — 错误修复时记录修复模式
+            extractExperience(workspacePath, workerId, 'error_fixed',
+              `${tc.function.name} 错误 "${lastFail.errorOutput.slice(0, 100)}" 已通过重试修复`);
+          }
+        }
+
+        // v20.0: 追踪验证命令执行
+        if (['run_command', 'run_test', 'run_lint'].includes(tc.function.name)) {
+          guardState.hasRunVerification = true;
+        }
+
+        // v20.0: 语义死循环检测 — 同一工具+同一文件连续失败
+        const targetFile = toolArgs.path || toolArgs.command || '';
+        if (typeof targetFile === 'string' && targetFile) {
+          const semLoop = checkSemanticLoop(guardState, tc.function.name, targetFile, toolResult.success);
+          if (semLoop.detected && semLoop.escalation) {
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `🔴 ${feature.id} 语义死循环检测: ${tc.function.name} → ${targetFile}`,
+            });
+            // 注入强制策略升级指令到消息历史
+            messages.push({
+              role: 'user',
+              content: semLoop.escalation,
+            });
           }
         }
 
@@ -728,6 +854,17 @@ export async function reactDeveloperLoop(
         }
       }
 
+      // v20.0: 并行 Worker 信息共享 (P2-4) — 每 5 轮注入其他 Worker 的最新变更
+      if (workspacePath && iter % 5 === 0 && iter > 1) {
+        const otherChanges = getOtherWorkersChanges(workspacePath, workerId);
+        if (otherChanges) {
+          messages.push({
+            role: 'user',
+            content: otherChanges + '\n\n> 以上是其他并行 Worker 的最新变更，请注意避免冲突。如果你正在修改的文件被其他 Worker 修改过，请先 read_file 获取最新内容。',
+          });
+        }
+      }
+
     } catch (err: unknown) {
       if (signal.aborted) break;
       // v5.6: 不可重试错误（模型不存在、API Key 无效等）→ 立即终止，不等 consecutive count
@@ -758,6 +895,12 @@ export async function reactDeveloperLoop(
     const allFiles = [...new Set([...existingFiles, ...filesWritten])];
     db.prepare("UPDATE features SET affected_files = ? WHERE id = ? AND project_id = ?")
       .run(JSON.stringify(allFiles), feature.id, projectId);
+
+    // v20.0: 自动经验提取 (P2-1) — Feature 完成时记录使用的方案
+    if (completed && workspacePath) {
+      extractExperience(workspacePath, workerId, 'feature_done',
+        `${feature.id} "${feature.title}" 完成, 影响文件: ${[...filesWritten].join(', ')}`);
+    }
   }
 
   // ── v8.0: 对话备份 ──
@@ -987,6 +1130,11 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     consecutiveIdleCount: 0, consecutiveErrorCount: 0,
     recentCallSignatures: [], taskCompleted: false,
     filesWritten: new Set<string>(),
+    // v20.0: 新增验证追踪
+    hasRunVerification: false,
+    hasWrittenFiles: false,
+    consecutivePlainTextCount: 0,
+    semanticFailures: new Map(),
   };
 
   // v18.0: 迭代间学习
@@ -1045,8 +1193,22 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
             sendToUI(win, 'workspace:changed', { projectId });
           }
         }
+
+        // v20.0: 纯文本回复容忍
+        guardState.consecutivePlainTextCount++;
+        if (guardState.consecutivePlainTextCount < 3) {
+          messages.push({ role: 'assistant', content: msg.content });
+          messages.push({
+            role: 'user',
+            content: '你需要使用工具来完成任务。请调用合适的工具。如果任务已全部完成，请调用 task_complete。',
+          });
+          continue;
+        }
         break;
       }
+
+      // v20.0: 有 tool_calls 时重置纯文本计数
+      guardState.consecutivePlainTextCount = 0;
 
       messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
 
@@ -1146,10 +1308,25 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
 
           if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && result.success) {
             filesWritten.add(toolArgs.path);
+            guardState.hasWrittenFiles = true;
             sendToUI(win, 'workspace:changed', { projectId });
             // v19.0: Harness 自动收集文件变更到 scratchpad
             if (workspacePath) {
               recordFileChange(workspacePath, agentId, toolArgs.path, tc.function.name === 'write_file' ? 'created' : 'modified');
+            }
+          }
+
+          // v20.0: 追踪验证命令执行
+          if (['run_command', 'run_test', 'run_lint'].includes(tc.function.name)) {
+            guardState.hasRunVerification = true;
+          }
+
+          // v20.0: 语义死循环检测
+          const targetFile = toolArgs.path || toolArgs.command || '';
+          if (typeof targetFile === 'string' && targetFile && !result.success) {
+            const semLoop = checkSemanticLoop(guardState, tc.function.name, targetFile, result.success);
+            if (semLoop.detected && semLoop.escalation) {
+              messages.push({ role: 'user', content: semLoop.escalation });
             }
           }
 
