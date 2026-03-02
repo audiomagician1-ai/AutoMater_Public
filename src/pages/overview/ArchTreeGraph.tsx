@@ -56,8 +56,8 @@ interface LayoutNode extends ArchNode {
 // ── Color maps ──
 
 const LEVEL_COLORS: Record<ArchNodeLevel, { fill: string; stroke: string; text: string }> = {
-  domain:    { fill: '#1a1a2e', stroke: '#8b5cf6', text: '#c4b5fd' },
-  module:    { fill: '#083344', stroke: '#06b6d4', text: '#22d3ee' },
+  domain: { fill: '#1a1a2e', stroke: '#8b5cf6', text: '#c4b5fd' },
+  module: { fill: '#083344', stroke: '#06b6d4', text: '#22d3ee' },
   component: { fill: '#052e16', stroke: '#22c55e', text: '#4ade80' },
 };
 
@@ -66,10 +66,10 @@ const TYPE_ICONS: Record<string, string> = {
   'api-layer': '🌐',
   'data-layer': '🗃️',
   'business-logic': '⚙️',
-  'config': '⚙️',
-  'utility': '🔧',
-  'ui': '🎨',
-  'infrastructure': '🏗️',
+  config: '⚙️',
+  utility: '🔧',
+  ui: '🎨',
+  infrastructure: '🏗️',
 };
 
 const EDGE_COLORS: Record<string, string> = {
@@ -131,20 +131,25 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
   // Drill-down state
   const [viewLevel, setViewLevel] = useState<ArchNodeLevel>('domain');
   const [filterParentId, setFilterParentId] = useState<string | null>(null);
-  const [breadcrumb, setBreadcrumb] = useState<Array<{ level: ArchNodeLevel; label: string; parentId: string | null }>>([
-    { level: 'domain', label: '架构域', parentId: null },
-  ]);
+  const [breadcrumb, setBreadcrumb] = useState<Array<{ level: ArchNodeLevel; label: string; parentId: string | null }>>(
+    [{ level: 'domain', label: '架构域', parentId: null }],
+  );
 
   const loadTree = useCallback(async () => {
     setLoading(true);
     try {
       const res = await window.automater.project.getArchTree(projectId);
       if (res.success && res.tree) setTree(res.tree as ArchTree);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
+    } catch {
+      /* silent */
+    } finally {
+      setLoading(false);
+    }
   }, [projectId]);
 
-  useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => {
+    loadTree();
+  }, [loadTree]);
 
   // Compute visible nodes and edges based on drill-down level
   const { visibleNodes, visibleEdges } = useMemo(() => {
@@ -174,42 +179,71 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
       if (viewLevel === 'domain') {
         const sourceNode = tree.nodes.find(n => n.id === e.source);
         const targetNode = tree.nodes.find(n => n.id === e.target);
-        const sourceDomain = sourceNode?.level === 'module' ? sourceNode.parentId : sourceNode?.level === 'component' ? tree.nodes.find(n => n.id === sourceNode.parentId)?.parentId : e.source;
-        const targetDomain = targetNode?.level === 'module' ? targetNode.parentId : targetNode?.level === 'component' ? tree.nodes.find(n => n.id === targetNode.parentId)?.parentId : e.target;
-        return sourceDomain && targetDomain && nodeIds.has(sourceDomain) && nodeIds.has(targetDomain) && sourceDomain !== targetDomain;
+        const sourceDomain =
+          sourceNode?.level === 'module'
+            ? sourceNode.parentId
+            : sourceNode?.level === 'component'
+              ? tree.nodes.find(n => n.id === sourceNode.parentId)?.parentId
+              : e.source;
+        const targetDomain =
+          targetNode?.level === 'module'
+            ? targetNode.parentId
+            : targetNode?.level === 'component'
+              ? tree.nodes.find(n => n.id === targetNode.parentId)?.parentId
+              : e.target;
+        return (
+          sourceDomain &&
+          targetDomain &&
+          nodeIds.has(sourceDomain) &&
+          nodeIds.has(targetDomain) &&
+          sourceDomain !== targetDomain
+        );
       }
       return false;
     });
 
     // Remap cross-level edges at domain level
-    const remappedEdges: ArchEdge[] = viewLevel === 'domain'
-      ? (() => {
-          const domainEdgeSet = new Set<string>();
-          const result: ArchEdge[] = [];
-          for (const e of filteredEdges) {
-            if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
-              const key = `${e.source}-${e.target}`;
-              if (!domainEdgeSet.has(key)) { domainEdgeSet.add(key); result.push(e); }
-            } else {
-              const sourceNode = tree.nodes.find(n => n.id === e.source);
-              const targetNode = tree.nodes.find(n => n.id === e.target);
-              const sd = sourceNode?.level === 'module' ? sourceNode.parentId! : tree.nodes.find(n => n.id === sourceNode?.parentId)?.parentId!;
-              const td = targetNode?.level === 'module' ? targetNode.parentId! : tree.nodes.find(n => n.id === targetNode?.parentId)?.parentId!;
-              if (sd && td && sd !== td) {
-                const key = `${sd}-${td}`;
-                if (!domainEdgeSet.has(key)) { domainEdgeSet.add(key); result.push({ ...e, source: sd, target: td }); }
+    const remappedEdges: ArchEdge[] =
+      viewLevel === 'domain'
+        ? (() => {
+            const domainEdgeSet = new Set<string>();
+            const result: ArchEdge[] = [];
+            for (const e of filteredEdges) {
+              if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
+                const key = `${e.source}-${e.target}`;
+                if (!domainEdgeSet.has(key)) {
+                  domainEdgeSet.add(key);
+                  result.push(e);
+                }
+              } else {
+                const sourceNode = tree.nodes.find(n => n.id === e.source);
+                const targetNode = tree.nodes.find(n => n.id === e.target);
+                const sd =
+                  sourceNode?.level === 'module'
+                    ? sourceNode.parentId!
+                    : tree.nodes.find(n => n.id === sourceNode?.parentId)?.parentId!;
+                const td =
+                  targetNode?.level === 'module'
+                    ? targetNode.parentId!
+                    : tree.nodes.find(n => n.id === targetNode?.parentId)?.parentId!;
+                if (sd && td && sd !== td) {
+                  const key = `${sd}-${td}`;
+                  if (!domainEdgeSet.has(key)) {
+                    domainEdgeSet.add(key);
+                    result.push({ ...e, source: sd, target: td });
+                  }
+                }
               }
             }
-          }
-          return result;
-        })()
-      : filteredEdges;
+            return result;
+          })()
+        : filteredEdges;
 
     return { visibleNodes: nodesWithChildren, visibleEdges: remappedEdges };
   }, [tree, viewLevel, filterParentId]);
 
   const layout = useMemo(
-    () => visibleNodes.length > 0 ? layoutNodes(visibleNodes, visibleEdges) : null,
+    () => (visibleNodes.length > 0 ? layoutNodes(visibleNodes, visibleEdges) : null),
     [visibleNodes, visibleEdges],
   );
 
@@ -223,7 +257,11 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
       if (rect) {
         const cx = e.clientX - rect.left;
         const cy = e.clientY - rect.top;
-        return { scale: newScale, x: cx - (cx - t.x) * (newScale / t.scale), y: cy - (cy - t.y) * (newScale / t.scale) };
+        return {
+          scale: newScale,
+          x: cx - (cx - t.x) * (newScale / t.scale),
+          y: cy - (cy - t.y) * (newScale / t.scale),
+        };
       }
       return { ...t, scale: newScale };
     });
@@ -236,8 +274,15 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  const handleMouseDown = (e: React.MouseEvent) => { if (e.button !== 0) return; setDragging(true); setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y }); };
-  const handleMouseMove = (e: React.MouseEvent) => { if (!dragging) return; setTransform(t => ({ ...t, x: e.clientX - dragStart.x, y: e.clientY - dragStart.y })); };
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+  };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragging) return;
+    setTransform(t => ({ ...t, x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }));
+  };
   const handleMouseUp = () => setDragging(false);
 
   const handleDoubleClick = (node: LayoutNode) => {
@@ -254,16 +299,13 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
     } else if (viewLevel === 'module') {
       setViewLevel('component');
       setFilterParentId(node.id);
-      setBreadcrumb(prev => [
-        ...prev,
-        { level: 'component', label: node.name, parentId: node.id },
-      ]);
+      setBreadcrumb(prev => [...prev, { level: 'component', label: node.name, parentId: node.id }]);
       setTransform({ x: 0, y: 0, scale: 1 });
       setSelectedNode(null);
     }
   };
 
-  const navigateToBreadcrumb = (item: typeof breadcrumb[0]) => {
+  const navigateToBreadcrumb = (item: (typeof breadcrumb)[0]) => {
     setViewLevel(item.level);
     setFilterParentId(item.parentId);
     if (item.level === 'domain') {
@@ -281,14 +323,32 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-12 justify-center text-sm text-slate-500">
-        <div className="animate-spin w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full" />
-        加载架构树...
-      </div>
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-slate-400">🏛️ 系统架构图谱</h3>
+        </div>
+        <div className="bg-slate-900/30 border border-slate-800/50 rounded-xl px-5 py-10 flex items-center justify-center gap-2 text-sm text-slate-500">
+          <div className="animate-spin w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full" />
+          加载架构树...
+        </div>
+      </section>
     );
   }
 
-  if (!tree || !layout || layout.nodes.length === 0) return null;
+  if (!tree || !layout || layout.nodes.length === 0) {
+    return (
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-slate-400">🏛️ 系统架构图谱</h3>
+        </div>
+        <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl px-5 py-10 text-center">
+          <div className="text-3xl mb-3 opacity-40">🏛️</div>
+          <div className="text-sm text-slate-500 mb-1">暂无架构数据</div>
+          <div className="text-xs text-slate-600">导入已有项目后，系统将自动生成三级架构图谱（域 → 模块 → 组件）。</div>
+        </div>
+      </section>
+    );
+  }
 
   const nodeMap = new Map(layout.nodes.map(n => [n.id, n]));
 
@@ -308,7 +368,9 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
               {level === 'domain' ? '域' : level === 'module' ? '模块' : '组件'}
             </span>
           ))}
-          <span className="text-slate-600 ml-2">{treeDomains} 域 · {treeModules} 模块 · {treeComponents} 组件</span>
+          <span className="text-slate-600 ml-2">
+            {treeDomains} 域 · {treeModules} 模块 · {treeComponents} 组件
+          </span>
         </div>
       </div>
 
@@ -339,9 +401,27 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
         >
           {/* Controls */}
           <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
-            <button onClick={zoomIn} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center" title="放大">+</button>
-            <button onClick={zoomOut} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center" title="缩小">−</button>
-            <button onClick={resetView} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs flex items-center justify-center" title="重置">⟲</button>
+            <button
+              onClick={zoomIn}
+              className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center"
+              title="放大"
+            >
+              +
+            </button>
+            <button
+              onClick={zoomOut}
+              className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center"
+              title="缩小"
+            >
+              −
+            </button>
+            <button
+              onClick={resetView}
+              className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs flex items-center justify-center"
+              title="重置"
+            >
+              ⟲
+            </button>
           </div>
           <div className="absolute bottom-3 left-3 z-10 text-[10px] text-slate-600">
             缩放: {(transform.scale * 100).toFixed(0)}% · 滚轮缩放 · 拖拽平移 · 双击下钻
@@ -357,10 +437,26 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
           >
             <svg width="100%" height="100%">
               <defs>
-                <marker id="at-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <marker
+                  id="at-arrow"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
                 </marker>
-                <marker id="at-arrow-hl" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <marker
+                  id="at-arrow-hl"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4b5fd" />
                 </marker>
               </defs>
@@ -377,11 +473,15 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                   const toY = to.y + to.height / 2;
                   const midX = (fromX + toX) / 2;
                   const isHl = hoveredNode === edge.source || hoveredNode === edge.target;
-                  const color = isHl ? '#c4b5fd' : (EDGE_COLORS[edge.type] || '#334155');
+                  const color = isHl ? '#c4b5fd' : EDGE_COLORS[edge.type] || '#334155';
                   return (
-                    <path key={i}
+                    <path
+                      key={i}
                       d={`M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`}
-                      fill="none" stroke={color} strokeWidth={isHl ? 2.5 : 1.5} opacity={isHl ? 1 : 0.5}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={isHl ? 2.5 : 1.5}
+                      opacity={isHl ? 1 : 0.5}
                       markerEnd={isHl ? 'url(#at-arrow-hl)' : 'url(#at-arrow)'}
                       className="transition-all duration-200"
                     />
@@ -398,7 +498,9 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                   const hasChildren = node.childCount > 0;
 
                   return (
-                    <g key={node.id} transform={`translate(${node.x}, ${node.y})`}
+                    <g
+                      key={node.id}
+                      transform={`translate(${node.x}, ${node.y})`}
                       onMouseEnter={() => setHoveredNode(node.id)}
                       onMouseLeave={() => setHoveredNode(null)}
                       onClick={() => setSelectedNode(isSel ? null : node)}
@@ -407,13 +509,24 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                     >
                       {/* Outer glow on hover */}
                       {isHl && (
-                        <rect width={node.width} height={node.height} rx={10} fill="none"
-                          stroke={c.stroke} strokeWidth={2} opacity={0.3}>
+                        <rect
+                          width={node.width}
+                          height={node.height}
+                          rx={10}
+                          fill="none"
+                          stroke={c.stroke}
+                          strokeWidth={2}
+                          opacity={0.3}
+                        >
                           <animate attributeName="opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite" />
                         </rect>
                       )}
 
-                      <rect width={node.width} height={node.height} rx={10} fill={c.fill}
+                      <rect
+                        width={node.width}
+                        height={node.height}
+                        rx={10}
+                        fill={c.fill}
                         stroke={isSel ? '#e879f9' : isHl ? '#a78bfa' : c.stroke}
                         strokeWidth={isSel ? 2.5 : isHl ? 2 : 1}
                         className="transition-all duration-200"
@@ -441,7 +554,9 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
 
                       {/* Drill-down hint */}
                       {hasChildren && (
-                        <text x={node.width - 8} y={16} fontSize={8} fill="#475569" textAnchor="end">双击展开</text>
+                        <text x={node.width - 8} y={16} fontSize={8} fill="#475569" textAnchor="end">
+                          双击展开
+                        </text>
                       )}
                     </g>
                   );
@@ -455,12 +570,19 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
         {selectedNode && (
           <div className="w-72 shrink-0 bg-slate-900/80 border border-slate-800 rounded-xl p-4 overflow-y-auto max-h-[460px]">
             <div className="flex items-center gap-2 mb-3">
-              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: (LEVEL_COLORS[selectedNode.level] || LEVEL_COLORS.module).stroke }} />
+              <span
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: (LEVEL_COLORS[selectedNode.level] || LEVEL_COLORS.module).stroke }}
+              />
               <h4 className="text-sm font-semibold text-slate-200">{selectedNode.name}</h4>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 capitalize">{selectedNode.level}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 capitalize">
+                {selectedNode.level}
+              </span>
             </div>
             <p className="text-xs text-slate-400 mb-3">{selectedNode.responsibility}</p>
-            <div className="text-[10px] text-slate-500 mb-3">{TYPE_ICONS[selectedNode.type] || '📦'} {selectedNode.type}</div>
+            <div className="text-[10px] text-slate-500 mb-3">
+              {TYPE_ICONS[selectedNode.type] || '📦'} {selectedNode.type}
+            </div>
             <div className="flex gap-3 text-[10px] text-slate-500 mb-3">
               <span>{selectedNode.fileCount} 文件</span>
               <span>{selectedNode.loc} LOC</span>
@@ -471,9 +593,13 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                 <div className="text-[10px] font-medium text-slate-400 uppercase mb-1">Public API</div>
                 <div className="flex flex-wrap gap-1">
                   {selectedNode.publicAPI.slice(0, 12).map(api => (
-                    <span key={api} className="text-[10px] bg-cyan-900/30 text-cyan-400 px-1.5 py-0.5 rounded">{api}</span>
+                    <span key={api} className="text-[10px] bg-cyan-900/30 text-cyan-400 px-1.5 py-0.5 rounded">
+                      {api}
+                    </span>
                   ))}
-                  {selectedNode.publicAPI.length > 12 && <span className="text-[10px] text-slate-500">+{selectedNode.publicAPI.length - 12}</span>}
+                  {selectedNode.publicAPI.length > 12 && (
+                    <span className="text-[10px] text-slate-500">+{selectedNode.publicAPI.length - 12}</span>
+                  )}
                 </div>
               </div>
             )}
@@ -483,7 +609,9 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                 <div className="text-[10px] font-medium text-slate-400 uppercase mb-1">Key Types</div>
                 <div className="flex flex-wrap gap-1">
                   {selectedNode.keyTypes.slice(0, 10).map(t => (
-                    <span key={t} className="text-[10px] bg-purple-900/30 text-purple-400 px-1.5 py-0.5 rounded">{t}</span>
+                    <span key={t} className="text-[10px] bg-purple-900/30 text-purple-400 px-1.5 py-0.5 rounded">
+                      {t}
+                    </span>
                   ))}
                 </div>
               </div>
@@ -494,7 +622,9 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                 <div className="text-[10px] font-medium text-slate-400 uppercase mb-1">Patterns</div>
                 <div className="flex flex-wrap gap-1">
                   {selectedNode.patterns.map(p => (
-                    <span key={p} className="text-[10px] bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded">{p}</span>
+                    <span key={p} className="text-[10px] bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded">
+                      {p}
+                    </span>
                   ))}
                 </div>
               </div>
@@ -502,9 +632,13 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
 
             {selectedNode.issues.length > 0 && (
               <div className="mb-3">
-                <div className="text-[10px] font-medium text-amber-400 uppercase mb-1">Issues ({selectedNode.issues.length})</div>
+                <div className="text-[10px] font-medium text-amber-400 uppercase mb-1">
+                  Issues ({selectedNode.issues.length})
+                </div>
                 {selectedNode.issues.map((issue, i) => (
-                  <div key={i} className="text-[10px] text-amber-300 bg-amber-900/20 px-2 py-1 rounded mb-1">{issue}</div>
+                  <div key={i} className="text-[10px] text-amber-300 bg-amber-900/20 px-2 py-1 rounded mb-1">
+                    {issue}
+                  </div>
                 ))}
               </div>
             )}
@@ -540,9 +674,15 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                     const otherNode = tree.nodes.find(n => n.id === otherId);
                     return (
                       <div key={i} className="text-[10px] text-slate-500 flex items-center gap-1 mb-0.5">
-                        {edge.source === selectedNode.id
-                          ? <><span className="text-cyan-500">→</span> {otherNode?.name || otherId}</>
-                          : <><span className="text-emerald-500">←</span> {otherNode?.name || otherId}</>}
+                        {edge.source === selectedNode.id ? (
+                          <>
+                            <span className="text-cyan-500">→</span> {otherNode?.name || otherId}
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-emerald-500">←</span> {otherNode?.name || otherId}
+                          </>
+                        )}
                         <span className="text-slate-600">({edge.type})</span>
                       </div>
                     );
