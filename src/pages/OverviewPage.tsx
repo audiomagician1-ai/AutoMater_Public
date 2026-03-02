@@ -21,7 +21,7 @@ import { TechBackground } from '../components/TechBackground';
 import { SystemMonitor } from '../components/SystemMonitor';
 import { ActivityCharts } from '../components/ActivityCharts';
 import {
-  InteractiveGraph, ModuleArchGraph, ArchTreeGraph, ProgressRing, StatCard,
+  InteractiveGraph, ArchTreeGraph, ProgressRing, StatCard,
   DocCompletionBar,
   AgentActivityPanel, ImportAnalysisPanel,
   STATUS_COLOR, CATEGORY_BADGE, PROJECT_STATUS,
@@ -184,57 +184,28 @@ export function OverviewPage() {
 
       <div className="flex-1 px-6 pb-6 space-y-4 relative z-10">
 
-        {/* ═══════ ① 系统架构图 — 置顶 (v7.1) ═══════ */}
+        {/* ═══════ ① 系统架构图 — 始终展示 ═══════ */}
+        <ArchTreeGraph projectId={currentProjectId} />
+
+        {/* Feature 进度图 (有 features 时展示) */}
         {enriched.length > 0 && (
-          <>
-            {/* v10.0: 层级架构图谱 (始终展示, 作为开发逻辑索引) */}
-            <ArchTreeGraph projectId={currentProjectId} />
-
-            <section>
-              <h3 className="text-sm font-medium text-slate-400 mb-3">📊 Feature 进度图</h3>
-              <InteractiveGraph features={enriched} onDrillDown={() => {}} />
-              <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
-                {Object.entries(STATUS_COLOR).map(([key, sc]) => (
-                  <span key={key} className="flex items-center gap-1">
-                    <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
-                    {key === 'todo' ? '待做' : key === 'in_progress' ? '开发中' : key === 'reviewing' ? '审查中' : key === 'passed' ? '已完成' : '失败'}
-                  </span>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-
-        {/* ═══════ 导入项目架构展示 (features=0 时展示分析产物) ═══════ */}
-        {enriched.length === 0 && !isAnalyzing && (
-          <>
-            {/* v10.0: 层级架构树图谱 (优先) — 回退到旧版模块图 */}
-            <ArchTreeGraph projectId={currentProjectId} />
-
-            {/* 探针报告 + 已知问题 (补充信息) */}
-            <ImportAnalysisPanel projectId={currentProjectId} />
-          </>
-        )}
-
-        {/* Skeleton: 分析进行中占位 */}
-        {enriched.length === 0 && isAnalyzing && (
-          <section className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-              <span className="text-xs text-slate-600 uppercase tracking-wider">🗺️ 系统架构图</span>
-              <span className="text-[10px] text-cyan-500/60 ml-1">Agent 正在分析项目结构…</span>
-            </div>
-            <div className="h-36 flex items-center justify-center">
-              <div className="text-center text-slate-700 space-y-2">
-                <div className="flex items-center justify-center gap-4">
-                  {['模块A', '模块B', '模块C'].map(m => (
-                    <div key={m} className="w-24 h-12 rounded-lg border bg-slate-800/20 flex items-center justify-center text-[10px] text-slate-700 border-cyan-800/30 animate-pulse">{m}</div>
-                  ))}
-                </div>
-                <div className="text-[10px]">Agent 正在分析项目结构…</div>
-              </div>
+          <section>
+            <h3 className="text-sm font-medium text-slate-400 mb-3">📊 Feature 进度图</h3>
+            <InteractiveGraph features={enriched} onDrillDown={() => {}} />
+            <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
+              {Object.entries(STATUS_COLOR).map(([key, sc]) => (
+                <span key={key} className="flex items-center gap-1">
+                  <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
+                  {key === 'todo' ? '待做' : key === 'in_progress' ? '开发中' : key === 'reviewing' ? '审查中' : key === 'passed' ? '已完成' : '失败'}
+                </span>
+              ))}
             </div>
           </section>
+        )}
+
+        {/* 导入分析报告 (非 analyzing 且无 features 时展示分析产物) */}
+        {enriched.length === 0 && !isAnalyzing && (
+          <ImportAnalysisPanel projectId={currentProjectId} />
         )}
 
         {/* ═══════ ② 控制栏 (暂停/继续) ═══════ */}
@@ -372,75 +343,37 @@ export function OverviewPage() {
           </div>
         </section>
 
-        {/* ═══════ ④ 进度概览(左) + 实时状态(右) 并排 (v7.1) ═══════ */}
-        {enriched.length > 0 && (
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 左: 进度环 + Agent/Token/成本/分类 */}
-            <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 space-y-3">
-              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">📊 进度概览</h3>
-              <div className="flex items-center gap-4">
-                <ProgressRing value={progress} label="总进度" color="#22c55e" size={72} />
-                {failed > 0 && <ProgressRing value={total > 0 ? (failed / total) * 100 : 0} size={72} label="失败率" color="#ef4444" />}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <StatCard icon="🤖" label="Agents" value={String(a.total ?? 0)} />
-                <StatCard icon="📊" label="Tokens" value={a.total_tokens ? `${(a.total_tokens / 1000).toFixed(1)}k` : '0'} />
-                <StatCard icon="💰" label="成本" value={a.total_cost ? `$${a.total_cost.toFixed(3)}` : '$0'} />
-                <StatCard icon="📁" label="分类" value={String(categoryCount.size)}
-                  sub={[...categoryCount.entries()].map(([k, v]) => `${CATEGORY_BADGE[k] || '📦'}${k}: ${v}`).join('  ')} />
-              </div>
+        {/* ═══════ ④ 进度概览(左) + 实时状态(右) — 始终展示 ═══════ */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 左: 进度环 + Agent/Token/成本/分类 */}
+          <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">📊 进度概览</h3>
+            <div className="flex items-center gap-4">
+              <ProgressRing value={progress} label="总进度" color="#22c55e" size={72} />
+              {failed > 0 && <ProgressRing value={total > 0 ? (failed / total) * 100 : 0} size={72} label="失败率" color="#ef4444" />}
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <StatCard icon="🤖" label="Agents" value={String(a.total ?? 0)} />
+              <StatCard icon="📊" label="Tokens" value={a.total_tokens ? `${(a.total_tokens / 1000).toFixed(1)}k` : '0'} />
+              <StatCard icon="💰" label="成本" value={a.total_cost ? `$${a.total_cost.toFixed(3)}` : '$0'} />
+              <StatCard icon="📁" label="分类" value={String(categoryCount.size)}
+                sub={categoryCount.size > 0 ? [...categoryCount.entries()].map(([k, v]) => `${CATEGORY_BADGE[k] || '📦'}${k}: ${v}`).join('  ') : undefined} />
+            </div>
+          </div>
 
-            {/* 右: Feature 状态统计 + 文档完成度 */}
-            <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 space-y-3">
-              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">📋 实时状态</h3>
-              <div className="grid grid-cols-5 gap-2">
-                <StatCard icon="⬜" label="待做" value={String(todo)} />
-                <StatCard icon="🔨" label="开发中" value={String(inProgress)} />
-                <StatCard icon="🔍" label="审查中" value={String(reviewing)} />
-                <StatCard icon="✅" label="已完成" value={String(passed)} />
-                <StatCard icon="❌" label="失败" value={String(failed)} />
-              </div>
-              <DocCompletionBar features={enriched} projectId={currentProjectId!} />
+          {/* 右: Feature 状态统计 + 文档完成度 */}
+          <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">📋 实时状态</h3>
+            <div className="grid grid-cols-5 gap-2">
+              <StatCard icon="⬜" label="待做" value={String(todo)} />
+              <StatCard icon="🔨" label="开发中" value={String(inProgress)} />
+              <StatCard icon="🔍" label="审查中" value={String(reviewing)} />
+              <StatCard icon="✅" label="已完成" value={String(passed)} />
+              <StatCard icon="❌" label="失败" value={String(failed)} />
             </div>
-          </section>
-        )}
-
-        {/* Skeleton: 进度 + 状态占位 (仅分析中时显示) */}
-        {enriched.length === 0 && isAnalyzing && (
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
-                <span className="text-xs text-slate-600 uppercase tracking-wider">📊 进度看板</span>
-                {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待数据…</span>}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {['Agents', 'Tokens', '成本', '分类'].map(l => (
-                  <div key={l} className={`rounded-lg p-3 text-center ${isActive ? 'bg-slate-800/40 animate-pulse' : 'bg-slate-800/30'}`}>
-                    <div className="text-lg font-bold text-slate-700">—</div>
-                    <div className="text-[10px] text-slate-700">{l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
-                <span className="text-xs text-slate-600 uppercase tracking-wider">📋 实时状态</span>
-                {isActive && <span className="text-[10px] text-cyan-500/60 ml-1">等待数据…</span>}
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                {['待做', '开发中', '审查中', '已完成', '失败'].map(l => (
-                  <div key={l} className={`rounded-lg p-3 text-center ${isActive ? 'bg-slate-800/40 animate-pulse' : 'bg-slate-800/30'}`}>
-                    <div className="text-lg font-bold text-slate-700">—</div>
-                    <div className="text-[10px] text-slate-700">{l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
+            <DocCompletionBar features={enriched} projectId={currentProjectId!} />
+          </div>
+        </section>
 
         {/* ═══════ 项目导入分析 — 仅在 analyzing 时显示 (v7.1) ═══════ */}
         {project?.status === 'analyzing' && (
@@ -560,13 +493,13 @@ export function OverviewPage() {
         {/* ═══════ Agent 实时活动面板 (v6.1) ═══════ */}
         <AgentActivityPanel />
 
-        {/* ═══════ v7.0: 导入分析报告 (features 存在时作为补充信息) ═══════ */}
-        {enriched.length > 0 && <ImportAnalysisPanel projectId={currentProjectId} />}
+        {/* ═══════ 导入分析报告 (始终尝试展示) ═══════ */}
+        <ImportAnalysisPanel projectId={currentProjectId} />
 
-        {/* Feature roadmap */}
-        {enriched.length > 0 && (
-          <section>
-            <h3 className="text-sm font-medium text-slate-400 mb-3">📋 Feature 路线图</h3>
+        {/* Feature roadmap — 始终展示 */}
+        <section>
+          <h3 className="text-sm font-medium text-slate-400 mb-3">📋 Feature 路线图</h3>
+          {enriched.length > 0 ? (
             <div className="space-y-1">
               {enriched
                 .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id))
@@ -589,8 +522,17 @@ export function OverviewPage() {
                   );
                 })}
             </div>
-          </section>
-        )}
+          ) : (
+            <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl px-5 py-8 text-center">
+              <div className="text-2xl mb-2 opacity-40">📋</div>
+              <div className="text-xs text-slate-600">
+                {isAnalyzing ? 'Agent 正在分析项目，Feature 列表即将生成…'
+                  : project?.status === 'error' ? '项目运行出错，Feature 尚未生成。修复问题后重新启动。'
+                  : '暂无 Feature — 在「许愿」页提交需求后，PM 将自动拆分为 Feature 列表。'}
+              </div>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

@@ -211,6 +211,73 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 // ═══════════════════════════════════════
+// Messages 清理 — 确保发送给 API 的消息格式合法
+// ═══════════════════════════════════════
+
+/**
+ * 清理 messages 数组, 确保所有 tool_calls.function.arguments 是合法 JSON 字符串。
+ *
+ * 问题背景: LLM 流式返回有时被截断, 导致 arguments 是不完整的 JSON 字符串。
+ * 当这条 assistant 消息被保留在 messages 中并发送给下一轮 API 调用时,
+ * OpenRouter/OpenAI 会尝试解析该 arguments 字符串并报
+ * "failed to build llm messages: unexpected end of JSON input"。
+ *
+ * 同时确保: content 不为 null/undefined, role='tool' 消息有 content。
+ */
+function sanitizeMessagesForAPI(
+  messages: Array<{ role: string; content: unknown; tool_calls?: unknown[]; tool_call_id?: string }>
+): Array<Record<string, unknown>> {
+  return messages.map(msg => {
+    const cleaned: Record<string, unknown> = { role: msg.role };
+
+    // content: 确保不为 null/undefined (OpenAI API 部分模型不接受)
+    if (msg.content === null || msg.content === undefined) {
+      cleaned.content = msg.role === 'tool' ? '(empty)' : '';
+    } else {
+      cleaned.content = msg.content;
+    }
+
+    // tool_call_id (role=tool 消息需要)
+    if (msg.tool_call_id) {
+      cleaned.tool_call_id = msg.tool_call_id;
+    }
+
+    // tool_calls: 清理 arguments 确保是合法 JSON 字符串
+    if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      cleaned.tool_calls = msg.tool_calls.map((tc: unknown) => {
+        const raw = tc as Record<string, unknown>;
+        const fn = raw.function as Record<string, unknown> | undefined;
+        if (!fn) return raw;
+
+        let args = fn.arguments;
+        if (typeof args === 'string') {
+          // 验证是否为合法 JSON
+          try {
+            JSON.parse(args);
+          } catch {
+            // 不合法 → 尝试修复或替换为空对象
+            log.warn(`Sanitized invalid tool_call arguments for ${fn.name}: ${(args as string).slice(0, 100)}...`);
+            args = '{}';
+          }
+        } else if (args && typeof args === 'object') {
+          // 对象 → 转为 JSON 字符串 (OpenAI 格式要求 arguments 是字符串)
+          args = JSON.stringify(args);
+        } else {
+          args = '{}';
+        }
+
+        return {
+          ...raw,
+          function: { ...fn, arguments: args },
+        };
+      });
+    }
+
+    return cleaned;
+  });
+}
+
+// ═══════════════════════════════════════
 // callLLM — 流式 / 非流式文本生成
 // ═══════════════════════════════════════
 
@@ -449,9 +516,15 @@ async function _callOpenAIWithTools(
   messages: Array<{ role: string; content: unknown }>,
   tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
 ): Promise<LLMWithToolsResult> {
+  // v20.1: 清理 messages — 确保 tool_calls.arguments 是合法 JSON 字符串
+  // OpenRouter/OpenAI 在解析 messages 时会尝试 parse arguments 字符串,
+  // 如果 LLM 流式返回被截断导致 arguments 是不完整 JSON, 会报
+  // "failed to build llm messages: unexpected end of JSON input"
+  const sanitizedMessages = sanitizeMessagesForAPI(messages);
+
   const body: Record<string, unknown> = {
     model,
-    messages,
+    messages: sanitizedMessages,
     tools,
     temperature: 0.2,
     max_tokens: maxTokens,
@@ -523,6 +596,18 @@ async function _callOpenAIWithTools(
 
   if (outputTokens === 0) {
     outputTokens = Math.ceil(content.length / 3.5);
+  }
+
+  // v20.1: 检测流式返回中嵌入的错误消息
+  // 某些 LLM 代理层在消息格式有误时，不返回 HTTP 400 而是在 SSE content 中返回错误文本
+  if (content && /<<ERROR:[a-f0-9]+>>/.test(content) && toolCallMap.size === 0) {
+    const errMatch = content.match(/<<ERROR:([a-f0-9]+)>>:?(.+)/s);
+    const errDetail = errMatch ? errMatch[2].trim() : content;
+    log.warn(`LLM proxy returned error in stream: ${errDetail.slice(0, 200)}`);
+    throw new NonRetryableError(
+      `LLM proxy error: ${errDetail.slice(0, 500)}`,
+      400
+    );
   }
 
   // 组装 tool_calls 数组
