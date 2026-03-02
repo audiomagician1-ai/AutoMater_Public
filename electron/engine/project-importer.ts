@@ -613,6 +613,7 @@ async function phase2Fuse(
   reports: ProbeReport[],
   signal?: AbortSignal,
   onProgress?: (event: ImportProgressEvent) => void,
+  onLog?: ImportLogCallback,
 ): Promise<FuseOutput> {
   const settings = getSettings();
   if (!settings) throw new Error('未配置 LLM 设置');
@@ -629,6 +630,20 @@ async function phase2Fuse(
   const prompt = buildFusePrompt(projectName, scan, probesByType, merged);
 
   onProgress?.({ phase: 'fuse', step: `调用 ${model} 综合分析...`, progress: 0.3 });
+  onLog?.({
+    agentId: 'probe:fuse',
+    content: `🧩 Phase 2: 使用 ${model} 综合 ${reports.length} 个探针报告...`,
+    type: 'info',
+  });
+
+  // Stream fuse LLM output for visibility
+  const fuseOnChunk = (chunk: string) => {
+    onLog?.({
+      agentId: 'probe:fuse',
+      content: chunk,
+      type: 'stream',
+    });
+  };
 
   const result = await callLLM(
     settings, model,
@@ -641,6 +656,8 @@ async function phase2Fuse(
     ],
     signal,
     8192,
+    2,           // retries
+    fuseOnChunk, // stream output
   );
 
   onProgress?.({ phase: 'fuse', step: '解析综合分析结果...', progress: 0.8 });
@@ -832,7 +849,7 @@ export async function importProject(
   projectId: string,
   signal?: AbortSignal,
   onProgress?: ImportProgressCallback,
-  onDetailedLog?: (entry: { type: string; agentId?: string; probeId?: string; content?: string; delta?: string }) => void,
+  onLog?: ImportLogCallback,
 ): Promise<{
   skeleton: ProjectSkeleton;
   summaries: ModuleSummary[];
@@ -854,11 +871,11 @@ export async function importProject(
   if (signal?.aborted) throw new Error('Import aborted');
 
   // ── Phase 1: Probe ──
-  const reports = await phase1Probe(scan, signal, emitProgress);
+  const reports = await phase1Probe(scan, signal, emitProgress, onLog);
   if (signal?.aborted) throw new Error('Import aborted');
 
   // ── Phase 2: Fuse ──
-  const fuse = await phase2Fuse(scan, reports, signal, emitProgress);
+  const fuse = await phase2Fuse(scan, reports, signal, emitProgress, onLog);
   const totalMs = Date.now() - t0;
   fuse.stats.totalDurationMs = totalMs;
 
