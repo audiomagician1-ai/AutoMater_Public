@@ -77,6 +77,17 @@ export function setLogLevel(level: LogLevel): void {
 // ═══════════════════════════════════════
 
 /**
+ * Extract a clean error message string from an unknown thrown value.
+ * Use in catch blocks: `catch (err: unknown) { log.error('msg', toErrorMessage(err)); }`
+ */
+export function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object' && 'message' in err) return String((err as { message: unknown }).message);
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+/**
  * Extract a clean error message and stack from an unknown thrown value.
  * Handles: Error instances, strings, objects with message property, and anything else.
  */

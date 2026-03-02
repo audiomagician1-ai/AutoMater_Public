@@ -113,7 +113,7 @@ export function commit(config: GitProviderConfig, message: string): GitCommitRes
         execSync('git push origin HEAD', { cwd: workspacePath, stdio: 'ignore', timeout: 30000 });
         pushed = true;
       } catch (err) {
-        console.error('[GitProvider] Push failed:', err);
+        log.error('Push failed', err);
       }
     }
 
@@ -268,7 +268,7 @@ export async function testGitHubConnection(repo: string, token: string): Promise
   try {
     const data = await githubApi(`/repos/${repo}`, token);
     return { success: true, message: `✅ 已连接: ${data.full_name} (${data.private ? '私有' : '公开'})` };
-  } catch (err: any) {
-    return { success: false, message: err.message };
+  } catch (err: unknown) {
+    return { success: false, message: (err instanceof Error ? err.message : String(err)) };
   }
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sub-Agent — 只读研究子 Agent (spawn_researcher)
  *
  * Developer Agent 在 ReAct 循环中可以 spawn 一个轻量子 agent，
@@ -252,8 +252,8 @@ export async function runResearcher(
             if (tc.function.name === 'read_file' && toolArgs.path) {
               filesRead.push(toolArgs.path);
             }
-          } catch (err: any) {
-            output = `工具执行错误: ${err.message}`;
+          } catch (err: unknown) {
+            output = `工具执行错误: ${(err instanceof Error ? err.message : String(err))}`;
           }
         }
 
@@ -263,11 +263,11 @@ export async function runResearcher(
           content: output.slice(0, 3000),
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal?.aborted) break;
       return {
         success: false,
-        conclusion: `研究中断: ${err.message}`,
+        conclusion: `研究中断: ${(err instanceof Error ? err.message : String(err))}`,
         filesRead,
         inputTokens: totalIn,
         outputTokens: totalOut,

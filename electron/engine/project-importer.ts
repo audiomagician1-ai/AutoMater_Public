@@ -242,7 +242,7 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
   // 6. 快速文件数 + LOC 统计 (用 stat.size 估算行数，不读内容)
   const { fileCount, totalLOC, locByExtension } = quickFileStats(workspacePath);
 
-  console.log(`[IMPORT] Step 1 snapshot collected in ${Date.now() - t0}ms — ${fileCount} files, ${totalLOC} LOC, ${techStack.join(',')}`);
+  log.info(`Step 1 snapshot collected in ${Date.now() - t0}ms`, { fileCount, totalLOC, techStack: techStack.join(',') });
 
   return {
     techStack, packageFiles, directoryTree, keyFileContents,
@@ -308,7 +308,7 @@ async function analyzeWithLLM(
   if (!settings.strongModel?.trim()) throw new Error('未配置 Strong 模型，请先在设置页面配置');
 
   const model = settings.strongModel;
-  console.log(`[IMPORT] Step 2: Calling LLM (model=${model})`);
+  log.info(`Step 2: Calling LLM`, { model });
   onProgress?.(1, `正在调用大模型分析项目... (${model})`, 0.1);
 
   const prompt = `你是一位资深全栈架构师。我将给你一个项目的完整快照，请分析并生成结构化输出。
@@ -395,7 +395,7 @@ ${snapshot.entryFileSnippets || '(无)'}
   ], signal, 8192);
 
   onProgress?.(1, '大模型分析完成，正在解析结果...', 0.9);
-  console.log(`[IMPORT] Step 2: LLM responded — ${result.inputTokens} in, ${result.outputTokens} out`);
+  log.info(`Step 2: LLM responded`, { inputTokens: result.inputTokens, outputTokens: result.outputTokens });
 
   // 解析三个代码块
   const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/);
@@ -449,14 +449,14 @@ export async function importProject(
 }> {
   const t0 = Date.now();
   const projectName = path.basename(workspacePath);
-  console.log(`[IMPORT] === Import Start (v6.0) === path=${workspacePath}, id=${projectId}`);
+  log.info(`=== Import Start (v6.0) ===`, { workspacePath, projectId });
   log.info('=== Import Start (v6.0) ===', { workspacePath, projectId });
 
   // ── Step 1: 收集项目快照 ──
   onProgress?.(0, '正在收集项目信息...', 0.1);
   const snapshot = await collectProjectSnapshot(workspacePath);
   const step1Ms = Date.now() - t0;
-  console.log(`[IMPORT] Step 1 done in ${step1Ms}ms`);
+  log.info(`Step 1 done in ${step1Ms}ms`);
   onProgress?.(0, `已收集项目快照 (${snapshot.fileCount} 文件, ${snapshot.techStack.join(', ')})`, 1.0);
 
   if (signal?.aborted) throw new Error('Import aborted');
@@ -464,7 +464,7 @@ export async function importProject(
   // ── Step 2: LLM 分析 ──
   const llmResult = await analyzeWithLLM(snapshot, projectName, signal, onProgress);
   const step2Ms = Date.now() - t0;
-  console.log(`[IMPORT] Step 2 done in ${step2Ms}ms — ${llmResult.modules.length} modules detected`);
+  log.info(`Step 2 done in ${step2Ms}ms`, { modules: llmResult.modules.length });
 
   if (signal?.aborted) throw new Error('Import aborted');
 
@@ -527,7 +527,7 @@ export async function importProject(
   if (llmResult.architectureMd) docsGenerated++;
 
   const totalMs = Date.now() - t0;
-  console.log(`[IMPORT] === Import Complete === ${totalMs}ms, ${docsGenerated} docs, ${modules.length} modules`);
+  log.info(`=== Import Complete ===`, { totalMs, docsGenerated, modules: modules.length });
   log.info('=== Import Complete (v6.0) ===', { ms: totalMs, files: skeleton.fileCount, modules: modules.length, docs: docsGenerated });
   onProgress?.(1, `分析完成! ${skeleton.fileCount} 文件, ${modules.length} 模块, ${docsGenerated} 文档`, 1.0);
 

@@ -31,9 +31,9 @@ export interface ToolParamSpec {
   min?: number;
   max?: number;
   /** 枚举值 */
-  enum?: any[];
+  enum?: unknown[];
   /** 自定义校验函数 */
-  validate?: (value: any) => string | null;
+  validate?: (value: unknown) => string | null;
 }
 
 export interface ToolGuardSpec {
@@ -148,7 +148,7 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
 
 // ── Validators ──
 
-function validateRelativePath(value: any): string | null {
+function validateRelativePath(value: unknown): string | null {
   if (typeof value !== 'string') return 'path must be a string';
   const normalized = value.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return 'Absolute paths not allowed';
@@ -157,7 +157,7 @@ function validateRelativePath(value: any): string | null {
   return null;
 }
 
-function validateUrl(value: any): string | null {
+function validateUrl(value: unknown): string | null {
   if (typeof value !== 'string') return 'url must be a string';
   if (!value.match(/^https?:\/\//i)) return 'URL must start with http:// or https://';
   // Block internal/sensitive URLs
@@ -172,7 +172,7 @@ function validateUrl(value: any): string | null {
   return null;
 }
 
-function validateHotkey(value: any): string | null {
+function validateHotkey(value: unknown): string | null {
   if (typeof value !== 'string') return 'combo must be a string';
   // 危险快捷键黑名单
   const dangerous = ['alt+f4', 'ctrl+alt+delete', 'ctrl+alt+del'];

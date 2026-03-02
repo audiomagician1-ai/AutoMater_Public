@@ -131,8 +131,8 @@ export function scanSkillDirectory(dirPath: string): SkillScanResult {
   let entries: string[];
   try {
     entries = fs.readdirSync(dirPath);
-  } catch (err: any) {
-    result.errors.push({ file: dirPath, error: `Cannot read directory: ${err.message}` });
+  } catch (err: unknown) {
+    result.errors.push({ file: dirPath, error: `Cannot read directory: ${err instanceof Error ? err.message : String(err)}` });
     return result;
   }
 
@@ -145,9 +145,10 @@ export function scanSkillDirectory(dirPath: string): SkillScanResult {
       const parsed = JSON.parse(content);
       const skills = parseSkillFile(parsed, filePath);
       result.skills.push(...skills);
-    } catch (err: any) {
-      result.errors.push({ file: fileName, error: err.message });
-      log.warn('Failed to load skill file', { file: fileName, error: err.message });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push({ file: fileName, error: errMsg });
+      log.warn('Failed to load skill file', { file: fileName, error: errMsg });
     }
   }
 
@@ -174,7 +175,7 @@ export function scanSkillDirectory(dirPath: string): SkillScanResult {
 }
 
 /** 解析单个技能文件内容 */
-function parseSkillFile(data: any, filePath: string): LoadedSkill[] {
+function parseSkillFile(data: Record<string, unknown>, filePath: string): LoadedSkill[] {
   const skills: LoadedSkill[] = [];
 
   // 批量格式: { skills: [...] }
@@ -195,7 +196,7 @@ function parseSkillFile(data: any, filePath: string): LoadedSkill[] {
 }
 
 /** 验证并解析单个技能条目 */
-function parseSkillEntry(entry: any, filePath: string): LoadedSkill {
+function parseSkillEntry(entry: Record<string, unknown>, filePath: string): LoadedSkill {
   if (!entry.name || typeof entry.name !== 'string') {
     throw new Error(`Skill missing "name" in ${filePath}`);
   }
@@ -206,19 +207,20 @@ function parseSkillEntry(entry: any, filePath: string): LoadedSkill {
     throw new Error(`Skill "${entry.name}" missing "execution" config`);
   }
 
-  const execType = entry.execution.type;
+  const execution = entry.execution as Record<string, unknown>;
+  const execType = execution.type as string;
   if (!['command', 'http', 'script'].includes(execType)) {
     throw new Error(`Skill "${entry.name}" has invalid execution type: ${execType}`);
   }
 
   // 为安全起见, 对 command 和 script 类型做基本校验
-  if (execType === 'command' && !entry.execution.command) {
+  if (execType === 'command' && !execution.command) {
     throw new Error(`Skill "${entry.name}" (command type) missing "command"`);
   }
-  if (execType === 'http' && !entry.execution.url) {
+  if (execType === 'http' && !execution.url) {
     throw new Error(`Skill "${entry.name}" (http type) missing "url"`);
   }
-  if (execType === 'script' && !entry.execution.code) {
+  if (execType === 'script' && !execution.code) {
     throw new Error(`Skill "${entry.name}" (script type) missing "code"`);
   }
 
@@ -226,14 +228,14 @@ function parseSkillEntry(entry: any, filePath: string): LoadedSkill {
   const definition: ToolDefinition = {
     name: `skill_${entry.name}`,
     description: `[Skill] ${entry.description}`,
-    parameters: entry.parameters || { type: 'object', properties: {} },
+    parameters: (entry.parameters as Record<string, unknown>) || { type: 'object', properties: {} },
   };
 
   return {
     definition,
     execution: entry.execution as SkillExecution,
     sourceFile: filePath,
-    allowedRoles: entry.allowedRoles || [],
+    allowedRoles: (entry.allowedRoles as string[]) || [],
   };
 }
 
@@ -250,7 +252,7 @@ function parseSkillEntry(entry: any, filePath: string): LoadedSkill {
  */
 export async function executeSkill(
   skill: LoadedSkill,
-  args: Record<string, any>,
+  args: Record<string, unknown>,
 ): Promise<{ success: boolean; output: string }> {
   const exec = skill.execution;
   const timeout = exec.timeout ?? 30_000;
@@ -266,13 +268,13 @@ export async function executeSkill(
       default:
         return { success: false, output: `Unknown execution type: ${exec.type}` };
     }
-  } catch (err: any) {
-    return { success: false, output: `Skill execution error: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `Skill execution error: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
 /** 模板替换: {{arg_name}} → 实际值 */
-function interpolate(template: string, args: Record<string, any>): string {
+function interpolate(template: string, args: Record<string, unknown>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
     const val = args[key];
     return val !== undefined ? String(val) : '';
@@ -282,7 +284,7 @@ function interpolate(template: string, args: Record<string, any>): string {
 /** command 类型执行 */
 function executeCommandSkill(
   exec: SkillExecution,
-  args: Record<string, any>,
+  args: Record<string, unknown>,
   timeout: number,
 ): { success: boolean; output: string } {
   const command = exec.command!;
@@ -298,12 +300,13 @@ function executeCommandSkill(
       windowsHide: true,
     });
     return { success: true, output: output.slice(0, 10_000) };
-  } catch (err: any) {
-    const stderr = err.stderr?.toString() || '';
-    const stdout = err.stdout?.toString() || '';
+  } catch (err: unknown) {
+    const execErr = err as { stderr?: Buffer | string; stdout?: Buffer | string; status?: number };
+    const stderr = execErr.stderr?.toString() || '';
+    const stdout = execErr.stdout?.toString() || '';
     return {
       success: false,
-      output: `Command failed (exit ${err.status}):\n${stderr.slice(0, 3000)}${stdout ? '\n--- stdout ---\n' + stdout.slice(0, 2000) : ''}`,
+      output: `Command failed (exit ${execErr.status}):\n${stderr.slice(0, 3000)}${stdout ? '\n--- stdout ---\n' + stdout.slice(0, 2000) : ''}`,
     };
   }
 }
@@ -311,7 +314,7 @@ function executeCommandSkill(
 /** http 类型执行 */
 async function executeHttpSkill(
   exec: SkillExecution,
-  args: Record<string, any>,
+  args: Record<string, unknown>,
   timeout: number,
 ): Promise<{ success: boolean; output: string }> {
   const url = interpolate(exec.url!, args);
@@ -345,16 +348,16 @@ async function executeHttpSkill(
       success: response.ok,
       output: `HTTP ${response.status}\n${text.slice(0, 10_000)}`,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     clearTimeout(timer);
-    return { success: false, output: `HTTP request failed: ${err.message}` };
+    return { success: false, output: `HTTP request failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
 /** script 类型执行 (Node.js Function 构造器) */
 function executeScriptSkill(
   exec: SkillExecution,
-  args: Record<string, any>,
+  args: Record<string, unknown>,
   timeout: number,
 ): { success: boolean; output: string } {
   try {
@@ -366,8 +369,8 @@ function executeScriptSkill(
     const result = fn(args);
     const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     return { success: true, output: output.slice(0, 10_000) };
-  } catch (err: any) {
-    return { success: false, output: `Script error: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `Script error: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -424,7 +427,7 @@ class SkillManager {
   }
 
   /** 执行技能 */
-  async executeSkill(toolName: string, args: Record<string, any>): Promise<{ success: boolean; output: string }> {
+  async executeSkill(toolName: string, args: Record<string, unknown>): Promise<{ success: boolean; output: string }> {
     const skill = this.skills.get(toolName);
     if (!skill) {
       return { success: false, output: `Skill not found: ${toolName}` };

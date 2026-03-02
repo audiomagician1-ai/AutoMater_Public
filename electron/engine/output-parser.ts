@@ -48,14 +48,14 @@ export interface FieldRule {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   required?: boolean;
   /** 枚举约束 */
-  enum?: any[];
+  enum?: unknown[];
   /** 数值范围 */
   min?: number;
   max?: number;
   /** 数组元素校验 */
   items?: Record<string, FieldRule>;
   /** 默认值 (缺失时填入) */
-  default?: any;
+  default?: unknown;
 }
 
 export interface SchemaSpec {
@@ -74,59 +74,64 @@ export interface SchemaSpec {
  * 校验并修复解析后的数据
  * 返回修复后的数据 + 警告列表
  */
-function validateAndRepair(data: any, schema: SchemaSpec): { data: any; warnings: string[]; valid: boolean } {
+function validateAndRepair(data: unknown, schema: SchemaSpec): { data: unknown; warnings: string[]; valid: boolean } {
   const warnings: string[] = [];
+  let workData = data as Record<string, unknown> | unknown[];
 
   // 顶层类型检查
   if (schema.topLevel === 'array') {
-    if (!Array.isArray(data)) {
+    if (!Array.isArray(workData)) {
       // 尝试包装: 如果是单个对象, 包装成数组
-      if (typeof data === 'object' && data !== null) {
-        data = [data];
+      if (typeof workData === 'object' && workData !== null) {
+        workData = [workData];
         warnings.push('Wrapped single object into array');
       } else {
-        return { data, warnings: ['Expected array, got ' + typeof data], valid: false };
+        return { data: workData, warnings: ['Expected array, got ' + typeof workData], valid: false };
       }
     }
 
+    const arr = workData as unknown[];
     // 数组长度约束
-    if (schema.minItems !== undefined && data.length < schema.minItems) {
-      return { data, warnings: [`Array has ${data.length} items, minimum is ${schema.minItems}`], valid: false };
+    if (schema.minItems !== undefined && arr.length < schema.minItems) {
+      return { data: arr, warnings: [`Array has ${arr.length} items, minimum is ${schema.minItems}`], valid: false };
     }
-    if (schema.maxItems !== undefined && data.length > schema.maxItems) {
-      warnings.push(`Array truncated from ${data.length} to ${schema.maxItems} items`);
-      data = data.slice(0, schema.maxItems);
+    let result = arr;
+    if (schema.maxItems !== undefined && arr.length > schema.maxItems) {
+      warnings.push(`Array truncated from ${arr.length} to ${schema.maxItems} items`);
+      result = arr.slice(0, schema.maxItems);
     }
 
     // 校验每个数组元素
     if (schema.arrayItemFields) {
-      data = data.map((item: any, i: number) => {
+      const repaired = result.map((item: unknown, i: number) => {
         if (typeof item !== 'object' || item === null) {
           warnings.push(`Item[${i}] is not an object, skipped`);
           return null;
         }
-        return repairObject(item, schema.arrayItemFields!, warnings, `[${i}]`);
-      }).filter((x: any) => x !== null);
+        return repairObject(item as Record<string, unknown>, schema.arrayItemFields!, warnings, `[${i}]`);
+      }).filter((x: unknown) => x !== null);
+      return { data: repaired, warnings, valid: true };
     }
+    return { data: result, warnings, valid: true };
   } else {
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-      return { data, warnings: ['Expected object, got ' + (Array.isArray(data) ? 'array' : typeof data)], valid: false };
+    if (typeof workData !== 'object' || workData === null || Array.isArray(workData)) {
+      return { data: workData, warnings: ['Expected object, got ' + (Array.isArray(workData) ? 'array' : typeof workData)], valid: false };
     }
     if (schema.fields) {
-      data = repairObject(data, schema.fields, warnings, '');
+      workData = repairObject(workData as Record<string, unknown>, schema.fields, warnings, '');
     }
   }
 
-  return { data, warnings, valid: true };
+  return { data: workData, warnings, valid: true };
 }
 
 /** 校验 + 修复单个对象的字段 */
 function repairObject(
-  obj: Record<string, any>,
+  obj: Record<string, unknown>,
   fields: Record<string, FieldRule>,
   warnings: string[],
   path: string,
-): Record<string, any> {
+): Record<string, unknown> {
   const result = { ...obj };
 
   for (const [key, rule] of Object.entries(fields)) {
@@ -188,11 +193,12 @@ function repairObject(
 
     // 数值范围
     if (rule.type === 'number' && typeof result[key] === 'number') {
-      if (rule.min !== undefined && result[key] < rule.min) {
+      const num = result[key] as number;
+      if (rule.min !== undefined && num < rule.min) {
         result[key] = rule.min;
         warnings.push(`${fullPath}: clamped to min ${rule.min}`);
       }
-      if (rule.max !== undefined && result[key] > rule.max) {
+      if (rule.max !== undefined && num > rule.max) {
         result[key] = rule.max;
         warnings.push(`${fullPath}: clamped to max ${rule.max}`);
       }
@@ -207,7 +213,7 @@ function repairObject(
 // ═══════════════════════════════════════
 
 /** 策略 1: 直接 parse */
-function tryDirectParse(raw: string): any | null {
+function tryDirectParse(raw: string): unknown | null {
   try {
     return JSON.parse(raw.trim());
   } catch {
@@ -216,7 +222,7 @@ function tryDirectParse(raw: string): any | null {
 }
 
 /** 策略 2: 剥离 Markdown 代码块 */
-function tryMarkdownStrip(raw: string): any | null {
+function tryMarkdownStrip(raw: string): unknown | null {
   // 匹配 ```json ... ``` 或 ``` ... ```
   const codeBlockRegex = /```(?:json|JSON)?\s*\n?([\s\S]*?)```/g;
   let match;
@@ -230,7 +236,7 @@ function tryMarkdownStrip(raw: string): any | null {
 }
 
 /** 策略 3: 贪心括号匹配 (寻找最外层 [] 或 {}) */
-function tryBracketMatch(raw: string, targetBracket: '[' | '{'): any | null {
+function tryBracketMatch(raw: string, targetBracket: '[' | '{'): unknown | null {
   const openBr = targetBracket;
   const closeBr = targetBracket === '[' ? ']' : '}';
 
@@ -275,7 +281,7 @@ function tryBracketMatch(raw: string, targetBracket: '[' | '{'): any | null {
 }
 
 /** 策略 4: 行扫描 — 逐行拼接尝试 parse */
-function tryLineScan(raw: string, targetBracket: '[' | '{'): any | null {
+function tryLineScan(raw: string, targetBracket: '[' | '{'): unknown | null {
   const lines = raw.split('\n');
   const openBr = targetBracket;
   let collecting = false;
@@ -327,7 +333,7 @@ function tryLineScan(raw: string, targetBracket: '[' | '{'): any | null {
  * @param schema 校验规则 (定义期望的结构)
  * @returns 解析结果 (成功含修复后的数据, 失败含诊断信息)
  */
-export function parseStructuredOutput<T = any>(raw: string, schema: SchemaSpec): ParseResult<T> {
+export function parseStructuredOutput<T = unknown>(raw: string, schema: SchemaSpec): ParseResult<T> {
   const strategies: ParseStrategy[] = [];
   const targetBracket = schema.topLevel === 'array' ? '[' as const : '{' as const;
 

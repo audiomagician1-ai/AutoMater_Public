@@ -20,6 +20,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { toErrorMessage } from '../utils/errors';
 
 // ═══════════════════════════════════════
 // Types
@@ -84,8 +85,8 @@ export function AcceptancePanel() {
       await window.automater.project.userAccept(currentProjectId, true);
       addLog({ projectId: currentProjectId, agentId: 'user', content: '✅ 用户验收通过' });
       setShowAcceptancePanel(false);
-    } catch (err: any) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 验收失败: ${err.message}` });
+    } catch (err: unknown) {
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 验收失败: ${toErrorMessage(err)}` });
     } finally {
       setSubmitting(false);
     }
@@ -100,8 +101,8 @@ export function AcceptancePanel() {
       setShowAcceptancePanel(false);
       setRejectReason('');
       setShowRejectForm(false);
-    } catch (err: any) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 驳回失败: ${err.message}` });
+    } catch (err: unknown) {
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ 驳回失败: ${toErrorMessage(err)}` });
     } finally {
       setSubmitting(false);
     }

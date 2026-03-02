@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LLM Client — 统一的 LLM 调用层
  *
  * 支持 OpenAI / Anthropic 两种协议
@@ -135,12 +135,12 @@ export async function validateModel(settings: AppSettings, model: string): Promi
       { role: 'user', content: 'hi' },
     ], undefined, 1, 0); // maxTokens=1, retries=0 — 极低开销
     return null; // 通过
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (err instanceof NonRetryableError) {
-      return `模型 ${model} 不可用: ${err.message}`;
+      return `模型 ${model} 不可用: ${(err instanceof Error ? err.message : String(err))}`;
     }
     // 网络错误等也报出来
-    return `模型 ${model} 连接失败: ${err.message}`;
+    return `模型 ${model} 连接失败: ${(err instanceof Error ? err.message : String(err))}`;
   }
 }
 
@@ -177,7 +177,7 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
 // ═══════════════════════════════════════
 
 export async function callLLM(
-  settings: any, model: string,
+  settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
   maxTokens: number = 16384,
@@ -190,8 +190,8 @@ export async function callLLM(
     if (signal?.aborted) throw new Error('Aborted');
     try {
       return await _callLLMOnce(settings, model, messages, signal, maxTokens, onChunk, timeoutMs);
-    } catch (err: any) {
-      lastError = err;
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
       if (signal?.aborted) throw err;
       // v5.6: NonRetryableError 直接冒泡，不重试
       if (err instanceof NonRetryableError) throw err;
@@ -205,7 +205,7 @@ export async function callLLM(
 }
 
 async function _callLLMOnce(
-  settings: any, model: string,
+  settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
   maxTokens: number = 16384,
@@ -234,12 +234,12 @@ async function _callLLMOnce(
 }
 
 async function _callOpenAI(
-  settings: any, model: string,
+  settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   maxTokens: number, fetchOpts: RequestInit,
   stream: boolean, onChunk?: StreamCallback
 ): Promise<LLMResult> {
-  const body: any = { model, messages, temperature: 0.3, max_tokens: maxTokens };
+  const body: Record<string, unknown> = { model, messages, temperature: 0.3, max_tokens: maxTokens };
   if (stream) body.stream = true;
 
   const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
@@ -250,7 +250,7 @@ async function _callOpenAI(
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
   if (!stream) {
-    const data = await res.json() as any;
+    const data = await res.json() as Record<string, any>;
     return {
       content: data.choices[0].message.content ?? '',
       inputTokens: data.usage?.prompt_tokens ?? 0,
@@ -303,14 +303,14 @@ async function _callOpenAI(
 }
 
 async function _callAnthropic(
-  settings: any, model: string,
+  settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   maxTokens: number, fetchOpts: RequestInit,
   stream: boolean, onChunk?: StreamCallback
 ): Promise<LLMResult> {
   const systemMsg = messages.find(m => m.role === 'system');
   const otherMsgs = messages.filter(m => m.role !== 'system');
-  const body: any = { model, messages: otherMsgs, max_tokens: maxTokens, temperature: 0.3 };
+  const body: Record<string, unknown> = { model, messages: otherMsgs, max_tokens: maxTokens, temperature: 0.3 };
   if (systemMsg) body.system = systemMsg.content;
   if (stream) body.stream = true;
 
@@ -322,7 +322,7 @@ async function _callAnthropic(
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
   if (!stream) {
-    const data = await res.json() as any;
+    const data = await res.json() as Record<string, any>;
     return {
       content: data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''),
       inputTokens: data.usage?.input_tokens ?? 0,
@@ -380,10 +380,10 @@ async function _callAnthropic(
 // ═══════════════════════════════════════
 
 export async function callLLMWithTools(
-  settings: any,
+  settings: AppSettings,
   model: string,
-  messages: Array<{ role: string; content: any }>,
-  tools: any[],
+  messages: Array<{ role: string; content: unknown }>,
+  tools: Array<Record<string, unknown>>,
   signal?: AbortSignal,
   maxTokens: number = 16384,
 ): Promise<LLMWithToolsResult> {
@@ -407,11 +407,11 @@ export async function callLLMWithTools(
 }
 
 async function _callOpenAIWithTools(
-  settings: any, model: string,
-  messages: Array<{ role: string; content: any }>,
-  tools: any[], maxTokens: number, signal: AbortSignal,
+  settings: AppSettings, model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
 ): Promise<LLMWithToolsResult> {
-  const body: any = {
+  const body: Record<string, unknown> = {
     model,
     messages,
     tools,
@@ -427,7 +427,7 @@ async function _callOpenAIWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
-  const data = await res.json() as any;
+  const data = await res.json() as Record<string, any>;
   const choice = data.choices[0];
   return {
     message: choice.message,
@@ -437,12 +437,12 @@ async function _callOpenAIWithTools(
 }
 
 async function _callAnthropicWithTools(
-  settings: any, model: string,
-  messages: Array<{ role: string; content: any }>,
-  tools: any[], maxTokens: number, signal: AbortSignal,
+  settings: AppSettings, model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
 ): Promise<LLMWithToolsResult> {
   // Convert OpenAI tools format to Anthropic format
-  const anthropicTools = tools.map((t: any) => ({
+  const anthropicTools = tools.map((t: Record<string, any>) => ({
     name: t.function.name,
     description: t.function.description,
     input_schema: t.function.parameters,
@@ -457,10 +457,10 @@ async function _callAnthropicWithTools(
       // OpenAI tool result → Anthropic tool_result
       // v2.2: 支持 multimodal content (图像)
       const toolContent = m.content;
-      let anthropicToolContent: any;
+      let anthropicToolContent: unknown;
       if (Array.isArray(toolContent)) {
         // Multimodal content (text + image)
-        anthropicToolContent = toolContent.map((block: any) => {
+        anthropicToolContent = (toolContent as Array<Record<string, any>>).map((block) => {
           if (block.type === 'image_url' && block.image_url?.url) {
             const dataMatch = block.image_url.url.match(/^data:([^;]+);base64,(.+)/);
             if (dataMatch) {
@@ -487,7 +487,7 @@ async function _callAnthropicWithTools(
     }
     if (m.role === 'assistant' && (m as any).tool_calls) {
       // OpenAI assistant with tool_calls → Anthropic with tool_use blocks
-      const content: any[] = [];
+      const content: Array<Record<string, unknown>> = [];
       if (m.content) content.push({ type: 'text', text: m.content });
       for (const tc of (m as any).tool_calls) {
         content.push({
@@ -504,7 +504,7 @@ async function _callAnthropicWithTools(
     return m;
   });
 
-  const body: any = {
+  const body: Record<string, unknown> = {
     model,
     messages: anthropicMessages,
     tools: anthropicTools,
@@ -525,7 +525,7 @@ async function _callAnthropicWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
-  const data = await res.json() as any;
+  const data = await res.json() as Record<string, any>;
 
   // Convert Anthropic response back to OpenAI format
   let textContent = '';

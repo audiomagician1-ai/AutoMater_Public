@@ -55,7 +55,7 @@ export interface McpToolInfo {
   /** 描述 */
   description: string;
   /** JSON Schema for input */
-  inputSchema: Record<string, any>;
+  inputSchema: Record<string, unknown>;
   /** 所属 MCP 服务器 ID */
   serverId: string;
 }
@@ -75,14 +75,14 @@ interface JsonRpcRequest {
   jsonrpc: '2.0';
   id: number;
   method: string;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
 }
 
 interface JsonRpcResponse {
   jsonrpc: '2.0';
   id: number;
-  result?: any;
-  error?: { code: number; message: string; data?: any };
+  result?: Record<string, unknown>;
+  error?: { code: number; message: string; data?: unknown };
 }
 
 // ═══════════════════════════════════════
@@ -99,8 +99,8 @@ export class McpConnection {
   private process: ChildProcess | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, {
-    resolve: (value: any) => void;
-    reject: (reason: any) => void;
+    resolve: (value: Record<string, unknown>) => void;
+    reject: (reason: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
   private inputBuffer = '';
@@ -167,10 +167,10 @@ export class McpConnection {
   /** 刷新工具列表 */
   async refreshTools(): Promise<McpToolInfo[]> {
     const result = await this.request('tools/list', {});
-    const serverTools: McpToolInfo[] = (result.tools || []).map((t: any) => ({
-      name: t.name,
-      description: t.description || '',
-      inputSchema: t.inputSchema || { type: 'object', properties: {} },
+    const serverTools: McpToolInfo[] = ((result as Record<string, unknown>).tools as Array<Record<string, unknown>> || []).map((t) => ({
+      name: t.name as string,
+      description: (t.description as string) || '',
+      inputSchema: (t.inputSchema as Record<string, unknown>) || { type: 'object', properties: {} },
       serverId: this.config.id,
     }));
     this.tools = serverTools;
@@ -179,27 +179,28 @@ export class McpConnection {
   }
 
   /** 调用 MCP 工具 */
-  async callTool(toolName: string, args: Record<string, any>, timeoutMs = 120_000): Promise<McpToolCallResult> {
+  async callTool(toolName: string, args: Record<string, unknown>, timeoutMs = 120_000): Promise<McpToolCallResult> {
     try {
       const result = await this.request('tools/call', {
         name: toolName,
         arguments: args,
       }, timeoutMs);
 
+      const resultRecord = result as Record<string, unknown>;
       const contentArray: Array<{ type: string; text?: string; data?: string; mimeType?: string }> =
-        result.content || [];
+        (resultRecord.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>) || [];
 
       // 拼合文本内容
       const textParts = contentArray
-        .filter((c: any) => c.type === 'text')
-        .map((c: any) => c.text || '');
+        .filter(c => c.type === 'text')
+        .map(c => c.text || '');
       const text = textParts.join('\n');
 
       // 检查是否含图片
-      const imagePart = contentArray.find((c: any) => c.type === 'image');
+      const imagePart = contentArray.find(c => c.type === 'image');
       const imageBase64 = imagePart?.data;
 
-      const isError = result.isError === true;
+      const isError = resultRecord.isError === true;
 
       return {
         success: !isError,
@@ -207,10 +208,10 @@ export class McpConnection {
         imageBase64,
         rawContent: contentArray,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         success: false,
-        content: `MCP tool call failed: ${err.message}`,
+        content: `MCP tool call failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }
@@ -313,11 +314,13 @@ export class McpConnection {
       },
     });
 
+    const resultRec = result as Record<string, unknown>;
+    const serverInfo = resultRec.serverInfo as Record<string, string> | undefined;
     log.info('MCP handshake complete', {
       serverId: this.config.id,
-      serverName: result.serverInfo?.name,
-      serverVersion: result.serverInfo?.version,
-      protocolVersion: result.protocolVersion,
+      serverName: serverInfo?.name,
+      serverVersion: serverInfo?.version,
+      protocolVersion: resultRec.protocolVersion,
     });
 
     // 发送 initialized 通知 (无需等待响应)
@@ -327,7 +330,7 @@ export class McpConnection {
   // ── JSON-RPC 请求/响应 ──
 
   /** 发送请求并等待响应 */
-  private request(method: string, params: Record<string, any>, timeoutMs = 60_000): Promise<any> {
+  private request(method: string, params: Record<string, unknown>, timeoutMs = 60_000): Promise<Record<string, unknown>> {
     const id = this.nextId++;
     const rpcMsg: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
@@ -352,7 +355,7 @@ export class McpConnection {
   }
 
   /** 发送通知 (fire-and-forget, 无 id) */
-  private notify(method: string, params: Record<string, any>): void {
+  private notify(method: string, params: Record<string, unknown>): void {
     const msg = { jsonrpc: '2.0' as const, method, params };
 
     if (this.config.transport === 'stdio') {
@@ -463,7 +466,7 @@ export class McpConnection {
     if (msg.error) {
       pending.reject(new Error(`MCP error ${msg.error.code}: ${msg.error.message}`));
     } else {
-      pending.resolve(msg.result);
+      pending.resolve(msg.result as Record<string, unknown> ?? {});
     }
   }
 }
@@ -493,9 +496,10 @@ class McpManager {
       await conn.connect();
       this.connections.set(config.id, conn);
       return { success: true, tools: conn.tools };
-    } catch (err: any) {
-      log.error('Failed to connect MCP server', { serverId: config.id, error: err.message });
-      return { success: false, tools: [], error: err.message };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.error('Failed to connect MCP server', { serverId: config.id, error: errMsg });
+      return { success: false, tools: [], error: errMsg };
     }
   }
 
@@ -531,7 +535,7 @@ class McpManager {
   }
 
   /** 调用 MCP 工具 (自动路由到正确的服务器) */
-  async callTool(toolName: string, serverId: string, args: Record<string, any>): Promise<McpToolCallResult> {
+  async callTool(toolName: string, serverId: string, args: Record<string, unknown>): Promise<McpToolCallResult> {
     const conn = this.connections.get(serverId);
     if (!conn || !conn.isConnected) {
       return { success: false, content: `MCP server "${serverId}" is not connected` };

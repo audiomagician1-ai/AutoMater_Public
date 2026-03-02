@@ -8,6 +8,11 @@ import {
   type SchemaSpec,
 } from '../output-parser';
 
+// Helper types for test assertions
+type FeatureItem = Record<string, unknown>;
+type VerdictObj = Record<string, unknown>;
+type StepItem = Record<string, unknown>;
+
 // ═══════════════════════════════════════
 // 策略 1: 直接 JSON parse
 // ═══════════════════════════════════════
@@ -15,7 +20,7 @@ import {
 describe('parseStructuredOutput — direct parse', () => {
   it('parses clean JSON array directly', () => {
     const raw = JSON.stringify([{ id: 'F-1', title: 'Login', description: 'User login' }]);
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.strategy).toBe('direct');
@@ -26,7 +31,7 @@ describe('parseStructuredOutput — direct parse', () => {
 
   it('parses clean JSON object directly', () => {
     const raw = JSON.stringify({ verdict: 'pass', score: 90, summary: 'Looks good' });
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.strategy).toBe('direct');
@@ -49,7 +54,7 @@ describe('parseStructuredOutput — markdown strip', () => {
 \`\`\`
 
 Let me know if you need more details.`;
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.strategy).toBe('markdown_strip');
@@ -61,7 +66,7 @@ Let me know if you need more details.`;
     const raw = `\`\`\`
 {"verdict": "fail", "score": 30, "summary": "Missing tests"}
 \`\`\``;
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.verdict).toBe('fail');
@@ -78,7 +83,7 @@ describe('parseStructuredOutput — bracket match', () => {
     const raw = `I'll create these features:
 [{"id": "F-1", "title": "Setup", "description": "Project setup"}]
 That should cover the requirements.`;
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data[0].id).toBe('F-1');
@@ -87,7 +92,7 @@ That should cover the requirements.`;
 
   it('handles nested brackets correctly', () => {
     const raw = `Result: {"verdict": "pass", "score": 85, "summary": "Good with {minor} issues", "issues": ["a", "b"]}`;
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.score).toBe(85);
@@ -102,7 +107,7 @@ That should cover the requirements.`;
 describe('parseStructuredOutput — schema validation & repair', () => {
   it('wraps single object into array when array expected', () => {
     const raw = JSON.stringify({ id: 'F-1', title: 'Solo', description: 'Only feature' });
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data).toHaveLength(1);
@@ -112,7 +117,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
 
   it('applies default values for missing optional fields', () => {
     const raw = JSON.stringify([{ id: 'F-1', title: 'Test', description: 'Desc' }]);
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data[0].category).toBe('core');
@@ -123,7 +128,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
 
   it('coerces string to number', () => {
     const raw = JSON.stringify({ verdict: 'pass', score: '85', summary: 'OK' });
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.score).toBe(85);
@@ -133,7 +138,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
 
   it('clamps number to min/max range', () => {
     const raw = JSON.stringify({ verdict: 'pass', score: 150, summary: 'Over 100' });
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.score).toBe(100);
@@ -142,7 +147,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
 
   it('falls back to enum default for invalid values', () => {
     const raw = JSON.stringify({ verdict: 'maybe', score: 50, summary: 'Unsure' });
-    const result = parseStructuredOutput(raw, QA_VERDICT_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, QA_VERDICT_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.verdict).toBe('fail'); // default
@@ -154,7 +159,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
       description: `Step ${i}`, tool: 'read_file',
     }));
     const raw = JSON.stringify(items);
-    const result = parseStructuredOutput(raw, PLAN_STEPS_SCHEMA);
+    const result = parseStructuredOutput<StepItem[]>(raw, PLAN_STEPS_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.length).toBeLessThanOrEqual(15);
@@ -169,7 +174,7 @@ describe('parseStructuredOutput — schema validation & repair', () => {
 describe('parseStructuredOutput — failure cases', () => {
   it('fails on completely non-JSON text', () => {
     const raw = 'I think we should build a login system first and then add the dashboard.';
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.strategiesAttempted.length).toBe(4);
@@ -179,13 +184,13 @@ describe('parseStructuredOutput — failure cases', () => {
 
   it('fails when array is empty and minItems > 0', () => {
     const raw = '[]';
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(false);
   });
 
   it('fails when wrong top-level type', () => {
     const raw = '"just a string"';
-    const result = parseStructuredOutput(raw, PM_FEATURE_SCHEMA);
+    const result = parseStructuredOutput<FeatureItem[]>(raw, PM_FEATURE_SCHEMA);
     expect(result.ok).toBe(false);
   });
 });
@@ -201,7 +206,7 @@ describe('PM_ACCEPTANCE_SCHEMA', () => {
       summary: 'All criteria met',
       feedback: 'Well done',
     });
-    const result = parseStructuredOutput(raw, PM_ACCEPTANCE_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, PM_ACCEPTANCE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.verdict).toBe('accept');
@@ -210,7 +215,7 @@ describe('PM_ACCEPTANCE_SCHEMA', () => {
 
   it('defaults invalid verdict to reject', () => {
     const raw = JSON.stringify({ verdict: 'dunno', score: 50, summary: 'Unclear' });
-    const result = parseStructuredOutput(raw, PM_ACCEPTANCE_SCHEMA);
+    const result = parseStructuredOutput<VerdictObj>(raw, PM_ACCEPTANCE_SCHEMA);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.verdict).toBe('reject');

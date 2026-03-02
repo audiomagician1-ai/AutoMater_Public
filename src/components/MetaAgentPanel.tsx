@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
 import { MetaAgentSettings } from './MetaAgentSettings';
+import { toErrorMessage } from '../utils/errors';
 
 export function MetaAgentPanel() {
   const open = useAppStore(s => s.metaAgentPanelOpen);
@@ -77,8 +78,8 @@ export function MetaAgentPanel() {
       if (result.wishCreated) {
         window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));
       }
-    } catch (err: any) {
-      updateLastAssistant(chatKey, `❌ 错误: ${err.message || '未知'}`);
+    } catch (err: unknown) {
+      updateLastAssistant(chatKey, `❌ 错误: ${toErrorMessage(err) || '未知'}`);
     } finally {
       setSending(false);
     }

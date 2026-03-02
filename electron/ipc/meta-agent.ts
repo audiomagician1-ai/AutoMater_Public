@@ -21,6 +21,9 @@ import { backupConversation } from '../engine/conversation-backup';
 import fs from 'fs';
 import path from 'path';
 
+const log = createLogger('ipc:meta-agent');
+import { toErrorMessage, createLogger } from '../engine/logger';
+
 // ═══════════════════════════════════════
 // Types
 // ═══════════════════════════════════════
@@ -294,9 +297,9 @@ function autoExtractMemory(memoryNotes: string): void {
       importance: 5,
     });
 
-    console.log(`[MetaAgent] Auto-memory stored: [${category}] ${memoryNotes.slice(0, 50)}`);
+    log.info('Auto-memory stored', { category, preview: memoryNotes.slice(0, 50) });
   } catch (err) {
-    console.error('[MetaAgent] Auto-memory failed:', err);
+    log.error('Auto-memory failed', err);
   }
 }
 
@@ -450,7 +453,7 @@ export function setupMetaAgentHandlers() {
           const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
           if (proj && !['developing', 'initializing', 'reviewing'].includes(proj.status)) {
             runOrchestrator(projectId, win).catch(err => {
-              console.error('[MetaAgent→Orchestrator] Error:', err);
+              log.error('MetaAgent→Orchestrator error', err);
               sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 流水线启动失败: ${err.message}` });
             });
             wishCreated = true;
@@ -459,8 +462,8 @@ export function setupMetaAgentHandlers() {
             wishCreated = true;
             reply += '\n\n✅ 已记录需求。当前项目正在运行中，新需求将在本轮结束后自动处理。';
           }
-        } catch (err: any) {
-          console.error('[MetaAgent] Wish creation error:', err);
+        } catch (err: unknown) {
+          log.error('Wish creation error', err);
           reply += '\n\n⚠️ 需求记录失败，请手动在需求页提交。';
         }
       }
@@ -472,10 +475,10 @@ export function setupMetaAgentHandlers() {
         tokens: result.inputTokens + result.outputTokens,
         cost: result.inputTokens * 0.000001 + result.outputTokens * 0.000003,
       };
-    } catch (err: any) {
-      console.error('[meta-agent:chat] LLM error:', err);
+    } catch (err: unknown) {
+      log.error('LLM error', err);
       return {
-        reply: `抱歉，我暂时无法处理你的消息。错误: ${err.message?.slice(0, 100)}`,
+        reply: `抱歉，我暂时无法处理你的消息。错误: ${toErrorMessage(err).slice(0, 100)}`,
         intent: 'general',
       };
     }

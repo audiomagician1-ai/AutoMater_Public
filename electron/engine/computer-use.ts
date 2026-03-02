@@ -113,9 +113,9 @@ $graphics.Dispose()
     try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
 
     return { success: true, base64, width: w || 0, height: h || 0 };
-  } catch (err: any) {
+  } catch (err: unknown) {
     try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-    return { success: false, base64: '', width: 0, height: 0, error: err.message };
+    return { success: false, base64: '', width: 0, height: 0, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -137,8 +137,8 @@ export function mouseMove(x: number, y: number): { success: boolean; error?: str
       { timeout: 5000 }
     );
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -186,8 +186,8 @@ for ($i = 0; $i -lt ${clickCount}; $i++) {
       { timeout: 5000 }
     );
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -218,8 +218,8 @@ export function keyboardType(text: string): { success: boolean; error?: string }
       { timeout: 10000 }
     );
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -274,7 +274,7 @@ export function keyboardHotkey(combo: string): { success: boolean; error?: strin
       { timeout: 5000 }
     );
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: (err instanceof Error ? err.message : String(err)) };
   }
 }

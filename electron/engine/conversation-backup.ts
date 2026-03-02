@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Conversation Backup — 对话备份系统
  *
  * 在每个 Agent（包括元 Agent）的一轮对话完成后，自动备份完整对话记录，
@@ -440,7 +440,7 @@ export function backupConversation(opts: {
 
     return filePath;
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error('Conversation backup failed', err, { agentId: opts.agentId });
     return null;
   }
@@ -458,7 +458,7 @@ export function readBackup(filePath: string): ConversationBackup | null {
     if (!fs.existsSync(filePath)) return null;
     const content = fs.readFileSync(filePath, 'utf-8');
     return JSON.parse(content) as ConversationBackup;
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error('Failed to read backup', err, { filePath });
     return null;
   }

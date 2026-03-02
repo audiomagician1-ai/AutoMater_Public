@@ -261,8 +261,8 @@ class SkillEvolutionManager {
     try {
       const raw = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       this.index = raw.skills || [];
-    } catch (err: any) {
-      log.warn('Failed to load skill index, resetting', { error: err.message });
+    } catch (err: unknown) {
+      log.warn('Failed to load skill index, resetting', { error: (err instanceof Error ? err.message : String(err)) });
       this.index = [];
     }
   }
@@ -622,8 +622,8 @@ class SkillEvolutionManager {
       const p = getSkillPath(skillId);
       if (!fs.existsSync(p)) return null;
       return JSON.parse(fs.readFileSync(p, 'utf-8'));
-    } catch (err: any) {
-      log.warn('Failed to load skill', { id: skillId, error: err.message });
+    } catch (err: unknown) {
+      log.warn('Failed to load skill', { id: skillId, error: (err instanceof Error ? err.message : String(err)) });
       return null;
     }
   }
@@ -755,8 +755,8 @@ class SkillEvolutionManager {
             imported++;
           }
         }
-      } catch (err: any) {
-        errors.push(`${provider.name}: ${err.message}`);
+      } catch (err: unknown) {
+        errors.push(`${provider.name}: ${(err instanceof Error ? err.message : String(err))}`);
       }
     }
 

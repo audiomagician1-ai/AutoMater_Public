@@ -7,7 +7,8 @@
  * 用于 QA Agent 的 E2E 黑盒测试、网页交互验证
  */
 
-import { chromium, type Browser, type Page, type BrowserContext } from 'playwright-core';
+import { chromium, type Browser, type Page, type BrowserContext, type Response as PwResponse } from 'playwright-core';
+import type { A11yTreeNode } from './types';
 
 // ═══════════════════════════════════════
 // 单例浏览器管理
@@ -73,8 +74,8 @@ export async function launchBrowser(opts?: {
     startCleanupTimer();
 
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -115,8 +116,8 @@ export async function navigate(url: string): Promise<{ success: boolean; title: 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const title = await page.title();
     return { success: true, title, url: page.url() };
-  } catch (err: any) {
-    return { success: false, title: '', url: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, title: '', url: '', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -131,8 +132,8 @@ export async function browserScreenshot(fullPage: boolean = false): Promise<{
     const page = await getPage();
     const buffer = await page.screenshot({ fullPage, type: 'png' });
     return { success: true, base64: buffer.toString('base64') };
-  } catch (err: any) {
-    return { success: false, base64: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, base64: '', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -143,15 +144,15 @@ export async function browserScreenshot(fullPage: boolean = false): Promise<{
 export async function browserSnapshot(): Promise<{ success: boolean; content: string; error?: string }> {
   try {
     const page = await getPage();
-    const snapshot = await (page as any).accessibility.snapshot();
+    const snapshot = await (page as unknown as { accessibility: { snapshot(): Promise<A11yTreeNode> } }).accessibility.snapshot();
     const text = formatAccessibilityTree(snapshot, 0);
     return { success: true, content: text.slice(0, 8000) };
-  } catch (err: any) {
-    return { success: false, content: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, content: '', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-function formatAccessibilityTree(node: any, depth: number): string {
+function formatAccessibilityTree(node: A11yTreeNode, depth: number): string {
   if (!node) return '';
   const indent = '  '.repeat(depth);
   let line = `${indent}[${node.role}]`;
@@ -178,8 +179,8 @@ export async function browserClick(
     const page = await getPage();
     await page.click(selector, { button: options?.button || 'left', timeout: 10000 });
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -200,8 +201,8 @@ export async function browserType(
       await page.type(selector, text, { timeout: 10000 });
     }
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -217,8 +218,8 @@ export async function browserEvaluate(
     const result = await page.evaluate(expression);
     const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     return { success: true, result: (output || '(undefined)').slice(0, 5000) };
-  } catch (err: any) {
-    return { success: false, result: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, result: '', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -245,8 +246,8 @@ export async function browserWait(
       await page.waitForTimeout(Math.min(timeout, 5000));
     }
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -263,7 +264,7 @@ export async function browserNetwork(
     // 收集接下来 5 秒的请求
     const requests: Array<{ method: string; url: string; status: number }> = [];
 
-    const handler = (response: any) => {
+    const handler = (response: PwResponse) => {
       const req = response.request();
       const url = req.url();
       if (options?.urlPattern && !url.includes(options.urlPattern)) return;
@@ -290,7 +291,7 @@ export async function browserNetwork(
       r => `${r.method} ${r.status} ${r.url}`
     );
     return { success: true, requests: lines.join('\n') };
-  } catch (err: any) {
-    return { success: false, requests: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, requests: '', error: err instanceof Error ? err.message : String(err) };
   }
 }

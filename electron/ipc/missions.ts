@@ -3,6 +3,7 @@
  */
 
 import { ipcMain, BrowserWindow } from 'electron';
+import { toErrorMessage, createLogger } from '../engine/logger';
 import {
   createMission, getMission, listMissions, getMissionTasks,
   runMission, cancelMission, cleanupMission, deleteMission,
@@ -12,6 +13,7 @@ import {
 
 // v5.5: 运行中的 Mission AbortController 注册表
 const runningMissions = new Map<string, AbortController>();
+const log = createLogger('ipc:missions');
 
 export function setupMissionHandlers() {
   // 创建并启动 mission
@@ -27,15 +29,15 @@ export function setupMissionHandlers() {
       // 异步执行（不阻塞 IPC）
       runMission(id, win, abortCtrl.signal).catch(err => {
         if (err.message !== 'Cancelled') {
-          console.error(`[Mission ${id}] Error:`, err);
+          log.error(`Mission ${id} error`, err);
         }
       }).finally(() => {
         runningMissions.delete(id);
       });
 
       return { success: true, missionId: id };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
     }
   });
 

@@ -11,6 +11,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createLogger } from './logger';
+
+const log = createLogger('file-writer');
 
 export interface WrittenFile {
   relativePath: string;
@@ -50,7 +53,7 @@ export function writeFileBlocks(
     // 安全检查：禁止 .. 穿越
     const normalized = path.normalize(block.path);
     if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
-      console.warn(`[FileWriter] Skipping unsafe path: ${block.path}`);
+      log.warn(`Skipping unsafe path: ${block.path}`);
       continue;
     }
 

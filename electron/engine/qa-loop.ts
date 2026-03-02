@@ -8,11 +8,13 @@
 
 import { callLLM } from './llm-client';
 import { QA_SYSTEM_PROMPT } from './prompts';
+import { toErrorMessage } from './logger';
 import { readWorkspaceFile } from './file-writer';
 import { runTest as sbRunTest, runLint as sbRunLint, type SandboxConfig } from './sandbox-executor';
 import { parseStructuredOutput, QA_VERDICT_SCHEMA } from './output-parser';
 import { programmaticQACheck } from './guards';
 import { getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
+import type { AppSettings } from './types';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
@@ -68,7 +70,7 @@ function detectTestInfra(workspacePath: string): { hasTests: boolean; hasLint: b
 // ═══════════════════════════════════════
 
 export async function runQAReview(
-  settings: any, signal: AbortSignal,
+  settings: AppSettings, signal: AbortSignal,
   feature: any, filesWritten: string[], workspacePath: string,
   projectId?: string
 ): Promise<QAResult> {
@@ -103,8 +105,8 @@ export async function runQAReview(
       testResults += `## 测试执行结果\n`;
       testResults += `状态: ${testResult.success ? '✅ PASS' : '❌ FAIL'} (exit ${testResult.exitCode}, ${testResult.duration}ms)\n`;
       testResults += `\`\`\`\n${testOutput}\n\`\`\`\n\n`;
-    } catch (e: any) {
-      testResults += `## 测试执行\n⚠️ 无法运行: ${e.message}\n\n`;
+    } catch (e: unknown) {
+      testResults += `## 测试执行\n⚠️ 无法运行: ${toErrorMessage(e)}\n\n`;
     }
   }
 
@@ -200,11 +202,11 @@ export async function runQAReview(
   let verdict: 'pass' | 'fail' = 'fail';  // 默认 fail (不再默认 pass)
   let score = 0;
   let summary = '';
-  let issues: any[] = [];
+  let issues: unknown[] = [];
 
-  const parseResult = parseStructuredOutput(result.content, QA_VERDICT_SCHEMA);
+  const parseResult = parseStructuredOutput<{ verdict: string; score: number; summary: string; issues?: unknown[] }>(result.content, QA_VERDICT_SCHEMA);
   if (parseResult.ok) {
-    verdict = parseResult.data.verdict;
+    verdict = parseResult.data.verdict as 'pass' | 'fail';
     score = parseResult.data.score;
     summary = parseResult.data.summary;
     issues = parseResult.data.issues ?? [];
@@ -266,7 +268,7 @@ export async function runQAReview(
  * @returns 生成的测试文件列表 (相对路径) 和内容
  */
 export async function generateTestSkeleton(
-  settings: any,
+  settings: AppSettings,
   signal: AbortSignal,
   feature: any,
   workspacePath: string,

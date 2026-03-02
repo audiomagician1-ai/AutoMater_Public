@@ -250,13 +250,14 @@ export function execInSandbox(command: string, config: SandboxConfig): SandboxRe
       timedOut: false,
       duration: Date.now() - start,
     };
-  } catch (err: any) {
-    const timedOut = err.killed === true || err.signal === 'SIGTERM';
+  } catch (err: unknown) {
+    const execErr = err as { killed?: boolean; signal?: string; status?: number; stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+    const timedOut = execErr.killed === true || execErr.signal === 'SIGTERM';
     return {
       success: false,
-      exitCode: err.status ?? -1,
-      stdout: (err.stdout?.toString() || '').slice(0, maxBuffer / 2),
-      stderr: (err.stderr?.toString() || err.message || '').slice(0, maxBuffer / 2),
+      exitCode: execErr.status ?? -1,
+      stdout: (execErr.stdout?.toString() || '').slice(0, maxBuffer / 2),
+      stderr: (execErr.stderr?.toString() || (err instanceof Error ? err.message : String(err)) || '').slice(0, maxBuffer / 2),
       timedOut,
       duration: Date.now() - start,
     };
@@ -476,7 +477,7 @@ export function execInSandboxAsync(
         success: false,
         exitCode: -1,
         stdout: stdoutBuf,
-        stderr: err.message,
+        stderr: (err instanceof Error ? err.message : String(err)),
         timedOut: false,
         duration: Date.now() - start,
       });

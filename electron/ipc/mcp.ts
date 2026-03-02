@@ -23,7 +23,7 @@ import { getDb } from '../db';
 import { mcpManager, type McpServerConfig, type McpToolInfo } from '../engine/mcp-client';
 import { skillManager, type SkillScanResult } from '../engine/skill-loader';
 import { skillEvolution } from '../engine/skill-evolution';
-import { createLogger } from '../engine/logger';
+import { createLogger, toErrorMessage } from '../engine/logger';
 
 const log = createLogger('ipc:mcp');
 
@@ -141,8 +141,8 @@ export function setupMcpHandlers(): void {
         await mcpManager.disconnectServer(config.id);
       }
       return result;
-    } catch (err: any) {
-      return { success: false, tools: [], error: err.message };
+    } catch (err: unknown) {
+      return { success: false, tools: [], error: toErrorMessage(err) };
     }
   });
 
@@ -230,8 +230,8 @@ export async function initMcpAndSkills(): Promise<void> {
     try {
       const result = skillManager.loadFromDirectory(skillDir);
       log.info('Skills auto-loaded on startup', { count: result.skills.length });
-    } catch (err: any) {
-      log.warn('Failed to load skill directory on startup', { error: err.message });
+    } catch (err: unknown) {
+      log.warn('Failed to load skill directory on startup', { error: toErrorMessage(err) });
     }
   }
 
@@ -240,8 +240,8 @@ export async function initMcpAndSkills(): Promise<void> {
     skillEvolution.ensureInitialized();
     const overview = skillEvolution.getOverview();
     log.info('Skill evolution initialized', { total: overview.total, byMaturity: overview.byMaturity });
-  } catch (err: any) {
-    log.warn('Failed to initialize skill evolution', { error: err.message });
+  } catch (err: unknown) {
+    log.warn('Failed to initialize skill evolution', { error: toErrorMessage(err) });
   }
 
   // 2. 自动连接 enabled 的 MCP 服务器
@@ -256,8 +256,8 @@ export async function initMcpAndSkills(): Promise<void> {
       } else {
         log.warn('MCP server auto-connect failed', { id: config.id, error: result.error });
       }
-    } catch (err: any) {
-      log.warn('MCP server auto-connect error', { id: config.id, error: err.message });
+    } catch (err: unknown) {
+      log.warn('MCP server auto-connect error', { id: config.id, error: toErrorMessage(err) });
     }
   }
 }

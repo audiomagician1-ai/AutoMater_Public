@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "automater",
   "version": "0.1.0",
   "private": true,
@@ -10,7 +10,13 @@
     "build:prepare": "node scripts/prepare-build.js",
     "build": "vite build && node scripts/prepare-build.js && electron-builder",
     "electron:dev": "vite",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src/ electron/ --ext .ts,.tsx",
+    "lint:fix": "eslint src/ electron/ --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -25,7 +31,6 @@
     ]
   },
   "dependencies": {
-    "@types/dagre": "^0.7.54",
     "better-sqlite3": "^11.7.0",
     "clsx": "^2.1.0",
     "dagre": "^0.8.5",
@@ -41,17 +46,25 @@
     "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.0",
     "@types/react": "^19.0.0",
+    "@types/dagre": "^0.7.54",
     "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "electron": "^33.3.0",
     "electron-builder": "^25.1.0",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "postcss": "^8.4.0",
+    "prettier": "^3.8.1",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vite-plugin-electron": "^0.28.0",
-    "vite-plugin-electron-renderer": "^0.14.0"
+    "vite-plugin-electron-renderer": "^0.14.0",
+    "vitest": "^4.0.18"
   },
   "build": {
     "appId": "com.automater.app",

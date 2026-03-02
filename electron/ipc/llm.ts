@@ -7,6 +7,8 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import { getDb } from '../db';
+import type { AppSettings } from '../engine/types';
+import { toErrorMessage } from '../engine/logger';
 
 interface LLMProvider {
   type: 'openai' | 'anthropic' | 'custom';
@@ -93,8 +95,8 @@ export function setupLLMHandlers() {
         // 其他错误 (如 404 model not found) 说明认证OK，连接没问题
         return { success: true, status: res.status, message: 'Connected! (部分端点可能不可用)' };
       }
-    } catch (err: any) {
-      return { success: false, status: 0, message: err.message };
+    } catch (err: unknown) {
+      return { success: false, status: 0, message: toErrorMessage(err) };
     }
   });
 
@@ -135,13 +137,13 @@ export function setupLLMHandlers() {
       } else {
         return await chatOpenAI(settings, request);
       }
-    } catch (err: any) {
-      return { success: false, error: err.message, content: '' };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err), content: '' };
     }
   });
 }
 
-async function chatOpenAI(settings: any, request: ChatRequest) {
+async function chatOpenAI(settings: AppSettings, request: ChatRequest) {
   const base = normalizeBaseUrl(settings.baseUrl);
   const res = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
@@ -173,7 +175,7 @@ async function chatOpenAI(settings: any, request: ChatRequest) {
   };
 }
 
-async function chatAnthropic(settings: any, request: ChatRequest) {
+async function chatAnthropic(settings: AppSettings, request: ChatRequest) {
   const base = normalizeBaseUrl(settings.baseUrl);
   const systemMsg = request.messages.find(m => m.role === 'system');
   const otherMsgs = request.messages.filter(m => m.role !== 'system');

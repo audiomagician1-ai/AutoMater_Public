@@ -55,8 +55,8 @@ export async function webSearch(
     const trimmed = text.length > 8000 ? text.slice(0, 8000) + '\n\n... [截断]' : text;
 
     return { success: true, content: trimmed, results };
-  } catch (err: any) {
-    return { success: false, content: '', results: [], error: err.message };
+  } catch (err: unknown) {
+    return { success: false, content: '', results: [], error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -128,8 +128,8 @@ export async function fetchUrl(
       : text;
 
     return { success: true, content, title, length: text.length };
-  } catch (err: any) {
-    return { success: false, content: '', title: '', length: 0, error: err.message };
+  } catch (err: unknown) {
+    return { success: false, content: '', title: '', length: 0, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -180,7 +180,7 @@ export async function httpRequest(
       : bodyText;
 
     return { success: res.ok, status: res.status, headers: respHeaders, body };
-  } catch (err: any) {
-    return { success: false, status: 0, headers: {}, body: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, status: 0, headers: {}, body: '', error: (err instanceof Error ? err.message : String(err)) };
   }
 }

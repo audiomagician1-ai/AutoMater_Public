@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { toErrorMessage } from '../utils/errors';
 
 // ═══════════════════════════════════════
 // Mission Types (临时工作流)
@@ -470,8 +471,8 @@ export function WorkflowPage() {
       }
       setMissionError(null);
       await loadMissions();
-    } catch (err: any) {
-      setMissionError(err.message || '创建任务时出错');
+    } catch (err: unknown) {
+      setMissionError(toErrorMessage(err) || '创建任务时出错');
     } finally {
       setLaunchingMission(false);
     }

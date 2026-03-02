@@ -349,7 +349,7 @@ export async function runMission(
         if (results[j].status === 'rejected') {
           const err = (results[j] as PromiseRejectedResult).reason;
           db.prepare("UPDATE mission_tasks SET status = 'failed', output = ?, completed_at = datetime('now') WHERE id = ?")
-            .run(JSON.stringify({ error: err.message }), batch[j].id);
+            .run(JSON.stringify({ error: (err instanceof Error ? err.message : String(err)) }), batch[j].id);
         }
       }
     }
@@ -433,14 +433,14 @@ export async function runMission(
 
     return { missionId, conclusion, patches: allPatches, stats };
 
-  } catch (err: any) {
-    if (err.message === 'Cancelled') {
+  } catch (err: unknown) {
+    if ((err instanceof Error ? err.message : String(err)) === 'Cancelled') {
       db.prepare("UPDATE missions SET status = 'cancelled', completed_at = datetime('now') WHERE id = ?").run(missionId);
       emitProgress('⏹ Cancelled', '任务已取消');
     } else {
       db.prepare("UPDATE missions SET status = 'failed', conclusion = ?, completed_at = datetime('now') WHERE id = ?")
-        .run(`❌ 执行失败: ${err.message}`, missionId);
-      emitProgress('❌ Failed', err.message);
+        .run(`❌ 执行失败: ${(err instanceof Error ? err.message : String(err))}`, missionId);
+      emitProgress('❌ Failed', (err instanceof Error ? err.message : String(err)));
     }
     throw err;
   }

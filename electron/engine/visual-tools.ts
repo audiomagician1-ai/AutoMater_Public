@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Visual Tools — 视觉验证 (v2.4)
  * 
  * 利用 LLM Vision API 分析截图、对比差异、断言 UI 状态
@@ -77,8 +77,8 @@ export async function analyzeImage(
     const prompt = `请分析这张截图并回答以下问题:\n\n${question}\n\n请详细描述你观察到的内容。`;
     const analysis = await callVision(prompt, base64, 'image/png');
     return { success: true, analysis };
-  } catch (err: any) {
-    return { success: false, analysis: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, analysis: '', error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -127,8 +127,8 @@ export async function compareScreenshots(
       pixelDiffPercent: Math.round(roughDiff * 100) / 100,
       analysis,
     };
-  } catch (err: any) {
-    return { success: false, pixelDiffPercent: -1, analysis: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, pixelDiffPercent: -1, analysis: '', error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -190,7 +190,7 @@ export async function visualAssert(
       confidence: 50,
       reasoning: response,
     };
-  } catch (err: any) {
-    return { success: false, passed: false, confidence: 0, reasoning: '', error: err.message };
+  } catch (err: unknown) {
+    return { success: false, passed: false, confidence: 0, reasoning: '', error: (err instanceof Error ? err.message : String(err)) };
   }
 }

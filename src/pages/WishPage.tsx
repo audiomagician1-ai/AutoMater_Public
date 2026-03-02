@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
+import { toErrorMessage } from '../utils/errors';
 
 // ═══════════════════════════════════════
 // Constants
@@ -95,8 +96,8 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         // Trigger a refresh by dispatching a custom event
         window.dispatchEvent(new CustomEvent('meta-agent:wish-created'));
       }
-    } catch (err: any) {
-      updateLastAssistant(chatKey, `❌ 请求失败: ${err.message || '未知错误'}。请检查 LLM 设置。`);
+    } catch (err: unknown) {
+      updateLastAssistant(chatKey, `❌ 请求失败: ${toErrorMessage(err) || '未知错误'}。请检查 LLM 设置。`);
     } finally {
       setSending(false);
     }
@@ -237,8 +238,8 @@ export function WishPage() {
       setSelectedWishId(res.wishId);
       setProjectPage('overview');
       await loadWishes();
-    } catch (err: any) {
-      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ ${err.message}` });
+    } catch (err: unknown) {
+      addLog({ projectId: currentProjectId, agentId: 'system', content: `❌ ${toErrorMessage(err)}` });
     } finally {
       setSubmitting(false);
     }

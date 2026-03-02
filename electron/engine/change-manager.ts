@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Change Manager — 需求变更管理器
  *
  * 职责:
@@ -197,11 +197,11 @@ export async function runChangeRequest(
 
     return { success: true };
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return { success: false, error: 'Aborted' };
     db.prepare("UPDATE change_requests SET status = 'failed' WHERE id = ?").run(changeRequestId);
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 需求变更失败: ${err.message}` });
-    return { success: false, error: err.message };
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 需求变更失败: ${(err instanceof Error ? err.message : String(err))}` });
+    return { success: false, error: (err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -264,8 +264,8 @@ async function analyzeImpact(
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 影响分析输出解析失败: ${parseResult.error}` });
       return null;
     }
-  } catch (err: any) {
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 影响分析失败: ${err.message}` });
+  } catch (err: unknown) {
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 影响分析失败: ${(err instanceof Error ? err.message : String(err))}` });
     return null;
   }
 }
@@ -303,8 +303,8 @@ async function updateDesignDoc(
     const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
     const version = writeDoc(workspacePath, 'design', result.content, pmId, `需求变更: ${changeDescription.slice(0, 100)}`);
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `✅ 设计文档更新至 v${version} ($${cost.toFixed(4)})` });
-  } catch (err: any) {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `⚠️ 设计文档更新失败: ${err.message}` });
+  } catch (err: unknown) {
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `⚠️ 设计文档更新失败: ${(err instanceof Error ? err.message : String(err))}` });
   }
 }
 
@@ -349,8 +349,8 @@ async function updateRequirementDoc(
       .run(version, featureId, projectId);
 
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ✅ ${featureId} 子需求更新至 v${version} ($${cost.toFixed(4)})` });
-  } catch (err: any) {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 子需求更新失败: ${err.message}` });
+  } catch (err: unknown) {
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 子需求更新失败: ${(err instanceof Error ? err.message : String(err))}` });
   }
 }
 
@@ -395,8 +395,8 @@ async function updateTestSpecDoc(
       .run(version, featureId, projectId);
 
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ✅ ${featureId} 测试规格更新至 v${version} ($${cost.toFixed(4)})` });
-  } catch (err: any) {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 测试规格更新失败: ${err.message}` });
+  } catch (err: unknown) {
+    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ ${featureId} 测试规格更新失败: ${(err instanceof Error ? err.message : String(err))}` });
   }
 }
 
@@ -557,15 +557,15 @@ export async function detectImplicitChanges(
 
     return triage;
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal.aborted) return null;
-    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 分诊失败: ${err.message}. 默认视为纯新增` });
+    sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `⚠️ 分诊失败: ${(err instanceof Error ? err.message : String(err))}. 默认视为纯新增` });
     return {
       category: 'pure_new',
       newCapabilities: [{ title: '新需求', description: newWish }],
       implicitChanges: [],
       conflicts: [],
-      reasoning: `分诊异常 (${err.message}), 保守处理为纯新增`,
+      reasoning: `分诊异常 (${(err instanceof Error ? err.message : String(err))}), 保守处理为纯新增`,
     };
   }
 }

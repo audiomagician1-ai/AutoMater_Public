@@ -14,6 +14,9 @@
  */
 
 import { getDb } from '../db';
+import { createLogger } from './logger';
+
+const log = createLogger('event-store');
 
 // ═══════════════════════════════════════
 // Types
@@ -149,7 +152,7 @@ export function emitEvent(event: AgentEvent): number {
     return result.lastInsertRowid as number;
   } catch (err) {
     // 事件写入失败不应影响主流程
-    console.error('[EventStore] emit failed:', err);
+    log.error('emit failed', err);
     return -1;
   }
 }

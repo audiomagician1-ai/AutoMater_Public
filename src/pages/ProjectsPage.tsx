@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { toErrorMessage } from '../utils/errors';
 
 const STATUS_LABELS: Record<string, { text: string; color: string; icon: string }> = {
   initializing: { text: '分析中', color: 'text-blue-400',    icon: '🔵' },
@@ -77,8 +78,8 @@ export function ProjectsPage() {
         // 进入项目的许愿页，让用户在那里输入需求
         enterProject(result.projectId, 'wish');
       }
-    } catch (err: any) {
-      addLog({ projectId: '', agentId: 'system', content: `❌ ${err.message}` });
+    } catch (err: unknown) {
+      addLog({ projectId: '', agentId: 'system', content: `❌ ${toErrorMessage(err)}` });
     } finally {
       setCreating(false);
       loadProjects();
@@ -144,8 +145,8 @@ export function ProjectsPage() {
         // 直接进入 Overview 页面查看实时进度
         enterProject(result.projectId, 'overview');
       }
-    } catch (err: any) {
-      addLog({ projectId: '', agentId: 'system', content: `❌ 导入失败: ${err.message}` });
+    } catch (err: unknown) {
+      addLog({ projectId: '', agentId: 'system', content: `❌ 导入失败: ${toErrorMessage(err)}` });
     } finally {
       setImporting(false);
       setImportProgress(null);
