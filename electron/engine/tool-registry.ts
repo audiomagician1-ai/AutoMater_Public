@@ -42,6 +42,8 @@ export interface AgentPermissions {
   externalWrite?: boolean;
   /** 允许执行 shell 命令（run_command / sandbox_exec） */
   shellExec?: boolean;
+  /** Agent 单次 read_file 默认行数限制 (默认300, 最大2000) */
+  readFileLineLimit?: number;
 }
 
 /** 工具执行上下文 (由 orchestrator 注入) */
@@ -73,7 +75,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       properties: {
         path: { type: 'string', description: '文件路径（相对于工作区，或绝对路径需要 externalRead 权限）' },
         offset: { type: 'number', description: '起始行号 (从1开始)，默认1' },
-        limit: { type: 'number', description: '读取行数，默认300，最大1000' },
+        limit: { type: 'number', description: '读取行数，默认300（可在全景页配置），最大2000' },
       },
       required: ['path'],
     },
@@ -269,6 +271,18 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: { process_id: { type: 'string', description: '后台进程 ID (由 run_command 返回)' } },
+      required: ['process_id'],
+    },
+  },
+  {
+    name: 'wait_for_process',
+    description: '等待后台进程完成并返回完整结果。比反复调用 check_process 更高效——一次调用即可阻塞等待直到进程结束或超时。',
+    parameters: {
+      type: 'object',
+      properties: {
+        process_id: { type: 'string', description: '后台进程 ID (由 run_command 返回)' },
+        timeout_seconds: { type: 'number', description: '最长等待秒数 (默认120, 最大600)' },
+      },
       required: ['process_id'],
     },
   },
@@ -1541,7 +1555,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'spawn_researcher',
     'memory_read', 'memory_append',
-    'check_process',   // v6.0: 查询后台进程状态
+    'check_process', 'wait_for_process',   // v6.0/v19.0: 查询/等待后台进程
     'rfc_propose',     // v5.5: RFC 设计变更提案
     // Computer Use — 调试 GUI/桌面应用
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
@@ -1607,7 +1621,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'list_files', 'glob_files', 'search_files',
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     // 命令执行
-    'run_command', 'check_process', 'run_test', 'run_lint',
+    'run_command', 'check_process', 'wait_for_process', 'run_test', 'run_lint',
     // HTTP
     'http_request', 'fetch_url',
     // Git + GitHub
@@ -1793,6 +1807,7 @@ export function isAsyncTool(toolName: string): boolean {
         'read_file', 'read_many_files', 'code_graph_query',  // v17.0: async file ops
         'generate_image', 'edit_image',
         'glob_files', 'run_command', 'run_test', 'run_lint', // v17.1: execSync → async migration
+        'wait_for_process', // v19.0: 阻塞等待后台进程完成
         'search_files', 'code_search', // v17.1: codeSearch fallback async
        ].includes(toolName);
 }

@@ -5,6 +5,7 @@
 import { ipcMain } from 'electron';
 import { getDb } from '../db';
 import { readDirectoryTree, readWorkspaceFile } from '../engine/file-writer';
+import { assertProjectId, assertNonEmptyString } from './ipc-validator';
 
 function getWorkspacePath(projectId: string): string | null {
   const db = getDb();
@@ -16,6 +17,7 @@ export function setupWorkspaceHandlers() {
 
   // ── 获取文件树 ──
   ipcMain.handle('workspace:tree', (_event, projectId: string) => {
+    assertProjectId('workspace:tree', projectId);
     const wsPath = getWorkspacePath(projectId);
     if (!wsPath) return { success: false, tree: [] };
     return { success: true, tree: readDirectoryTree(wsPath) };
@@ -23,6 +25,8 @@ export function setupWorkspaceHandlers() {
 
   // ── 读取文件内容 ──
   ipcMain.handle('workspace:read-file', (_event, projectId: string, relativePath: string) => {
+    assertProjectId('workspace:read-file', projectId);
+    assertNonEmptyString('workspace:read-file', 'relativePath', relativePath);
     const wsPath = getWorkspacePath(projectId);
     if (!wsPath) return { success: false, content: '' };
     const content = readWorkspaceFile(wsPath, relativePath);
@@ -32,6 +36,7 @@ export function setupWorkspaceHandlers() {
 
   // ── 获取工作区路径 ──
   ipcMain.handle('workspace:get-path', (_event, projectId: string) => {
+    assertProjectId('workspace:get-path', projectId);
     return getWorkspacePath(projectId);
   });
 }

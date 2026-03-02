@@ -20,7 +20,7 @@ export function TeamPage() {
   const [selectedAgent, setSelectedAgent] = useState<(TeamMember & { status?: string; current_task?: string }) | null>(null);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [tab, setTab] = useState<'runtime' | 'config'>('config');
+  const [tab, setTab] = useState<'runtime' | 'config'>('runtime');
 
   // ── 新增成员表单 ──
   const [newName, setNewName] = useState('');
@@ -316,24 +316,32 @@ export function TeamPage() {
       ) : (
         /* ══════ 运行状态 (v6.0: 左右分栏) ══════ */
         <div className="flex-1 flex gap-0 overflow-hidden rounded-xl border border-slate-800">
-          {/* ── 左侧: 成员列表 ── */}
+          {/* ── 左侧: 成员列表 (合并活跃 agent + 全部 members 兜底) ── */}
           <div className="w-56 shrink-0 border-r border-slate-800 bg-slate-950 overflow-y-auto p-2 space-y-1.5">
-            {agents.length === 0 ? (
-              <div className="text-center py-8 text-slate-600 text-xs">
-                <div className="text-2xl mb-2">🤖</div>
-                尚无活跃 Agent<br />
-                <span className="text-slate-700">发布需求后自动上线</span>
-              </div>
-            ) : (
-              agents.map(agent => (
-                <MiniAgentCard
-                  key={agent.id}
-                  agent={agent}
-                  isSelected={selectedAgent?.id === agent.id}
-                  onClick={() => setSelectedAgent(agent)}
-                />
-              ))
-            )}
+            {(() => {
+              // 以 agents (含运行状态) 为主，补充 members 中未出现的成员
+              const agentIds = new Set(agents.map(a => a.id));
+              const merged: (TeamMember & { status?: string; current_task?: string })[] = [
+                ...agents,
+                ...members.filter(m => !agentIds.has(m.id)).map(m => ({ ...m, status: 'idle' as const, current_task: undefined })),
+              ];
+              return merged.length === 0 ? (
+                <div className="text-center py-8 text-slate-600 text-xs">
+                  <div className="text-2xl mb-2">👥</div>
+                  尚无团队成员<br />
+                  <span className="text-slate-700">前往「团队配置」添加成员</span>
+                </div>
+              ) : (
+                merged.map(agent => (
+                  <MiniAgentCard
+                    key={agent.id}
+                    agent={agent}
+                    isSelected={selectedAgent?.id === agent.id}
+                    onClick={() => setSelectedAgent(agent)}
+                  />
+                ))
+              );
+            })()}
           </div>
 
           {/* ── 右侧: Session 面板 (实时流 + 历史会话) ── */}

@@ -24,6 +24,7 @@ import { mcpManager, type McpServerConfig, type McpToolInfo } from '../engine/mc
 import { skillManager, type SkillScanResult } from '../engine/skill-loader';
 import { skillEvolution } from '../engine/skill-evolution';
 import { createLogger, toErrorMessage } from '../engine/logger';
+import { assertNonEmptyString, assertObject, assertOptionalString } from './ipc-validator';
 
 const log = createLogger('ipc:mcp');
 
@@ -84,6 +85,8 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:add-server', (_event, config: Omit<McpServerConfig, 'id'>) => {
+    assertObject('mcp:add-server', 'config', config);
+    assertNonEmptyString('mcp:add-server', 'name', (config as Record<string, unknown>).name);
     const configs = loadMcpConfigs();
     const id = `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const newConfig: McpServerConfig = { ...config, id };
@@ -94,6 +97,8 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:update-server', (_event, id: string, updates: Partial<McpServerConfig>) => {
+    assertNonEmptyString('mcp:update-server', 'id', id);
+    assertObject('mcp:update-server', 'updates', updates);
     const configs = loadMcpConfigs();
     const index = configs.findIndex(c => c.id === id);
     if (index === -1) return { success: false, error: 'Server not found' };
@@ -105,6 +110,7 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:remove-server', async (_event, id: string) => {
+    assertNonEmptyString('mcp:remove-server', 'id', id);
     // 先断开连接
     await mcpManager.disconnectServer(id);
 
@@ -116,6 +122,7 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:connect-server', async (_event, id: string) => {
+    assertNonEmptyString('mcp:connect-server', 'id', id);
     const configs = loadMcpConfigs();
     const config = configs.find(c => c.id === id);
     if (!config) return { success: false, error: 'Server config not found' };
@@ -125,6 +132,7 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:disconnect-server', async (_event, id: string) => {
+    assertNonEmptyString('mcp:disconnect-server', 'id', id);
     await mcpManager.disconnectServer(id);
     return { success: true };
   });
@@ -134,6 +142,7 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('mcp:test-server', async (_event, config: McpServerConfig) => {
+    assertObject('mcp:test-server', 'config', config);
     try {
       const result = await mcpManager.connectServer(config);
       if (result.success) {
@@ -153,6 +162,7 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('skill:set-directory', (_event, dirPath: string) => {
+    assertNonEmptyString('skill:set-directory', 'dirPath', dirPath);
     saveSkillDirectory(dirPath);
     if (dirPath) {
       const result = skillManager.loadFromDirectory(dirPath);
@@ -186,14 +196,18 @@ export function setupMcpHandlers(): void {
   });
 
   ipcMain.handle('skill-evolution:get-skill', (_event, skillId: string) => {
+    assertNonEmptyString('skill-evolution:get-skill', 'skillId', skillId);
     return skillEvolution.loadSkill(skillId);
   });
 
   ipcMain.handle('skill-evolution:get-knowledge', (_event, skillId: string) => {
+    assertNonEmptyString('skill-evolution:get-knowledge', 'skillId', skillId);
     return skillEvolution.loadKnowledge(skillId);
   });
 
   ipcMain.handle('skill-evolution:deprecate', (_event, skillId: string, reason: string) => {
+    assertNonEmptyString('skill-evolution:deprecate', 'skillId', skillId);
+    assertNonEmptyString('skill-evolution:deprecate', 'reason', reason);
     const ok = skillEvolution.deprecate(skillId, reason);
     return { success: ok };
   });

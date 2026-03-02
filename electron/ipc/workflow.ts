@@ -9,6 +9,7 @@
 import { ipcMain } from 'electron';
 import { getDb } from '../db';
 import type { WorkflowPresetRow, WorkflowPreset, WorkflowStage } from '../engine/types';
+import { assertNonEmptyString, assertProjectId, assertObject } from './ipc-validator';
 
 // ═══════════════════════════════════════
 // Built-in Workflow Presets (3 种常用预设)
@@ -115,6 +116,7 @@ function ensureBuiltinPresets(projectId: string): void {
 export function registerWorkflowHandlers(): void {
   /** 列出项目的所有工作流预设 (自动初始化内置预设) */
   ipcMain.handle('workflow:list', (_e, projectId: string) => {
+    assertProjectId('workflow:list', projectId);
     ensureBuiltinPresets(projectId);
     const db = getDb();
     const rows = db.prepare('SELECT * FROM workflow_presets WHERE project_id = ? ORDER BY is_builtin DESC, created_at ASC')
@@ -124,6 +126,7 @@ export function registerWorkflowHandlers(): void {
 
   /** 获取项目当前激活的工作流 */
   ipcMain.handle('workflow:get-active', (_e, projectId: string) => {
+    assertProjectId('workflow:get-active', projectId);
     ensureBuiltinPresets(projectId);
     const db = getDb();
     const row = db.prepare('SELECT * FROM workflow_presets WHERE project_id = ? AND is_active = 1')
@@ -133,6 +136,7 @@ export function registerWorkflowHandlers(): void {
 
   /** 获取单个工作流 */
   ipcMain.handle('workflow:get', (_e, presetId: string) => {
+    assertNonEmptyString('workflow:get', 'presetId', presetId);
     const db = getDb();
     const row = db.prepare('SELECT * FROM workflow_presets WHERE id = ?').get(presetId) as WorkflowPresetRow | undefined;
     return row ? rowToPreset(row) : null;
@@ -140,6 +144,8 @@ export function registerWorkflowHandlers(): void {
 
   /** 激活某个工作流 (同一项目只能激活一个) */
   ipcMain.handle('workflow:activate', (_e, projectId: string, presetId: string) => {
+    assertProjectId('workflow:activate', projectId);
+    assertNonEmptyString('workflow:activate', 'presetId', presetId);
     const db = getDb();
     db.prepare('UPDATE workflow_presets SET is_active = 0, updated_at = datetime(\'now\') WHERE project_id = ?').run(projectId);
     db.prepare('UPDATE workflow_presets SET is_active = 1, updated_at = datetime(\'now\') WHERE id = ? AND project_id = ?').run(presetId, projectId);
@@ -150,6 +156,9 @@ export function registerWorkflowHandlers(): void {
   ipcMain.handle('workflow:create', (_e, projectId: string, data: {
     name: string; description?: string; icon?: string; stages: WorkflowStage[];
   }) => {
+    assertProjectId('workflow:create', projectId);
+    assertObject('workflow:create', 'data', data);
+    assertNonEmptyString('workflow:create', 'data.name', (data as Record<string, unknown>).name);
     const db = getDb();
     const id = `wf-custom-${Date.now().toString(36)}`;
     db.prepare(`
@@ -164,6 +173,8 @@ export function registerWorkflowHandlers(): void {
   ipcMain.handle('workflow:update', (_e, presetId: string, updates: {
     name?: string; description?: string; icon?: string; stages?: WorkflowStage[];
   }) => {
+    assertNonEmptyString('workflow:update', 'presetId', presetId);
+    assertObject('workflow:update', 'updates', updates);
     const db = getDb();
     const sets: string[] = [];
     const params: Array<string | number | null> = [];
@@ -184,6 +195,7 @@ export function registerWorkflowHandlers(): void {
 
   /** 删除自定义工作流 (内置不可删除) */
   ipcMain.handle('workflow:delete', (_e, presetId: string) => {
+    assertNonEmptyString('workflow:delete', 'presetId', presetId);
     const db = getDb();
     const row = db.prepare('SELECT is_builtin FROM workflow_presets WHERE id = ?').get(presetId) as { is_builtin: number } | undefined;
     if (row?.is_builtin === 1) {
@@ -195,6 +207,7 @@ export function registerWorkflowHandlers(): void {
 
   /** 复制工作流 (作为自定义副本) */
   ipcMain.handle('workflow:duplicate', (_e, presetId: string) => {
+    assertNonEmptyString('workflow:duplicate', 'presetId', presetId);
     const db = getDb();
     const source = db.prepare('SELECT * FROM workflow_presets WHERE id = ?').get(presetId) as WorkflowPresetRow | undefined;
     if (!source) return { success: false, error: '源工作流不存在' };

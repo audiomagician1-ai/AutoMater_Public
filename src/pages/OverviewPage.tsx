@@ -95,10 +95,10 @@ export function OverviewPage() {
   const [starting, setStarting] = useState(false);
 
   // v16.0: 项目级权限开关
-  const [permissions, setPermissions] = useState({ externalRead: false, externalWrite: false, shellExec: false });
+  const [permissions, setPermissions] = useState({ externalRead: false, externalWrite: false, shellExec: false, readFileLineLimit: 300 });
   useEffect(() => {
     if (!currentProjectId) return;
-    window.automater.project.getPermissions(currentProjectId).then(setPermissions);
+    window.automater.project.getPermissions(currentProjectId).then(p => setPermissions({ readFileLineLimit: 300, ...p }));
   }, [currentProjectId]);
 
   const togglePermission = async (key: 'externalRead' | 'externalWrite' | 'shellExec') => {
@@ -314,7 +314,7 @@ export function OverviewPage() {
                   { key: 'externalWrite' as const, icon: '✏️', label: '写外部' },
                   { key: 'shellExec' as const, icon: '⚡', label: '执行命令' },
                 ] as const).map(p => (
-                  <button key={p.key} onClick={() => togglePermission(p.key)}
+                   <button key={p.key} onClick={() => togglePermission(p.key)}
                     title={`${permissions[p.key] ? '已开启' : '已关闭'}: Agent ${p.label}`}
                     className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
                       permissions[p.key]
@@ -326,6 +326,19 @@ export function OverviewPage() {
                     <span className={`w-1.5 h-1.5 rounded-full ${permissions[p.key] ? 'bg-emerald-400' : 'bg-slate-600'}`} />
                   </button>
                 ))}
+                <div className="flex items-center gap-1 ml-1" title="Agent 单次读取文件的默认行数">
+                  <span className="text-[10px] text-slate-500">📄 读取行数</span>
+                  <input type="number" min={50} max={2000} step={50}
+                    value={permissions.readFileLineLimit || 300}
+                    onChange={async (e) => {
+                      const v = Math.min(2000, Math.max(50, parseInt(e.target.value) || 300));
+                      const next = { ...permissions, readFileLineLimit: v };
+                      setPermissions(next);
+                      if (currentProjectId) await window.automater.project.updatePermissions(currentProjectId, next);
+                    }}
+                    className="w-14 px-1 py-0.5 rounded bg-slate-800/60 border border-slate-700/40 text-[10px] text-slate-300 text-center focus:border-cyan-500/50 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
           </div>

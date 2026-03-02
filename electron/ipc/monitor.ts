@@ -4,6 +4,7 @@
 
 import { ipcMain } from 'electron';
 import { getSystemMetrics, getActivityTimeseries, getBuiltinModelPricing } from '../engine/system-monitor';
+import { assertNonEmptyString, assertOptionalNumber } from './ipc-validator';
 
 export function setupMonitorHandlers() {
   // ── 系统性能快照 ──
@@ -13,6 +14,8 @@ export function setupMonitorHandlers() {
 
   // ── 活动时序数据 ──
   ipcMain.handle('monitor:activity-timeseries', async (_e, projectId: string, minutes?: number) => {
+    assertNonEmptyString('monitor:activity-timeseries', 'projectId', projectId);
+    assertOptionalNumber('monitor:activity-timeseries', 'minutes', minutes);
     return getActivityTimeseries(projectId, minutes ?? 30);
   });
 

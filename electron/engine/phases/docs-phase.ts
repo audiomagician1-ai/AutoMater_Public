@@ -7,9 +7,10 @@
 import {
   BrowserWindow, getDb, createLogger, execSync, fs, path,
   callLLM, calcCost, sendToUI,
-  resolveMemberModel,
+  spawnAgent, updateAgentStats, resolveMemberModel,
   writeDoc, readDoc, buildDesignContext, checkConsistency,
   emitEvent, createCheckpoint,
+  backupConversation, getOrCreateSession, linkFeatureSession, completeFeatureSessionLink,
   incrementalUpdate, type ProjectSkeleton,
   PM_SPLIT_REQS_PROMPT, QA_TEST_SPEC_PROMPT,
   type AppSettings, type ParsedFeature,
@@ -83,6 +84,19 @@ export async function phaseReqsAndTestSpecs(
     // 批量子需求
     try {
       const pmReqId = 'pm-0';  // 固定 ID: 批量子需求复用 PM Agent
+      spawnAgent(projectId, pmReqId, 'pm', win);
+
+      // ── Session + Feature 关联 ──
+      const reqSession = getOrCreateSession(projectId, pmReqId, 'pm');
+      const reqLinkIds: string[] = [];
+      for (const fid of batchIds) {
+        reqLinkIds.push(linkFeatureSession({
+          featureId: fid, sessionId: reqSession.id, projectId,
+          agentId: pmReqId, agentRole: 'pm', workType: 'doc-generation',
+          expectedOutput: `为 ${fid} 生成子需求文档`,
+        }));
+      }
+
       const batchFeatureDesc = batch.map((f) => {
         const fid = f.id || `F${features.indexOf(f) + 1}`;
         return `### Feature ${fid}\n标题: ${f.title || f.description}\n描述: ${f.description}\n验收标准: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(f.dependsOn || f.depends_on || [])}\n备注: ${f.notes || '无'}`;
@@ -94,23 +108,51 @@ export async function phaseReqsAndTestSpecs(
       ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
       const reqCost = calcCost(resolveMemberModel(projectId, 'pm', settings), reqResult.inputTokens, reqResult.outputTokens);
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  📄 批次 ${bi + 1}/${totalBatches} 子需求生成完成 ($${reqCost.toFixed(4)})` });
+      updateAgentStats(pmReqId, projectId, reqResult.inputTokens, reqResult.outputTokens, reqCost);
+      sendToUI(win, 'agent:log', { projectId, agentId: pmReqId, content: `  📄 批次 ${bi + 1}/${totalBatches} 子需求生成完成 ($${reqCost.toFixed(4)})` });
 
       const sections = splitBatchOutput(reqResult.content, batchIds);
-      for (const fid of batchIds) {
+      for (let i = 0; i < batchIds.length; i++) {
+        const fid = batchIds[i];
         const content = sections[fid] || reqResult.content;
         const reqVer = writeDoc(workspacePath, 'requirement', content, pmReqId, `${fid} 初始子需求`, fid);
         db.prepare("UPDATE features SET requirement_doc_ver = ? WHERE id = ? AND project_id = ?").run(reqVer, fid, projectId);
+        completeFeatureSessionLink(reqLinkIds[i], `子需求文档 v${reqVer}`, true);
       }
+
+      // ── 备份对话 ──
+      backupConversation({
+        sessionId: reqSession.id, projectId, agentId: pmReqId, agentRole: 'pm',
+        messages: [
+          { role: 'system', content: PM_SPLIT_REQS_PROMPT },
+          { role: 'user', content: `批次 ${bi + 1}: ${batchIds.join(', ')} 子需求生成` },
+          { role: 'assistant', content: reqResult.content.slice(0, 50000) },
+        ],
+        totalInputTokens: reqResult.inputTokens, totalOutputTokens: reqResult.outputTokens,
+        totalCost: reqCost, model: resolveMemberModel(projectId, 'pm', settings), completed: true,
+      });
     } catch (err: unknown) {
       if (signal.aborted) return;
       const errMsg = err instanceof Error ? err.message : String(err);
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'pm-0', content: `  ⚠️ 批次 ${bi + 1} 子需求生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     // 批量测试规格
     try {
       const qaSpecId = 'qa-0';  // 固定 ID: 批量测试规格复用 QA Agent
+      spawnAgent(projectId, qaSpecId, 'qa', win);
+
+      // ── Session + Feature 关联 ──
+      const specSession = getOrCreateSession(projectId, qaSpecId, 'qa');
+      const specLinkIds: string[] = [];
+      for (const fid of batchIds) {
+        specLinkIds.push(linkFeatureSession({
+          featureId: fid, sessionId: specSession.id, projectId,
+          agentId: qaSpecId, agentRole: 'qa', workType: 'doc-generation',
+          expectedOutput: `为 ${fid} 生成测试规格文档`,
+        }));
+      }
+
       const batchReqDocs = batchIds.map(fid => { const c = readDoc(workspacePath, 'requirement', fid); return c ? `### Feature ${fid}\n${c}` : null; }).filter(Boolean).join('\n\n---\n\n');
       if (batchReqDocs) {
         const specResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
@@ -119,19 +161,39 @@ export async function phaseReqsAndTestSpecs(
         ], signal, 16384, 2, undefined, PHASE3_TIMEOUT_MS);
 
         const specCost = calcCost(resolveMemberModel(projectId, 'pm', settings), specResult.inputTokens, specResult.outputTokens);
-        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🧪 批次 ${bi + 1}/${totalBatches} 测试规格生成完成 ($${specCost.toFixed(4)})` });
+        updateAgentStats(qaSpecId, projectId, specResult.inputTokens, specResult.outputTokens, specCost);
+        sendToUI(win, 'agent:log', { projectId, agentId: qaSpecId, content: `  🧪 批次 ${bi + 1}/${totalBatches} 测试规格生成完成 ($${specCost.toFixed(4)})` });
 
         const specSections = splitBatchOutput(specResult.content, batchIds);
-        for (const fid of batchIds) {
+        for (let i = 0; i < batchIds.length; i++) {
+          const fid = batchIds[i];
           const content = specSections[fid] || specResult.content;
           const specVer = writeDoc(workspacePath, 'test_spec', content, qaSpecId, `${fid} 初始测试规格`, fid);
           db.prepare("UPDATE features SET test_spec_doc_ver = ? WHERE id = ? AND project_id = ?").run(specVer, fid, projectId);
+          completeFeatureSessionLink(specLinkIds[i], `测试规格文档 v${specVer}`, true);
+        }
+
+        // ── 备份对话 ──
+        backupConversation({
+          sessionId: specSession.id, projectId, agentId: qaSpecId, agentRole: 'qa',
+          messages: [
+            { role: 'system', content: QA_TEST_SPEC_PROMPT },
+            { role: 'user', content: `批次 ${bi + 1}: ${batchIds.join(', ')} 测试规格生成` },
+            { role: 'assistant', content: specResult.content.slice(0, 50000) },
+          ],
+          totalInputTokens: specResult.inputTokens, totalOutputTokens: specResult.outputTokens,
+          totalCost: specCost, model: resolveMemberModel(projectId, 'pm', settings), completed: true,
+        });
+      } else {
+        // 无子需求文档可用 — 标记 link 失败
+        for (let i = 0; i < specLinkIds.length; i++) {
+          completeFeatureSessionLink(specLinkIds[i], '无子需求文档可用', false);
         }
       }
     } catch (err: unknown) {
       if (signal.aborted) return;
       const errMsg = err instanceof Error ? err.message : String(err);
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
+      sendToUI(win, 'agent:log', { projectId, agentId: 'qa-0', content: `  ⚠️ 批次 ${bi + 1} 测试规格生成失败: ${errMsg}${errMsg.includes('abort') ? ' (可能是 LLM 响应超时，将继续处理下一批)' : ''}` });
     }
 
     createCheckpoint(projectId, `Phase 3: 批次 ${bi + 1}/${totalBatches} 文档已生成`);

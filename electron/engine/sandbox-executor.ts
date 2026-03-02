@@ -597,6 +597,26 @@ export function getActiveProcess(id: string): AsyncSandboxHandle | undefined {
   return activeProcesses.get(id);
 }
 
+/** v19.0: 等待后台进程完成（带超时） */
+export async function waitForProcess(id: string, timeoutMs: number = 120_000): Promise<SandboxResult & { processId: string }> {
+  const handle = activeProcesses.get(id);
+  if (!handle) {
+    return { processId: id, success: false, stdout: '', stderr: `进程 ${id} 不存在或已结束`, exitCode: -1, duration: 0, timedOut: false };
+  }
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`wait_for_process 超时 (${Math.round(timeoutMs / 1000)}s)`)), timeoutMs)
+  );
+  try {
+    const result = await Promise.race([handle.promise, timeoutPromise]);
+    return { ...result, processId: id };
+  } catch (err) {
+    // 超时 — 返回当前已有的输出
+    const stdout = handle.getStdout();
+    const stderr = handle.getStderr();
+    return { processId: id, success: false, stdout, stderr: `${err instanceof Error ? err.message : String(err)}\n${stderr}`, exitCode: -1, duration: timeoutMs, timedOut: true };
+  }
+}
+
 /** 杀掉所有活跃子进程 (graceful shutdown) */
 export function killAllProcesses(): void {
   for (const [id, handle] of activeProcesses) {

@@ -12,7 +12,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { assertProjectId, assertNonEmptyString } from './ipc-validator';
+import { assertProjectId, assertNonEmptyString, assertOptionalString, assertOptionalNumber } from './ipc-validator';
 import {
   createSession, switchSession, listSessions, listAllSessions,
   getActiveSession, readSessionBackup, getBackupStats, cleanupOldBackups,
@@ -40,6 +40,7 @@ export function setupSessionHandlers() {
 
   /** 获取某个 Agent 的活跃 Session */
   ipcMain.handle('session:get-active', (_event, projectId: string | null, agentId: string) => {
+    assertNonEmptyString('session:get-active', 'agentId', agentId);
     return getActiveSession(projectId, agentId);
   });
 
@@ -50,6 +51,7 @@ export function setupSessionHandlers() {
 
   /** 列出所有 Session (全局) */
   ipcMain.handle('session:list-all', (_event, limit?: number) => {
+    assertOptionalNumber('session:list-all', 'limit', limit);
     return listAllSessions(limit);
   });
 
@@ -70,6 +72,7 @@ export function setupSessionHandlers() {
 
   /** 清理旧备份 */
   ipcMain.handle('session:cleanup', (_event, keepDays?: number) => {
+    assertOptionalNumber('session:cleanup', 'keepDays', keepDays);
     const deleted = cleanupOldBackups(keepDays);
     return { success: true, deletedFolders: deleted };
   });
@@ -78,21 +81,27 @@ export function setupSessionHandlers() {
 
   /** 获取某个 Feature 关联的所有 Sessions (含 Session 详情) */
   ipcMain.handle('session:feature-sessions', (_event, projectId: string, featureId: string) => {
+    assertProjectId('session:feature-sessions', projectId);
+    assertNonEmptyString('session:feature-sessions', 'featureId', featureId);
     return getSessionsForFeature(projectId, featureId);
   });
 
   /** 获取某个 Session 关联的所有 Features */
   ipcMain.handle('session:session-features', (_event, sessionId: string) => {
+    assertNonEmptyString('session:session-features', 'sessionId', sessionId);
     return getFeaturesForSession(sessionId);
   });
 
   /** 获取项目下所有 Feature-Session 关联 */
   ipcMain.handle('session:feature-session-links', (_event, projectId: string, limit?: number) => {
+    assertProjectId('session:feature-session-links', projectId);
+    assertOptionalNumber('session:feature-session-links', 'limit', limit);
     return listFeatureSessionLinks(projectId, limit);
   });
 
   /** 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
   ipcMain.handle('session:batch-feature-summaries', (_event, projectId: string) => {
+    assertProjectId('session:batch-feature-summaries', projectId);
     const map = batchGetFeatureSessionSummaries(projectId);
     // Map → plain object (IPC 序列化)
     const obj: Record<string, any> = {};

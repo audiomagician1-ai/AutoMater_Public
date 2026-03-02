@@ -339,6 +339,7 @@ export function setupMetaAgentHandlers() {
   });
 
   ipcMain.handle('meta-agent:config:save', (_event, config: Partial<MetaAgentConfig>) => {
+    assertObject('meta-agent:config:save', 'config', config);
     const saved = saveMetaAgentConfig(config);
     return { success: true, config: saved };
   });
@@ -350,6 +351,8 @@ export function setupMetaAgentHandlers() {
   });
 
   ipcMain.handle('meta-agent:memory:add', (_event, memory: Omit<MetaAgentMemory, 'id' | 'created_at' | 'updated_at'>) => {
+    assertObject('meta-agent:memory:add', 'memory', memory);
+    assertNonEmptyString('meta-agent:memory:add', 'content', (memory as Record<string, unknown>).content);
     return addMemory(memory);
   });
 
@@ -365,6 +368,8 @@ export function setupMetaAgentHandlers() {
   });
 
   ipcMain.handle('meta-agent:memory:search', (_event, query: string, limit?: number) => {
+    assertNonEmptyString('meta-agent:memory:search', 'query', query);
+    assertOptionalNumber('meta-agent:memory:search', 'limit', limit);
     return searchMemories(query, limit);
   });
 
@@ -373,6 +378,7 @@ export function setupMetaAgentHandlers() {
   });
 
   ipcMain.handle('meta-agent:memory:clear', (_event, category?: string) => {
+    assertOptionalString('meta-agent:memory:clear', 'category', category);
     const db = getDb();
     if (category) {
       db.prepare('DELETE FROM meta_agent_memories WHERE category = ?').run(category);
@@ -657,6 +663,7 @@ const result = await callLLMWithTools(
   });
 
   ipcMain.handle('meta-agent:daemon:config:save', (_event, config: Partial<DaemonConfig>) => {
+    assertObject('meta-agent:daemon:config:save', 'config', config);
     const saved = saveDaemonConfig(config);
     // Restart daemon with new config
     restartDaemon();
@@ -679,6 +686,7 @@ const result = await callLLMWithTools(
   });
 
   ipcMain.handle('meta-agent:daemon:logs', (_event, limit?: number) => {
+    assertOptionalNumber('meta-agent:daemon:logs', 'limit', limit);
     return getHeartbeatLogs(limit);
   });
 }

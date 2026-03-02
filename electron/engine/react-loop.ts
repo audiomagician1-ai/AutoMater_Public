@@ -754,6 +754,65 @@ export async function reactDeveloperLoop(
 // Message History Compression
 // ═══════════════════════════════════════
 
+/**
+ * 找到安全的压缩分界点 — 确保不会把 assistant(tool_calls) 和对应的 tool(tool_result) 拆散。
+ * 返回可以安全压缩的消息数量（从 messages[1] 开始计数）。
+ */
+function findSafeCompressBoundary(messages: LLMMessage[], keepRecent: number): number {
+  let boundary = messages.length - keepRecent;
+  // 向前扫描: 如果 boundary 切到了 assistant(tool_calls) 与 tool 之间，往前收缩
+  // 确保 boundary 处不是 tool 消息（否则它的 assistant 在被压缩区域内但 tool 在保留区域）
+  while (boundary > 1 && messages[boundary]?.role === 'tool') {
+    boundary--;
+  }
+  // 同时确保 boundary 处不是带 tool_calls 的 assistant（否则 tool 结果在保留区但 assistant 被压缩）
+  if (boundary > 1 && messages[boundary]?.role === 'assistant' && messages[boundary]?.tool_calls?.length) {
+    // 这条 assistant 带 tool_calls，它后面的 tool 消息也应该一起保留
+    boundary--;
+  }
+  return Math.max(1, boundary);
+}
+
+/**
+ * 消息完整性修复 — 清理压缩后可能残留的孤儿 tool/tool_result 消息。
+ * 确保每条 role=tool 的消息前面都有一条 assistant(tool_calls) 包含其 tool_call_id。
+ */
+function sanitizeToolPairs(messages: LLMMessage[]): void {
+  // 收集所有 assistant 消息中声明的 tool_call ids
+  const declaredIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.tool_calls) {
+      for (const tc of m.tool_calls as Array<{ id: string }>) {
+        declaredIds.add(tc.id);
+      }
+    }
+  }
+  // 移除孤立的 tool 消息（其 tool_call_id 没有对应的 assistant tool_use）
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'tool' && messages[i].tool_call_id) {
+      if (!declaredIds.has(messages[i].tool_call_id as string)) {
+        messages.splice(i, 1);
+      }
+    }
+  }
+  // 移除孤立的 assistant(tool_calls)：如果其 tool_call_id 没有对应的 tool 结果
+  const existingToolIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === 'tool' && m.tool_call_id) existingToolIds.add(m.tool_call_id as string);
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant' && messages[i].tool_calls?.length) {
+      const tcIds = (messages[i].tool_calls as Array<{ id: string }>).map(tc => tc.id);
+      const hasAnyResult = tcIds.some(id => existingToolIds.has(id));
+      if (!hasAnyResult) {
+        // 这条 assistant 的所有 tool 结果都没了 → 退化为纯文本
+        delete messages[i].tool_calls;
+        if (!messages[i].content) messages[i].content = '[工具调用结果已压缩]';
+      }
+    }
+  }
+}
+
 async function compressMessageHistorySmart(
   messages: LLMMessage[],
   settings: AppSettings,
@@ -762,7 +821,8 @@ async function compressMessageHistorySmart(
   const keepRecent = 10;
   if (messages.length <= keepRecent + 2) return;
 
-  const compressRange = messages.slice(1, messages.length - keepRecent);
+  const safeCount = findSafeCompressBoundary(messages, keepRecent);
+  const compressRange = messages.slice(1, safeCount);
   if (compressRange.length < 5) return;
 
   const compressText = compressRange.map(m => {
@@ -785,6 +845,7 @@ async function compressMessageHistorySmart(
         content: `## 之前的对话摘要 (${compressRange.length} 条消息已压缩)\n${summaryResult.content}`,
       };
       messages.splice(1, compressRange.length, summaryMsg);
+      sanitizeToolPairs(messages);
       return;
     }
   } catch (err) {
@@ -792,6 +853,7 @@ async function compressMessageHistorySmart(
   }
 
   compressMessageHistorySimple(messages);
+  sanitizeToolPairs(messages);
 }
 
 function compressMessageHistorySimple(messages: LLMMessage[]) {
@@ -1040,6 +1102,16 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
           if ((tc.function.name === 'write_file' || tc.function.name === 'edit_file') && result.success) {
             filesWritten.add(toolArgs.path);
             sendToUI(win, 'workspace:changed', { projectId });
+          }
+
+          // v18.0: 迭代间学习 — 记录失败
+          if (!result.success) {
+            recordFailure(learningState, {
+              toolName: tc.function.name,
+              errorOutput: result.output.slice(0, 500),
+              arguments: toolArgs,
+              timestamp: Date.now(),
+            });
           }
 
           // v18.0: 智能摘要

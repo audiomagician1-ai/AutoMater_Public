@@ -9,6 +9,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import type { AppSettings } from '../engine/types';
 import { toErrorMessage } from '../engine/logger';
+import { assertObject, assertString } from './ipc-validator';
 
 interface LLMProvider {
   type: 'openai' | 'anthropic' | 'custom';
@@ -45,6 +46,7 @@ export function setupLLMHandlers() {
 
   // ── 连通性测试 ──
   ipcMain.handle('llm:test-connection', async (_event, provider: LLMProvider) => {
+    assertObject('llm:test-connection', 'provider', provider);
     const base = normalizeBaseUrl(provider.baseUrl);
     try {
       if (provider.type === 'anthropic') {
@@ -102,6 +104,7 @@ export function setupLLMHandlers() {
 
   // ── 列出模型 ──
   ipcMain.handle('llm:list-models', async (_event, provider: LLMProvider) => {
+    assertObject('llm:list-models', 'provider', provider);
     const base = normalizeBaseUrl(provider.baseUrl);
     try {
       if (provider.type === 'anthropic') {
@@ -130,6 +133,7 @@ export function setupLLMHandlers() {
 
   // ── 对话（非流式，简化版） ──
   ipcMain.handle('llm:chat', async (_event, request: ChatRequest) => {
+    assertObject('llm:chat', 'request', request);
     const settings = getSettings();
     try {
       if (settings.llmProvider === 'anthropic') {

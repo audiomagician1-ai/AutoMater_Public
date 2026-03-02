@@ -45,21 +45,25 @@ export function setupMissionHandlers() {
 
   // 获取单个 mission
   ipcMain.handle('mission:get', (_event, missionId: string) => {
+    assertNonEmptyString('mission:get', 'missionId', missionId);
     return getMission(missionId) || null;
   });
 
   // 列出项目的所有 missions
   ipcMain.handle('mission:list', (_event, projectId: string) => {
+    assertProjectId('mission:list', projectId);
     return listMissions(projectId);
   });
 
   // 获取 mission 的任务列表
   ipcMain.handle('mission:get-tasks', (_event, missionId: string) => {
+    assertNonEmptyString('mission:get-tasks', 'missionId', missionId);
     return getMissionTasks(missionId);
   });
 
   // 取消 mission — v5.5: 同时 abort 运行中的 LLM 调用
   ipcMain.handle('mission:cancel', (_event, missionId: string) => {
+    assertNonEmptyString('mission:cancel', 'missionId', missionId);
     const ctrl = runningMissions.get(missionId);
     if (ctrl) {
       ctrl.abort();
@@ -71,18 +75,21 @@ export function setupMissionHandlers() {
 
   // 清理 mission 中间数据
   ipcMain.handle('mission:cleanup', (_event, missionId: string) => {
+    assertNonEmptyString('mission:cleanup', 'missionId', missionId);
     cleanupMission(missionId);
     return { success: true };
   });
 
   // 删除 mission
   ipcMain.handle('mission:delete', (_event, missionId: string) => {
+    assertNonEmptyString('mission:delete', 'missionId', missionId);
     deleteMission(missionId);
     return { success: true };
   });
 
   // v6.0: 获取 mission 的修复建议 patches
   ipcMain.handle('mission:get-patches', (_event, missionId: string) => {
+    assertNonEmptyString('mission:get-patches', 'missionId', missionId);
     return getMissionPatches(missionId);
   });
 }

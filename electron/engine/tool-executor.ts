@@ -21,7 +21,7 @@ import {
   streamReadFile, queryCodeGraph, getRepoMap,
 } from './code-search';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment, getIssue, createBranch, switchBranch, deleteBranch, listBranches, getCurrentBranch, gitPull, gitPush, gitFetch, createPR, listPRs, getPR, mergePR } from './git-provider';
-import { execInSandbox, execInSandboxAsync, execInSandboxPromise, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, runTestAsync, runLintAsync, type SandboxConfig } from './sandbox-executor';
+import { execInSandbox, execInSandboxAsync, execInSandboxPromise, isAsyncHandle, registerProcess, getActiveProcess, waitForProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, runTestAsync, runLintAsync, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
@@ -137,7 +137,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           const rfContent = fs.readFileSync(rfTarget, 'utf-8');
           const rfLines = rfContent.split('\n');
           const rfOffset = Math.max(1, call.arguments.offset ?? 1);
-          const rfLimit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
+          const rfLimit = Math.min(2000, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 300));
           const rfSlice = rfLines.slice(rfOffset - 1, rfOffset - 1 + rfLimit);
           const rfOut = rfSlice.map((l, i) => `${rfOffset + i}| ${l}`).join('\n');
           const rfHasMore = rfOffset - 1 + rfLimit < rfLines.length;
@@ -767,7 +767,7 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     const inputPath = call.arguments.path || '';
     const normalizedInput = path.normalize(inputPath);
     const offset = Math.max(1, call.arguments.offset ?? 1);
-    const limit = Math.min(1000, Math.max(1, call.arguments.limit ?? 300));
+    const limit = Math.min(2000, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 300));
 
     let targetPath: string;
     if (path.isAbsolute(normalizedInput)) {
@@ -1604,6 +1604,25 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     const result = await runLintAsync({ workspacePath: ctx.workspacePath });
     const output = result.stdout + (result.stderr ? '\n[stderr] ' + result.stderr : '');
     return { success: result.success, output: `[run_lint] exit=${result.exitCode} duration=${result.duration}ms${result.timedOut ? ' TIMEOUT' : ''}\n${output.slice(0, 8000)}`, action: 'shell' };
+  }
+
+  // v19.0: 等待后台进程完成
+  if (call.name === 'wait_for_process') {
+    const procId = call.arguments.process_id;
+    const timeoutSec = Math.min(600, Math.max(5, call.arguments.timeout_seconds ?? 120));
+    const result = await waitForProcess(procId, timeoutSec * 1000);
+    if (result.timedOut) {
+      return {
+        success: false,
+        output: `⏰ 进程 ${procId} 等待超时 (${timeoutSec}s)\n\n--- stdout (最后4000字符) ---\n${result.stdout.slice(-4000)}${result.stderr ? '\n\n--- stderr ---\n' + result.stderr.slice(-1000) : ''}`,
+        action: 'shell',
+      };
+    }
+    return {
+      success: result.success,
+      output: `进程 ${procId} 已完成 (exit=${result.exitCode}, ${Math.round(result.duration / 1000)}s)\n\n--- stdout ---\n${result.stdout.slice(-6000)}${result.stderr ? '\n\n--- stderr ---\n' + result.stderr.slice(-2000) : ''}`,
+      action: 'shell',
+    };
   }
 
   // Fallback to sync

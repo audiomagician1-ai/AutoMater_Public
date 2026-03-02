@@ -61,9 +61,17 @@ interface FailurePattern {
 }
 
 const FAILURE_PATTERNS: FailurePattern[] = [
+  // Edit 匹配失败 (must be before generic "not found" pattern)
+  {
+    toolPattern: /edit_file/,
+    errorPattern: /old_string not found|未找到匹配|不匹配|old_string.*not/i,
+    lessonType: 'param_fix',
+    descriptionTemplate: 'edit_file 的 old_string 与文件内容不匹配。先用 read_file 读取最新内容，确认精确匹配。',
+  },
+
   // 路径错误
   {
-    toolPattern: /read_file|write_file|edit_file|list_files/,
+    toolPattern: /read_file|write_file|list_files/,
     errorPattern: /not found|ENOENT|no such file|找不到/i,
     lessonType: 'param_fix',
     descriptionTemplate: '文件路径不存在。先用 list_files 或 search_files 确认路径，再操作文件。',
@@ -81,14 +89,6 @@ const FAILURE_PATTERNS: FailurePattern[] = [
     errorPattern: /无匹配|no results|0 results|无结果/i,
     lessonType: 'strategy_change',
     descriptionTemplate: '搜索无结果。尝试: 1) 简化关键词 2) 换同义词 3) 放宽搜索范围。',
-  },
-
-  // Edit 匹配失败
-  {
-    toolPattern: /edit_file/,
-    errorPattern: /old_string not found|未找到|不匹配/i,
-    lessonType: 'param_fix',
-    descriptionTemplate: 'edit_file 的 old_string 与文件内容不匹配。先用 read_file 读取最新内容，确认精确匹配。',
   },
 
   // 命令执行超时

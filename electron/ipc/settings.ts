@@ -4,6 +4,7 @@
 
 import { ipcMain } from 'electron';
 import { getDb } from '../db';
+import { assertObject } from './ipc-validator';
 
 export interface AppSettings {
   llmProvider: 'openai' | 'anthropic' | 'custom';
@@ -42,6 +43,7 @@ export function setupSettingsHandlers() {
   });
 
   ipcMain.handle('settings:save', (_event, settings: AppSettings) => {
+    assertObject('settings:save', 'settings', settings);
     const db = getDb();
     db.prepare(
       'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
