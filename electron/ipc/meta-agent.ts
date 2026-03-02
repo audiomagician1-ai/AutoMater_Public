@@ -755,7 +755,14 @@ export function setupMetaAgentHandlers() {
       const modeHistoryLimit = getModeParam(config, mode, 'contextHistoryLimit');
       const recent = history.slice(-modeHistoryLimit);
       for (const h of recent) {
-        messages.push({ role: h.role, content: h.content });
+        // v23.0: 防御性过滤 — 前端 history 只有 {role, content} 简化形式
+        // 跳过 role='tool' (无 tool_call_id 会导致 API 400)
+        // 确保 content 不为 null/undefined (某些 gateway 不容忍)
+        if (h.role === 'tool') continue;
+        const content = h.content ?? '';
+        if (h.role === 'user' || h.role === 'assistant' || h.role === 'system') {
+          messages.push({ role: h.role, content });
+        }
       }
     }
 
