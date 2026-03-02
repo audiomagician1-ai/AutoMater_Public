@@ -13,7 +13,7 @@ import { getDb } from '../db';
 import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
-import type { AppSettings } from './types';
+import type { AppSettings, EnrichedFeature, LLMMessage, LLMToolCall } from './types';
 import { collectDeveloperContext, collectLightContext, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
@@ -116,13 +116,13 @@ function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
 // Token Estimation Utilities
 // ═══════════════════════════════════════
 
-function estimateMsgTokens(content: any): number {
+function estimateMsgTokens(content: string | null | unknown): number {
   if (!content) return 0;
   const text = typeof content === 'string' ? content : JSON.stringify(content);
   return Math.ceil(text.length / 1.5);
 }
 
-function computeMessageBreakdown(messages: Array<{ role: string; content: any }>): { breakdown: MessageTokenBreakdown[]; total: number } {
+function computeMessageBreakdown(messages: LLMMessage[]): { breakdown: MessageTokenBreakdown[]; total: number } {
   const map: Record<string, { tokens: number; count: number }> = {};
   let total = 0;
   for (const m of messages) {
@@ -134,7 +134,7 @@ function computeMessageBreakdown(messages: Array<{ role: string; content: any }>
     total += t;
   }
   const breakdown: MessageTokenBreakdown[] = Object.entries(map).map(([role, v]) => ({
-    role: role as any,
+    role: role as MessageTokenBreakdown['role'],
     tokens: v.tokens,
     count: v.count,
   }));
@@ -149,7 +149,7 @@ export async function reactDeveloperLoop(
   projectId: string, workerId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, gitConfig: GitProviderConfig,
-  feature: any, qaFeedback: string
+  feature: EnrichedFeature, qaFeedback: string
 ): Promise<ReactResult> {
   const db = getDb();
   const MAX_ITERATIONS = 25;
@@ -199,6 +199,8 @@ export async function reactDeveloperLoop(
     workspacePath: workspacePath || '',
     projectId,
     gitConfig,
+    workerId,
+    featureId: feature.id,
     callVision: async (prompt: string, imageBase64: string, mimeType?: string) => {
       const visionModel = resolveModel('strong', settings);
       const messages = [
@@ -280,11 +282,11 @@ export async function reactDeveloperLoop(
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const devSystemPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
 
-  const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
+  const messages: LLMMessage[] = [
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 
@@ -474,8 +476,9 @@ export async function reactDeveloperLoop(
               output: `研究结论:\n${researchResult.conclusion}\n\n参考文件: ${researchResult.filesRead.join(', ') || '无'}`,
               action: 'read',
             };
-          } catch (resErr: any) {
-            toolResult = { success: false, output: `研究子 Agent 失败: ${resErr.message}`, action: 'read' };
+          } catch (resErr: unknown) {
+            const resErrMsg = resErr instanceof Error ? resErr.message : String(resErr);
+            toolResult = { success: false, output: `研究子 Agent 失败: ${resErrMsg}`, action: 'read' };
           }
         } else if (isAsync) {
           toolResult = await executeToolAsync(toolCall, toolCtx);
@@ -521,15 +524,16 @@ export async function reactDeveloperLoop(
         }
 
         // 将工具结果加入消息历史
-        if ((tc.function.name === 'screenshot' || tc.function.name === 'browser_screenshot') && (toolResult as any)._imageBase64) {
-          const base64 = (toolResult as any)._imageBase64;
+        const toolResultAny = toolResult as ToolResult & { _imageBase64?: string };
+        if ((tc.function.name === 'screenshot' || tc.function.name === 'browser_screenshot') && toolResultAny._imageBase64) {
+          const base64 = toolResultAny._imageBase64;
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
             content: [
               { type: 'text', text: toolResult.output },
               { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
-            ] as any,
+            ],
           });
         } else {
           messages.push({
@@ -541,7 +545,7 @@ export async function reactDeveloperLoop(
       }
 
       // ═══ 推送 Agent ReAct 迭代状态 ═══
-      const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+      const toolCallsThisIter = (msg.tool_calls || []).map((tc: LLMToolCall) => tc.function.name);
 
       // v3.0: 更新 guard 的 idle/error 追踪
       if (hasToolSideEffect(toolCallsThisIter)) {
@@ -592,7 +596,7 @@ export async function reactDeveloperLoop(
         await compressMessageHistorySmart(messages, settings, signal);
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) break;
       // v5.6: 不可重试错误（模型不存在、API Key 无效等）→ 立即终止，不等 consecutive count
       if (err instanceof NonRetryableError) {
@@ -603,12 +607,13 @@ export async function reactDeveloperLoop(
         addLog(projectId, workerId, 'error', `[${feature.id}] NonRetryable: ${err.message}`);
         break;
       }
+      const errMsg = err instanceof Error ? err.message : String(err);
       guardState.consecutiveErrorCount++;
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
-        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${err.message}`,
+        content: `⚠️ ${feature.id} ReAct 迭代 ${iter} 错误: ${errMsg}`,
       });
-      addLog(projectId, workerId, 'error', `[${feature.id}] iter ${iter}: ${err.message}`);
+      addLog(projectId, workerId, 'error', `[${feature.id}] iter ${iter}: ${errMsg}`);
       await sleep(2000);
     }
   }
@@ -628,10 +633,9 @@ export async function reactDeveloperLoop(
     agentRole: 'developer',
     featureId: feature.id,
     messages: messages.map(m => ({
-      role: m.role as any,
-      content: m.content,
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : m.content ? JSON.stringify(m.content) : null,
       tool_calls: m.tool_calls,
-      tool_call_id: m.tool_call_id,
     })),
     reactIterations: reactState.iterations.length,
     totalInputTokens: totalIn,
@@ -661,7 +665,7 @@ export async function reactDeveloperLoop(
 // ═══════════════════════════════════════
 
 async function compressMessageHistorySmart(
-  messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>,
+  messages: LLMMessage[],
   settings: AppSettings,
   signal?: AbortSignal
 ): Promise<void> {
@@ -674,7 +678,7 @@ async function compressMessageHistorySmart(
   const compressText = compressRange.map(m => {
     const role = m.role;
     const content = typeof m.content === 'string' ? m.content.slice(0, 300) : JSON.stringify(m.content).slice(0, 300);
-    const toolInfo = m.tool_calls ? ` [tools: ${m.tool_calls.map((t: any) => t.function.name).join(',')}]` : '';
+    const toolInfo = m.tool_calls ? ` [tools: ${m.tool_calls.map((t: LLMToolCall) => t.function.name).join(',')}]` : '';
     return `[${role}]${toolInfo} ${content}`;
   }).join('\n');
 
@@ -686,8 +690,8 @@ async function compressMessageHistorySmart(
     ], signal, 1024, 0);
 
     if (summaryResult.content) {
-      const summaryMsg = {
-        role: 'user' as string,
+      const summaryMsg: LLMMessage = {
+        role: 'user',
         content: `## 之前的对话摘要 (${compressRange.length} 条消息已压缩)\n${summaryResult.content}`,
       };
       messages.splice(1, compressRange.length, summaryMsg);
@@ -700,7 +704,7 @@ async function compressMessageHistorySmart(
   compressMessageHistorySimple(messages);
 }
 
-function compressMessageHistorySimple(messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }>) {
+function compressMessageHistorySimple(messages: LLMMessage[]) {
   const keepRecent = 10;
   const cutoff = messages.length - keepRecent;
   for (let i = 1; i < cutoff; i++) {
@@ -785,7 +789,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     filesWritten: new Set<string>(),
   };
 
-  const messages: Array<{ role: string; content: any; tool_calls?: any; tool_call_id?: string }> = [
+  const messages: LLMMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
   ];
@@ -905,7 +909,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult.output.slice(0, 4000) });
       }
 
-      const toolCallsThisIter = (msg.tool_calls || []).map((tc: any) => tc.function.name);
+      const toolCallsThisIter = (msg.tool_calls || []).map((tc: LLMToolCall) => tc.function.name);
       if (hasToolSideEffect(toolCallsThisIter)) guardState.consecutiveIdleCount = 0;
       else guardState.consecutiveIdleCount++;
       guardState.consecutiveErrorCount = 0;
@@ -920,7 +924,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
 
       if (messages.length > 20) await compressMessageHistorySmart(messages, settings, signal);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) break;
       // v5.6: 不可重试错误立即终止
       if (err instanceof NonRetryableError) {
@@ -928,9 +932,10 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         addLog(projectId, agentId, 'error', `NonRetryable: ${err.message}`);
         break;
       }
+      const errMsg = err instanceof Error ? err.message : String(err);
       guardState.consecutiveErrorCount++;
-      sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误: ${err.message}` });
-      addLog(projectId, agentId, 'error', `iter ${iter}: ${err.message}`);
+      sendToUI(win, 'agent:log', { projectId, agentId, content: `⚠️ 迭代 ${iter} 错误: ${errMsg}` });
+      addLog(projectId, agentId, 'error', `iter ${iter}: ${errMsg}`);
       await sleep(2000);
     }
   }
@@ -941,10 +946,9 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     agentId,
     agentRole: role,
     messages: messages.map(m => ({
-      role: m.role as any,
-      content: m.content,
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : m.content ? JSON.stringify(m.content) : null,
       tool_calls: m.tool_calls,
-      tool_call_id: m.tool_call_id,
     })),
     reactIterations: guardState.iteration,
     totalInputTokens: totalIn,

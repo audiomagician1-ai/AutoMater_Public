@@ -258,3 +258,96 @@ export function cleanupDecisionLog(workspacePath: string): void {
     log.info(`Decision log cleanup: ${entries.length} → ${recent.length} entries`);
   }
 }
+
+// ═══════════════════════════════════════
+// v6.1 (构想D): Worker 间成果广播
+// ═══════════════════════════════════════
+
+/**
+ * Worker 成果广播条目。
+ * 当一个 Worker 完成 Feature 后，广播自己创建/导出了哪些文件和模块，
+ * 其他 Worker 在开始新 Feature 时可以看到这些信息，避免重复实现。
+ */
+export interface WorkerBroadcast {
+  workerId: string;
+  featureId: string;
+  type: 'file_created' | 'function_exported' | 'module_added';
+  /** 简短描述, 如 "utils/helpers.ts: export function formatDate()" */
+  detail: string;
+  timestamp: number;
+}
+
+/** 进程内广播缓存 — 不需要持久化（只在单次 orchestrator 运行中有效） */
+const broadcasts: WorkerBroadcast[] = [];
+
+/**
+ * 广播成果 — Worker 完成 Feature 后调用
+ */
+export function broadcastAchievement(b: WorkerBroadcast): void {
+  broadcasts.push(b);
+  // 控制内存: 最多保留 200 条
+  if (broadcasts.length > 200) {
+    broadcasts.splice(0, broadcasts.length - 200);
+  }
+}
+
+/**
+ * 批量广播文件创建成果
+ */
+export function broadcastFilesCreated(
+  workerId: string,
+  featureId: string,
+  filesWritten: string[],
+): void {
+  const now = Date.now();
+  for (const file of filesWritten.slice(0, 20)) { // 最多广播 20 个文件
+    broadcasts.push({
+      workerId,
+      featureId,
+      type: 'file_created',
+      detail: file,
+      timestamp: now,
+    });
+  }
+  // 控制内存
+  if (broadcasts.length > 200) {
+    broadcasts.splice(0, broadcasts.length - 200);
+  }
+}
+
+/**
+ * 获取近期广播 — Worker 开始新 Feature 时调用
+ * @param sinceMs 时间窗口（默认 10 分钟）
+ * @param excludeWorkerId 排除自己的广播
+ */
+export function getRecentBroadcasts(sinceMs: number = 600_000, excludeWorkerId?: string): WorkerBroadcast[] {
+  const cutoff = Date.now() - sinceMs;
+  return broadcasts.filter(b =>
+    b.timestamp > cutoff &&
+    (!excludeWorkerId || b.workerId !== excludeWorkerId)
+  );
+}
+
+/**
+ * 将近期广播格式化为可注入 Developer 上下文的文本
+ */
+export function formatBroadcastContext(recentWork: WorkerBroadcast[]): string {
+  if (recentWork.length === 0) return '';
+
+  // 按 Worker 分组
+  const byWorker = new Map<string, { featureId: string; files: string[] }>();
+  for (const b of recentWork) {
+    const key = `${b.workerId}:${b.featureId}`;
+    if (!byWorker.has(key)) byWorker.set(key, { featureId: b.featureId, files: [] });
+    byWorker.get(key)!.files.push(b.detail);
+  }
+
+  const lines = ['## 其他开发者最近的工作成果 (可直接 import 使用)'];
+  for (const [key, { featureId, files }] of byWorker) {
+    const workerId = key.split(':')[0];
+    const fileList = files.slice(0, 8).join(', ');
+    const overflow = files.length > 8 ? ` +${files.length - 8} 更多` : '';
+    lines.push(`- **${workerId}** (${featureId}): ${fileList}${overflow}`);
+  }
+  return lines.join('\n');
+}

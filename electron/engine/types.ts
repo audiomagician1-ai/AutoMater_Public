@@ -296,6 +296,155 @@ export interface EnrichedFeature extends FeatureRow {
   _tddTests?: string[];
   /** v5.4: TDD 上下文提示 */
   _tddContext?: string;
+  /** v6.1 (构想D): 其他 Worker 的近期成果广播 */
+  _teamContext?: string;
+}
+
+// ═══════════════════════════════════════
+// LLM Message Types (v12.2 — 消除消息 any)
+// ═══════════════════════════════════════
+
+/** OpenAI function-call 格式的单个工具调用 */
+export interface LLMToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+/** 统一的 LLM chat message — 用于 react-loop / sub-agent 等的消息数组 */
+export interface LLMMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null | Array<Record<string, unknown>>;
+  tool_calls?: LLMToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+/** OpenAI tools 定义格式 */
+export interface LLMToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+// ═══════════════════════════════════════
+// MCP Types (v12.2)
+// ═══════════════════════════════════════
+
+/** JSON-RPC 请求 */
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: number;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+/** JSON-RPC 响应 */
+export interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id?: number;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}
+
+/** MCP content block */
+export interface McpContentBlock {
+  type: 'text' | 'image' | 'resource';
+  text?: string;
+  data?: string;
+  mimeType?: string;
+}
+
+// ═══════════════════════════════════════
+// Guards Schema Types (v12.2)
+// ═══════════════════════════════════════
+
+/** guards.ts schema field definition */
+export interface GuardSchemaField {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  required?: boolean;
+  default?: unknown;
+  enum?: unknown[];
+  validate?: (value: unknown) => string | null;
+}
+
+// ═══════════════════════════════════════
+// Conversation / Session Types (v12.2)
+// ═══════════════════════════════════════
+
+/** conversation-backup 消息行 */
+export interface ConversationMessage {
+  role: string;
+  content: string | null | Array<Record<string, unknown>>;
+  tool_calls?: LLMToolCall[];
+}
+
+/** Git issue/PR types */
+export interface GitIssue {
+  number: number;
+  title: string;
+  state: string;
+  labels: string[];
+  body: string;
+}
+
+// ═══════════════════════════════════════
+// File tree node (for formatTree) (v12.2)
+// ═══════════════════════════════════════
+
+export interface FileTreeNode {
+  name: string;
+  type: 'file' | 'directory';
+  children?: FileTreeNode[];
+}
+
+// ═══════════════════════════════════════
+// Accessibility tree node (for browser-tools) (v12.2)
+// ═══════════════════════════════════════
+
+export interface A11yTreeNode {
+  role?: string;
+  name?: string;
+  value?: string;
+  children?: A11yTreeNode[];
+  [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// QA Loop types (v12.2)
+// ═══════════════════════════════════════
+
+export interface QAIssue {
+  severity: 'error' | 'warning' | 'info';
+  file?: string;
+  line?: number;
+  message: string;
+  suggestion?: string;
+}
+
+// ═══════════════════════════════════════
+// Mission Runner Task (v12.2)
+// ═══════════════════════════════════════
+
+export interface MissionTask {
+  title: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+  [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// Skill Types (v12.2)
+// ═══════════════════════════════════════
+
+export interface SkillEntry {
+  name: string;
+  description?: string;
+  trigger?: string;
+  steps?: string[];
+  [key: string]: unknown;
 }
 
 // ═══════════════════════════════════════

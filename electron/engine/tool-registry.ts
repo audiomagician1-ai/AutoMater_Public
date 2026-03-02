@@ -37,6 +37,10 @@ export interface ToolContext {
   gitConfig: import('./git-provider').GitProviderConfig;
   /** Vision LLM 回调 (用于视觉验证工具) */
   callVision?: import('./visual-tools').VisionCallback;
+  /** 当前 Worker ID — 用于文件级写锁 (构想A) */
+  workerId?: string;
+  /** 当前 Feature ID — 用于文件级写锁 (构想A) */
+  featureId?: string;
 }
 
 // ═══════════════════════════════════════

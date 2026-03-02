@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tool Executor — 工具同步/异步执行分发
  *
  * 接收 ToolCall + ToolContext，调用对应的实现模块，返回 ToolResult。
@@ -6,11 +6,13 @@
  *
  * v2.6.0: 从 tool-system.ts 拆出
  * v5.0.0: 支持 MCP + Skill 外部工具代理执行
+ * v6.1.0: 构想A — 文件级写锁 (write_file/edit_file/batch_edit)
  */
 
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues } from './git-provider';
@@ -176,6 +178,13 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'write_file': {
         const check = assertSafePath(call.arguments.path);
         if (!check.ok) return { success: false, output: check.error, action: 'write' };
+        // v6.1: 文件级写锁 — 多 Worker 并行时防止互相覆盖
+        if (ctx.workerId && ctx.featureId) {
+          const lock = acquireFileLock(ctx.workspacePath, check.normalized, ctx.workerId, ctx.featureId);
+          if (!lock.acquired) {
+            return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'write' };
+          }
+        }
         const absPath = path.join(ctx.workspacePath, check.normalized);
         fs.mkdirSync(path.dirname(absPath), { recursive: true });
         fs.writeFileSync(absPath, call.arguments.content, 'utf-8');
@@ -186,6 +195,13 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'edit_file': {
         const check = assertSafePath(call.arguments.path);
         if (!check.ok) return { success: false, output: check.error, action: 'edit' };
+        // v6.1: 文件级写锁
+        if (ctx.workerId && ctx.featureId) {
+          const lock = acquireFileLock(ctx.workspacePath, check.normalized, ctx.workerId, ctx.featureId);
+          if (!lock.acquired) {
+            return { success: false, output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`, action: 'edit' };
+          }
+        }
         const absPath = path.join(ctx.workspacePath, check.normalized);
         if (!fs.existsSync(absPath)) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'edit' };
         let content = fs.readFileSync(absPath, 'utf-8');
@@ -452,6 +468,16 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'batch_edit': {
         const edits: EditOperation[] = call.arguments.edits || [];
         if (edits.length === 0) return { success: false, output: '编辑列表为空', action: 'edit' };
+        // v6.1: 文件级写锁
+        if (ctx.workerId && ctx.featureId && call.arguments.path) {
+          const batchCheck = assertSafePath(call.arguments.path);
+          if (batchCheck.ok) {
+            const lock = acquireFileLock(ctx.workspacePath, batchCheck.normalized, ctx.workerId, ctx.featureId);
+            if (!lock.acquired) {
+              return { success: false, output: `🔒 文件被锁定: ${call.arguments.path} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试。`, action: 'edit' };
+            }
+          }
+        }
         const result = batchEdit(ctx.workspacePath, call.arguments.path, edits);
         return { success: result.success, output: result.output, action: 'edit' };
       }
@@ -532,8 +558,8 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: false, output: `未知工具: ${call.name}` };
       }
     }
-  } catch (err: any) {
-    return { success: false, output: `工具执行错误: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `工具执行错误: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -723,8 +749,8 @@ async function executeMcpTool(call: ToolCall): Promise<ToolResult> {
     }
 
     return toolResult;
-  } catch (err: any) {
-    return { success: false, output: `MCP tool execution error: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `MCP tool execution error: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -743,8 +769,8 @@ async function executeSkillTool(call: ToolCall): Promise<ToolResult> {
       output: result.output.slice(0, 10_000),
       action: 'shell',
     };
-  } catch (err: any) {
-    return { success: false, output: `Skill execution error: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `Skill execution error: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -781,8 +807,8 @@ function executeSkillAcquire(call: ToolCall, ctx: ToolContext): ToolResult {
       output: `✅ 新技能已习得:\n  ID: ${skill.id}\n  名称: ${skill.name}\n  成熟度: ${skill.maturity}\n  触发: ${skill.trigger}\n  标签: ${skill.tags.join(', ') || '无'}\n\n技能将在匹配的未来任务中自动推荐。使用 ≥3 次且成功率 ≥70% 后自动晋升为 proven。`,
       action: 'write',
     };
-  } catch (err: any) {
-    return { success: false, output: `技能习得失败: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `技能习得失败: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -812,8 +838,8 @@ function executeSkillSearch(call: ToolCall): ToolResult {
     }
 
     return { success: true, output: sections.join('\n'), action: 'read' };
-  } catch (err: any) {
-    return { success: false, output: `技能搜索失败: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `技能搜索失败: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -842,8 +868,8 @@ function executeSkillImprove(call: ToolCall): ToolResult {
       output: `✅ 技能已改进:\n  ID: ${skill.id}\n  名称: ${skill.name}\n  版本: v${skill.version}\n  变更: ${args.change_note}`,
       action: 'write',
     };
-  } catch (err: any) {
-    return { success: false, output: `技能改进失败: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `技能改进失败: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
 
@@ -869,7 +895,7 @@ function executeSkillRecordUsage(call: ToolCall, ctx: ToolContext): ToolResult {
       output: `已记录技能 ${args.skill_id} 使用结果: ${args.success ? '✅ 成功' : '❌ 失败'}${args.feedback ? ` (反馈: ${args.feedback})` : ''}`,
       action: 'write',
     };
-  } catch (err: any) {
-    return { success: false, output: `记录使用失败: ${err.message}` };
+  } catch (err: unknown) {
+    return { success: false, output: `记录使用失败: ${(err instanceof Error ? err.message : String(err))}` };
   }
 }
