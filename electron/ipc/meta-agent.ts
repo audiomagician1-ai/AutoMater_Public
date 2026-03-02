@@ -3,6 +3,7 @@
  *
  * v5.4: 初始创建 — LLM 对话 + 意图检测
  * v7.0: 管理页面支持 — 可配置名字/称呼/提示词/上下文限制 + 独立记忆系统
+ * v6.1: ReAct 模式升级 — callLLMWithTools, 具备只读工具集(读文件/搜索/web_search/git_log)
  *
  * 记忆系统参考 EchoAgent agent-memory 架构:
  *   - identity: 管家自我认知 (名字/角色/性格)
@@ -13,11 +14,13 @@
  */
 
 import { ipcMain, BrowserWindow } from 'electron';
-import { callLLM, getSettings } from '../engine/llm-client';
+import { callLLMWithTools, calcCost, getSettings } from '../engine/llm-client';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getDb } from '../db';
 import { runOrchestrator } from '../engine/orchestrator';
 import { backupConversation } from '../engine/conversation-backup';
+import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
+import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
 
@@ -98,7 +101,7 @@ function saveMetaAgentConfig(config: Partial<MetaAgentConfig>): MetaAgentConfig 
 function getMemories(category?: string, limit?: number): MetaAgentMemory[] {
   const db = getDb();
   let sql = 'SELECT * FROM meta_agent_memories';
-  const params: any[] = [];
+  const params: Array<string | number> = [];
 
   if (category) {
     sql += ' WHERE category = ?';
@@ -131,7 +134,7 @@ function addMemory(memory: Omit<MetaAgentMemory, 'id' | 'created_at' | 'updated_
 function updateMemory(id: string, updates: { content?: string; importance?: number; category?: string }): boolean {
   const db = getDb();
   const parts: string[] = [];
-  const params: any[] = [];
+  const params: Array<string | number> = [];
 
   if (updates.content !== undefined) { parts.push('content = ?'); params.push(updates.content); }
   if (updates.importance !== undefined) { parts.push('importance = ?'); params.push(updates.importance); }
@@ -184,24 +187,36 @@ function buildSystemPrompt(config: MetaAgentConfig, memories: MetaAgentMemory[])
   const userName = config.userNickname ? `称呼用户为"${config.userNickname}"` : '用正常方式称呼用户';
   const personality = config.personality || '专业、友好、高效';
 
-  let prompt = `你是"${config.name}"，一个AI软件开发平台的智能助手。性格: ${personality}。${userName}。
+  let prompt = `你是"${config.name}"，一个AI软件开发平台的智能管家。性格: ${personality}。${userName}。
 
 你的职责：
 
 1. **需求接收**: 当用户表达产品需求/功能想法时，提取核心需求，回复确认并告知已转交团队处理。
-2. **项目查询**: 当用户询问项目状态、设计文档、技术架构时，基于提供的项目上下文回答。
+2. **项目查询**: 当用户询问项目状态、设计文档、技术架构时，**主动使用工具**读取相关文件和搜索项目代码来获取准确信息。
 3. **工作流管理**: 当用户想调整团队配置、暂停/恢复项目时，给出操作建议。
 4. **通用对话**: 其他问题友好回答。
 
+**你拥有以下工具能力**:
+- read_file: 读取项目文件内容（代码、文档、配置等）
+- list_files: 查看项目目录结构
+- search_files: 搜索项目中的代码/文本
+- glob_files: 按模式匹配查找文件
+- web_search: 搜索互联网获取最新信息
+- fetch_url: 获取网页内容
+- git_log: 查看 Git 提交历史
+- think: 在回复前组织思路（不可见给用户）
+
 **重要规则**:
-- 你的回复必须是 JSON 格式: {"intent": "wish|query|workflow|general", "reply": "你的回复文本", "wishContent": "仅当intent=wish时，提取的需求文本", "memoryNotes": "可选,值得记住的新信息(用户偏好/重要决策/经验教训),不超过50字,没有则省略此字段"}
+- 当用户问到项目中的具体代码、文件、架构等问题时，**必须先用工具去读取/搜索**，不要凭空猜测。
+- 你的最终回复必须是 JSON 格式: {"intent": "wish|query|workflow|general", "reply": "你的回复文本", "wishContent": "仅当intent=wish时，提取的需求文本", "memoryNotes": "可选,值得记住的新信息"}
 - intent=wish: 用户在表达新功能需求、产品想法、要做什么系统/功能
 - intent=query: 用户在问项目状态、进度、文档内容、技术细节
 - intent=workflow: 用户想暂停/启动/调整工作流、团队配置
 - intent=general: 闲聊或其他
-- wishContent: 精炼后的需求描述（保留用户原意，去除口语化表达），仅 wish 意图时填写
-- memoryNotes: 从对话中提取值得长期记住的信息(用户偏好变化/重要决策/新的约定等)，可选字段
-- 回复要简洁友好，中文。确认需求时要复述核心要点让用户确认。`;
+- wishContent: 精炼后的需求描述（保留用户原意），仅 wish 意图时填写
+- memoryNotes: 从对话中提取值得长期记住的信息(用户偏好/重要决策)，可选字段
+- 回复要简洁友好，中文。确认需求时要复述核心要点让用户确认。
+- 使用工具收集信息后，在最终回复中整合工具的结果给用户。`;
 
   // Inject memory context
   const memoryBlock = formatMemoriesForContext(memories);
@@ -246,7 +261,7 @@ function formatMemoriesForContext(memories: MetaAgentMemory[]): string {
 
 function collectProjectContext(projectId: string): string {
   const db = getDb();
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as { name: string; status: string; wish?: string; workspace_path?: string } | undefined;
   if (!project) return '(项目不存在)';
 
   const parts: string[] = [];
@@ -255,10 +270,10 @@ function collectProjectContext(projectId: string): string {
   if (project.wish) parts.push(`需求: ${project.wish}`);
 
   // Features summary
-  const features = db.prepare('SELECT id, title, status, category FROM features WHERE project_id = ?').all(projectId) as any[];
+  const features = db.prepare('SELECT id, title, status, category FROM features WHERE project_id = ?').all(projectId) as Array<{ id: string; title: string; status: string; category: string }>;
   if (features.length > 0) {
     parts.push(`\nFeature 列表 (${features.length}个):`);
-    features.forEach((f: any) => parts.push(`  - [${f.status}] ${f.title} (${f.category || 'other'})`));
+    features.forEach((f) => parts.push(`  - [${f.status}] ${f.title} (${f.category || 'other'})`));
   }
 
   // Design doc (truncated)
@@ -356,7 +371,7 @@ export function setupMetaAgentHandlers() {
     return { success: true };
   });
 
-  // ── Chat (enhanced with config + memory) ──
+  // ── Chat (v6.1: ReAct 模式 — callLLMWithTools + 只读工具集) ──
 
   ipcMain.handle('meta-agent:chat', async (_event, projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) => {
     const settings = getSettings();
@@ -366,13 +381,14 @@ export function setupMetaAgentHandlers() {
 
     const config = getMetaAgentConfig();
     const win = BrowserWindow.getAllWindows()[0] ?? null;
+    const agentId = 'meta-agent';
 
     // Load relevant memories (capped by config limit)
     const memories = getMemories(undefined, config.memoryInjectLimit);
 
     // Build messages for LLM
     const systemPrompt = buildSystemPrompt(config, memories);
-    const messages: Array<{ role: string; content: string }> = [
+    const messages: Array<{ role: string; content: string; tool_calls?: any[]; tool_call_id?: string }> = [
       { role: 'system', content: systemPrompt },
     ];
 
@@ -393,94 +409,227 @@ export function setupMetaAgentHandlers() {
     // Add current user message
     messages.push({ role: 'user', content: message });
 
+    // ── v6.1: ReAct Tool Loop ──
+    const MAX_REACT_ITERATIONS = 8;
+    const model = settings.strongModel || settings.workerModel || settings.fastModel || 'gpt-4o';
+
+    // 获取 meta-agent 角色的工具集
+    const project = projectId ? (getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any) : null;
+    const workspacePath = project?.workspace_path || '';
+    const tools = getToolsForRole('meta-agent', 'local');
+    const toolCtx: ToolContext = {
+      workspacePath,
+      projectId: projectId || '',
+      gitConfig: { mode: 'local', workspacePath },
+    };
+
+    let totalIn = 0;
+    let totalOut = 0;
+    let totalCost = 0;
+    let finalReply = '';
+
+    sendToUI(win, 'agent:log', {
+      projectId: projectId || 'system', agentId,
+      content: `🔄 元Agent 开始 ReAct 对话循环 (最多 ${MAX_REACT_ITERATIONS} 轮)`,
+    });
+
     try {
-      const model = settings.fastModel || settings.workerModel || settings.strongModel;
-      const result = await callLLM(settings, model, messages, undefined, config.maxResponseTokens || 2048, 1);
+      for (let iter = 1; iter <= MAX_REACT_ITERATIONS; iter++) {
+        const result = await callLLMWithTools(
+          settings, model, messages as any, tools, undefined,
+          config.maxResponseTokens || 4096,
+        );
+        const cost = calcCost(model, result.inputTokens, result.outputTokens);
+        totalIn += result.inputTokens;
+        totalOut += result.outputTokens;
+        totalCost += cost;
 
-      // Parse structured response
-      let intent = 'general';
-      const text = result.content ?? '';
-      let reply = text;
-      let wishContent = '';
-      let memoryNotes = '';
+        const msg = result.message;
 
-      try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          intent = parsed.intent || 'general';
-          reply = parsed.reply || text;
-          wishContent = parsed.wishContent || '';
-          memoryNotes = parsed.memoryNotes || '';
+        // 推送思考日志
+        if (msg.content) {
+          const shortThought = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+          sendToUI(win, 'agent:log', {
+            projectId: projectId || 'system', agentId,
+            content: `💭 [${iter}] ${shortThought}`,
+          });
+          finalReply = msg.content;
         }
-      } catch {
-        reply = text.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || text;
-      }
 
-      // Auto-memory: extract and store notable info from conversation
-      if (config.autoMemory && memoryNotes) {
-        autoExtractMemory(memoryNotes);
-      }
+        // 无 tool_calls → 纯文本回复，结束循环
+        if (!msg.tool_calls || msg.tool_calls.length === 0) {
+          sendToUI(win, 'agent:log', {
+            projectId: projectId || 'system', agentId,
+            content: `🔚 元Agent ReAct 结束 (${iter} 轮, ${totalIn + totalOut} tokens, $${totalCost.toFixed(4)})`,
+          });
+          break;
+        }
 
-      // v8.0: 备份元 Agent 对话
-      backupConversation({
-        projectId,
-        agentId: 'meta-agent',
-        agentRole: 'meta-agent',
-        messages: messages.map(m => ({ role: m.role as any, content: m.content })),
-        totalInputTokens: result.inputTokens,
-        totalOutputTokens: result.outputTokens,
-        totalCost: result.inputTokens * 0.000001 + result.outputTokens * 0.000003,
-        model,
-        completed: true,
-        metadata: { intent, wishCreated: false },
-      });
+        // 有 tool_calls → 执行工具
+        messages.push({
+          role: 'assistant',
+          content: msg.content || '',
+          tool_calls: msg.tool_calls,
+        });
 
-      // ── Intent: wish → Create wish + start pipeline ──
-      let wishCreated = false;
-      if (intent === 'wish' && projectId && wishContent.trim()) {
-        const db = getDb();
-        try {
-          const wishId = `wish-${Date.now().toString(36)}`;
-          db.prepare('INSERT INTO wishes (id, project_id, content, status) VALUES (?, ?, ?, ?)')
-            .run(wishId, projectId, wishContent.trim(), 'pending');
-          db.prepare("UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?")
-            .run(wishContent.trim(), projectId);
-
-          addLog(projectId, 'meta-agent', 'info', `📋 ${config.name} 已创建需求: ${wishContent.slice(0, 80)}...`);
-          sendToUI(win, 'agent:log', { projectId, agentId: 'meta-agent', content: `📋 需求已创建，启动开发流水线...` });
-
-          const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
-          if (proj && !['developing', 'initializing', 'reviewing'].includes(proj.status)) {
-            runOrchestrator(projectId, win).catch(err => {
-              log.error('MetaAgent→Orchestrator error', err);
-              sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 流水线启动失败: ${err.message}` });
-            });
-            wishCreated = true;
-            reply += '\n\n✅ 已创建需求并启动开发流水线。你可以在「总览」页查看进度。';
-          } else {
-            wishCreated = true;
-            reply += '\n\n✅ 已记录需求。当前项目正在运行中，新需求将在本轮结束后自动处理。';
+        for (const tc of msg.tool_calls) {
+          let toolArgs: Record<string, any>;
+          try {
+            toolArgs = typeof tc.function.arguments === 'string'
+              ? JSON.parse(tc.function.arguments)
+              : tc.function.arguments;
+          } catch {
+            toolArgs = {};
           }
-        } catch (err: unknown) {
-          log.error('Wish creation error', err);
-          reply += '\n\n⚠️ 需求记录失败，请手动在需求页提交。';
+
+          const toolCall: ToolCall = { name: tc.function.name, arguments: toolArgs };
+
+          // task_complete
+          if (tc.function.name === 'task_complete') {
+            const summary = toolArgs.summary || '完成';
+            sendToUI(win, 'agent:log', {
+              projectId: projectId || 'system', agentId,
+              content: `✅ task_complete: ${summary}`,
+            });
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: `任务已完成: ${summary}`,
+            });
+            continue;
+          }
+
+          // Guard check
+          const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
+          if (!guard.allowed) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: `工具调用被拦截: ${guard.reason}`,
+            });
+            continue;
+          }
+          if (guard.repairedArgs) {
+            toolCall.arguments = guard.repairedArgs;
+            toolArgs = guard.repairedArgs;
+          }
+
+          // 执行工具
+          const isAsync = ['web_search', 'fetch_url', 'git_log'].includes(tc.function.name)
+            || tc.function.name.startsWith('mcp_');
+          const toolResult: ToolResult = isAsync
+            ? await executeToolAsync(toolCall, toolCtx)
+            : executeTool(toolCall, toolCtx);
+
+          // 推送工具调用日志
+          const argsSummary = JSON.stringify(toolArgs).slice(0, 150);
+          sendToUI(win, 'agent:tool-call', {
+            projectId: projectId || 'system', agentId,
+            tool: tc.function.name,
+            args: argsSummary,
+            success: toolResult.success,
+            outputPreview: toolResult.output.slice(0, 200),
+          });
+          sendToUI(win, 'agent:log', {
+            projectId: projectId || 'system', agentId,
+            content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
+          });
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: toolResult.output.slice(0, 4000),
+          });
         }
       }
-
-      return {
-        reply,
-        intent,
-        wishCreated,
-        tokens: result.inputTokens + result.outputTokens,
-        cost: result.inputTokens * 0.000001 + result.outputTokens * 0.000003,
-      };
     } catch (err: unknown) {
-      log.error('LLM error', err);
+      log.error('MetaAgent ReAct error', err);
+      finalReply = `抱歉，我在处理你的消息时遇到了错误。错误: ${toErrorMessage(err).slice(0, 100)}`;
       return {
-        reply: `抱歉，我暂时无法处理你的消息。错误: ${toErrorMessage(err).slice(0, 100)}`,
+        reply: finalReply,
         intent: 'general',
+        tokens: totalIn + totalOut,
+        cost: totalCost,
       };
     }
+
+    // ── 解析结构化响应 (兼容 JSON 和纯文本) ──
+    let intent = 'general';
+    let reply = finalReply;
+    let wishContent = '';
+    let memoryNotes = '';
+
+    try {
+      const jsonMatch = finalReply.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        intent = parsed.intent || 'general';
+        reply = parsed.reply || finalReply;
+        wishContent = parsed.wishContent || '';
+        memoryNotes = parsed.memoryNotes || '';
+      }
+    } catch {
+      // 非JSON输出 → 当作纯文本回复
+      reply = finalReply.replace(/```json[\s\S]*?```/g, '').replace(/\{[\s\S]*\}/g, '').trim() || finalReply;
+    }
+
+    // Auto-memory: extract and store notable info from conversation
+    if (config.autoMemory && memoryNotes) {
+      autoExtractMemory(memoryNotes);
+    }
+
+    // v8.0: 备份元 Agent 对话
+    backupConversation({
+      projectId,
+      agentId,
+      agentRole: 'meta-agent',
+      messages: messages.map(m => ({ role: m.role as any, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })),
+      totalInputTokens: totalIn,
+      totalOutputTokens: totalOut,
+      totalCost,
+      model,
+      completed: true,
+      metadata: { intent, wishCreated: false },
+    });
+
+    // ── Intent: wish → Create wish + start pipeline ──
+    let wishCreated = false;
+    if (intent === 'wish' && projectId && wishContent.trim()) {
+      const db = getDb();
+      try {
+        const wishId = `wish-${Date.now().toString(36)}`;
+        db.prepare('INSERT INTO wishes (id, project_id, content, status) VALUES (?, ?, ?, ?)')
+          .run(wishId, projectId, wishContent.trim(), 'pending');
+        db.prepare("UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(wishContent.trim(), projectId);
+
+        addLog(projectId, agentId, 'info', `📋 ${config.name} 已创建需求: ${wishContent.slice(0, 80)}...`);
+        sendToUI(win, 'agent:log', { projectId, agentId, content: `📋 需求已创建，启动开发流水线...` });
+
+        const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+        if (proj && !['developing', 'initializing', 'reviewing'].includes(proj.status)) {
+          runOrchestrator(projectId, win).catch(err => {
+            log.error('MetaAgent→Orchestrator error', err);
+            sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 流水线启动失败: ${err.message}` });
+          });
+          wishCreated = true;
+          reply += '\n\n✅ 已创建需求并启动开发流水线。你可以在「总览」页查看进度。';
+        } else {
+          wishCreated = true;
+          reply += '\n\n✅ 已记录需求。当前项目正在运行中，新需求将在本轮结束后自动处理。';
+        }
+      } catch (err: unknown) {
+        log.error('Wish creation error', err);
+        reply += '\n\n⚠️ 需求记录失败，请手动在需求页提交。';
+      }
+    }
+
+    return {
+      reply,
+      intent,
+      wishCreated,
+      tokens: totalIn + totalOut,
+      cost: totalCost,
+    };
   });
 }

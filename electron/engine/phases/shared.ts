@@ -10,6 +10,11 @@ export { exec as execCb, execSync } from 'child_process';
 export { promisify } from 'util';
 export { default as fs } from 'fs';
 export { default as path } from 'path';
+
+import { exec as _execCb } from 'child_process';
+import { promisify as _promisify } from 'util';
+/** Promisified exec for async shell commands */
+export const execAsync = _promisify(_execCb);
 export { getDb } from '../../db';
 export { createLogger, toErrorMessage } from '../logger';
 

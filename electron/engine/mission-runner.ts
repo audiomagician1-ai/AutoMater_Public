@@ -246,11 +246,11 @@ export async function runMission(
     emitProgress('📋 Planning', '规划任务范围...');
 
     // Collect project context for planner
-    const features = db.prepare('SELECT id, title, status, category FROM features WHERE project_id = ?').all(projectId) as any[];
+    const features = db.prepare('SELECT id, title, status, category FROM features WHERE project_id = ?').all(projectId) as Array<{ id: string; title: string; status: string; category: string }>;
     const contextParts = [
       `项目: ${project.name}`,
       `Features (${features.length}个):`,
-      ...features.map((f: any) => `  - [${f.status}] ${f.title}`),
+      ...features.map((f) => `  - [${f.status}] ${f.title}`),
     ];
 
     // Read architecture doc if exists
@@ -322,7 +322,7 @@ export async function runMission(
       emitProgress('⚡ Executing', `任务 ${i + 1}-${Math.min(i + maxParallel, missionTasks.length)}/${missionTasks.length}`);
 
       const results = await Promise.allSettled(
-        batch.map(async (task: any) => {
+        batch.map(async (task: MissionTask) => {
           db.prepare("UPDATE mission_tasks SET status = 'running', agent_id = ? WHERE id = ?")
             .run(`worker-${task.id.slice(-4)}`, task.id);
 
@@ -364,7 +364,7 @@ export async function runMission(
     emitProgress('⚖️ Judging', '评估结果...');
 
     const completedTasks = getMissionTasks(missionId);
-    const taskSummaries = completedTasks.map((t: any) =>
+    const taskSummaries = completedTasks.map((t: MissionTask) =>
       `[${t.status}] ${t.title}: ${(t.output || '').slice(0, 500)}`
     ).join('\n\n');
 
@@ -379,9 +379,9 @@ export async function runMission(
 
     const stats = {
       totalTasks: completedTasks.length,
-      passed: completedTasks.filter((t: any) => t.status === 'passed').length,
-      failed: completedTasks.filter((t: any) => t.status === 'failed').length,
-      skipped: completedTasks.filter((t: any) => t.status === 'skipped').length,
+      passed: completedTasks.filter((t: MissionTask) => t.status === 'passed').length,
+      failed: completedTasks.filter((t: MissionTask) => t.status === 'failed').length,
+      skipped: completedTasks.filter((t: MissionTask) => t.status === 'skipped').length,
       tokenUsage: totalTokens,
       costUsd: totalCost,
     };

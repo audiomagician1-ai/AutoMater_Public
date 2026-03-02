@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore, type MetaAgentMessage } from '../stores/app-store';
 import { MetaAgentSettings } from './MetaAgentSettings';
+import { AgentWorkFeed } from './AgentWorkFeed';
 import { toErrorMessage } from '../utils/errors';
 
 export function MetaAgentPanel() {
@@ -30,7 +31,9 @@ export function MetaAgentPanel() {
   const [sending, setSending] = useState(false);
   const [agentName, setAgentName] = useState('元Agent · 管家');
   const [greeting, setGreeting] = useState('你好！我是元Agent管家。告诉我你的需求，或问我任何项目相关的问题。');
+  const [showToolActivity, setShowToolActivity] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const metaAgentWorkMsgs = useAppStore(s => s.agentWorkMessages.get('meta-agent') || []);
 
   // Load config to get agent name and greeting
   useEffect(() => {
@@ -158,6 +161,25 @@ export function MetaAgentPanel() {
               ))}
               <div ref={chatEndRef} />
             </div>
+
+            {/* v6.1: Tool activity indicator — 管家使用工具时的实时展示 */}
+            {(sending || metaAgentWorkMsgs.length > 0) && (
+              <div className="shrink-0 border-t border-slate-800">
+                <button
+                  onClick={() => setShowToolActivity(!showToolActivity)}
+                  className="w-full flex items-center gap-2 px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-800/50 transition-colors"
+                >
+                  {sending && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                  <span>🧠 工具活动 ({metaAgentWorkMsgs.length})</span>
+                  <span className={`ml-auto transition-transform ${showToolActivity ? 'rotate-180' : ''}`}>▾</span>
+                </button>
+                {showToolActivity && (
+                  <div style={{ maxHeight: '160px' }} className="overflow-y-auto">
+                    <AgentWorkFeed agentId="meta-agent" compact maxHeight="160px" />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Input */}
             <div className="shrink-0 px-2 py-1.5 border-t border-slate-800">

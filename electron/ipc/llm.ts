@@ -120,8 +120,8 @@ export function setupLLMHandlers() {
         headers: { 'Authorization': `Bearer ${provider.apiKey}` },
       });
       if (!res.ok) return { success: false, models: [] };
-      const data = await res.json() as any;
-      const models = (data.data || []).map((m: any) => m.id).sort();
+      const data = await res.json() as { data?: Array<{ id: string }> };
+      const models = (data.data || []).map((m) => m.id).sort();
       return { success: true, models };
     } catch {
       return { success: false, models: [] };
@@ -180,7 +180,7 @@ async function chatAnthropic(settings: AppSettings, request: ChatRequest) {
   const systemMsg = request.messages.find(m => m.role === 'system');
   const otherMsgs = request.messages.filter(m => m.role !== 'system');
 
-  const body: any = {
+  const body: Record<string, unknown> = {
     model: request.model,
     messages: otherMsgs,
     max_tokens: request.maxTokens ?? 4096,
@@ -203,11 +203,11 @@ async function chatAnthropic(settings: AppSettings, request: ChatRequest) {
     return { success: false, error: `API error ${res.status}: ${text}`, content: '' };
   }
 
-  const data = await res.json() as any;
-  const textBlocks = data.content.filter((b: any) => b.type === 'text');
+  const data = await res.json() as { content: Array<{ type: string; text?: string }>; usage?: { input_tokens: number; output_tokens: number }; model?: string };
+  const textBlocks = data.content.filter((b) => b.type === 'text');
   return {
     success: true,
-    content: textBlocks.map((b: any) => b.text).join(''),
+    content: textBlocks.map((b) => b.text ?? '').join(''),
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
     model: data.model,

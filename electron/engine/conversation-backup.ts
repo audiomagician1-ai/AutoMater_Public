@@ -28,6 +28,7 @@ import path from 'path';
 import { app } from 'electron';
 import { getDb } from '../db';
 import { createLogger } from './logger';
+import type { SessionRow, FeatureSessionRow } from './types';
 
 const log = createLogger('conversation-backup');
 
@@ -37,8 +38,8 @@ const log = createLogger('conversation-backup');
 
 export interface ConversationMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: any;
-  tool_calls?: any[];
+  content: string | null | Array<Record<string, unknown>>;
+  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
   timestamp?: number;
 }
@@ -300,15 +301,15 @@ export function switchSession(sessionId: string): SessionInfo | null {
  */
 export function listSessions(projectId: string | null, agentId?: string): SessionInfo[] {
   const db = getDb();
-  let rows: any[];
+  let rows: SessionRow[];
   if (agentId) {
     rows = db.prepare(
       'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? ORDER BY created_at DESC'
-    ).all(projectId, projectId, agentId);
+    ).all(projectId, projectId, agentId) as SessionRow[];
   } else {
     rows = db.prepare(
       'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) ORDER BY created_at DESC'
-    ).all(projectId, projectId);
+    ).all(projectId, projectId) as SessionRow[];
   }
   return rows.map(mapSessionRow);
 }
@@ -319,17 +320,17 @@ export function listSessions(projectId: string | null, agentId?: string): Sessio
 export function listAllSessions(limit: number = 100): SessionInfo[] {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?').all(limit);
-  return (rows as any[]).map(mapSessionRow);
+  return (rows as SessionRow[]).map(mapSessionRow);
 }
 
-function mapSessionRow(row: any): SessionInfo {
+function mapSessionRow(row: SessionRow): SessionInfo {
   return {
     id: row.id,
     projectId: row.project_id,
     agentId: row.agent_id,
     agentRole: row.agent_role,
     agentSeq: row.agent_seq,
-    status: row.status,
+    status: row.status as SessionRow['status'],
     backupPath: row.backup_path,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -707,7 +708,7 @@ export function batchGetFeatureSessionSummaries(projectId: string): Map<string, 
   return result;
 }
 
-function mapFeatureSessionRow(row: any): FeatureSessionLink {
+function mapFeatureSessionRow(row: FeatureSessionRow): FeatureSessionLink {
   return {
     id: row.id,
     featureId: row.feature_id,
@@ -715,10 +716,10 @@ function mapFeatureSessionRow(row: any): FeatureSessionLink {
     projectId: row.project_id,
     agentId: row.agent_id,
     agentRole: row.agent_role,
-    workType: row.work_type,
+    workType: row.work_type as WorkType,
     expectedOutput: row.expected_output,
     actualOutput: row.actual_output,
-    status: row.status,
+    status: row.status as FeatureSessionLink['status'],
     createdAt: row.created_at,
     completedAt: row.completed_at,
   };

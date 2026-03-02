@@ -8,6 +8,8 @@
  * v5.0.0: 支持动态外部工具 (MCP + Skill) 合并到 getToolsForRole()
  */
 
+import type { OpenAIFunctionTool } from './types';
+
 // ═══════════════════════════════════════
 // Types
 // ═══════════════════════════════════════
@@ -630,13 +632,305 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['skill_id', 'success'],
     },
   },
+
+  // ═══════════════════════════════════════════════════
+  // v7.0: Sub-Agent Framework
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'spawn_agent',
+    description: '启动一个子 Agent 执行委派任务。子 Agent 拥有自己的工具集和执行环境，完成后返回结论和产出文件列表。\n预设角色: researcher(只读研究)、coder(编码)、reviewer(审查)、tester(测试)、doc_writer(文档)、deployer(运维)。',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: '委派给子 Agent 的任务描述（要清晰具体，包含足够上下文）' },
+        preset: { type: 'string', enum: ['researcher', 'coder', 'reviewer', 'tester', 'doc_writer', 'deployer'], description: '预设角色' },
+        extra_prompt: { type: 'string', description: '额外的指令（追加到角色 prompt 之后，可选）' },
+        max_iterations: { type: 'number', description: '最大工具调用轮次（可选，默认按角色预设）' },
+      },
+      required: ['task', 'preset'],
+    },
+  },
+  {
+    name: 'spawn_parallel',
+    description: '并行启动多个子 Agent，各自独立执行，全部完成后汇总结果。适合可并行的调研/编码/测试任务。',
+    parameters: {
+      type: 'object',
+      properties: {
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: '任务 ID（用于结果匹配）' },
+              task: { type: 'string', description: '任务描述' },
+              preset: { type: 'string', enum: ['researcher', 'coder', 'reviewer', 'tester', 'doc_writer', 'deployer'], description: '预设角色' },
+            },
+            required: ['id', 'task', 'preset'],
+          },
+          description: '并行任务列表',
+        },
+      },
+      required: ['tasks'],
+    },
+  },
+  {
+    name: 'list_sub_agents',
+    description: '列出当前正在运行的子 Agent 及其状态。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cancel_sub_agent',
+    description: '取消一个正在执行的子 Agent。',
+    parameters: {
+      type: 'object',
+      properties: { agent_id: { type: 'string', description: '子 Agent ID（由 spawn_agent 返回）' } },
+      required: ['agent_id'],
+    },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // v7.0: Docker Sandbox
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'sandbox_init',
+    description: '创建一个 Docker 容器沙箱。用于在隔离环境中安装依赖、运行测试、执行不信任的代码。需要宿主机已安装 Docker。\n预设: node, python, rust, go, ubuntu。也可指定任意 Docker 镜像。',
+    parameters: {
+      type: 'object',
+      properties: {
+        image: { type: 'string', description: 'Docker 镜像或预设名（node/python/rust/go/ubuntu），默认 node', default: 'node' },
+        mount_workspace: { type: 'boolean', description: '是否将当前工作区挂载到容器（默认 false）', default: false },
+        env: { type: 'object', description: '环境变量 (key-value)' },
+        memory_limit: { type: 'string', description: '内存限制（如 512m, 2g），默认 1g' },
+      },
+    },
+  },
+  {
+    name: 'sandbox_exec',
+    description: '在 Docker 沙箱中执行命令。',
+    parameters: {
+      type: 'object',
+      properties: {
+        container_id: { type: 'string', description: '容器 ID (由 sandbox_init 返回)' },
+        command: { type: 'string', description: '要执行的 shell 命令' },
+        timeout: { type: 'number', description: '超时秒数，默认 60', default: 60 },
+      },
+      required: ['container_id', 'command'],
+    },
+  },
+  {
+    name: 'sandbox_write',
+    description: '向 Docker 沙箱写入文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        container_id: { type: 'string', description: '容器 ID' },
+        path: { type: 'string', description: '容器内文件路径' },
+        content: { type: 'string', description: '文件内容' },
+      },
+      required: ['container_id', 'path', 'content'],
+    },
+  },
+  {
+    name: 'sandbox_read',
+    description: '从 Docker 沙箱读取文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        container_id: { type: 'string', description: '容器 ID' },
+        path: { type: 'string', description: '容器内文件路径' },
+      },
+      required: ['container_id', 'path'],
+    },
+  },
+  {
+    name: 'sandbox_destroy',
+    description: '销毁 Docker 沙箱容器。',
+    parameters: {
+      type: 'object',
+      properties: {
+        container_id: { type: 'string', description: '容器 ID' },
+      },
+      required: ['container_id'],
+    },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // v7.0: Browser Enhancements
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'browser_hover',
+    description: '悬停在页面元素上（触发 tooltip / dropdown 等）。',
+    parameters: {
+      type: 'object',
+      properties: { selector: { type: 'string', description: 'CSS 选择器' } },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'browser_select_option',
+    description: '在下拉框中选择选项。',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: '下拉框 CSS 选择器' },
+        values: { type: 'array', items: { type: 'string' }, description: '要选择的值' },
+      },
+      required: ['selector', 'values'],
+    },
+  },
+  {
+    name: 'browser_press_key',
+    description: '按键盘键，如 ArrowDown、Escape、Enter、Tab 等。',
+    parameters: {
+      type: 'object',
+      properties: { key: { type: 'string', description: '按键名（如 ArrowDown, Escape, Enter, Tab, Backspace）' } },
+      required: ['key'],
+    },
+  },
+  {
+    name: 'browser_fill_form',
+    description: '批量填写表单（多个字段一次调用）。支持文本框、复选框、下拉框。',
+    parameters: {
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              selector: { type: 'string', description: '字段 CSS 选择器' },
+              value: { type: 'string', description: '填入的值（checkbox 用 true/false）' },
+              type: { type: 'string', enum: ['text', 'checkbox', 'select'], description: '字段类型，默认 text' },
+            },
+            required: ['selector', 'value'],
+          },
+          description: '表单字段列表',
+        },
+      },
+      required: ['fields'],
+    },
+  },
+  {
+    name: 'browser_drag',
+    description: '拖放操作（从一个元素拖到另一个元素）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        source_selector: { type: 'string', description: '源元素 CSS 选择器' },
+        target_selector: { type: 'string', description: '目标元素 CSS 选择器' },
+      },
+      required: ['source_selector', 'target_selector'],
+    },
+  },
+  {
+    name: 'browser_tabs',
+    description: '管理浏览器标签页。操作: list(列出)、new(新建)、close(关闭)、select(切换)。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'new', 'close', 'select'], description: '操作类型' },
+        index: { type: 'number', description: '标签页索引（close/select 时使用）' },
+        url: { type: 'string', description: '新标签页的 URL（new 时使用）' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'browser_file_upload',
+    description: '上传文件到页面的文件输入框。',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: '文件输入框 CSS 选择器（input[type=file]）' },
+        file_paths: { type: 'array', items: { type: 'string' }, description: '要上传的文件路径列表' },
+      },
+      required: ['selector', 'file_paths'],
+    },
+  },
+  {
+    name: 'browser_console',
+    description: '获取浏览器控制台日志（用于调试）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['error', 'warning', 'info', 'all'], description: '日志级别过滤，默认 info', default: 'info' },
+      },
+    },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // v8.0: Enhanced Search & Research
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'web_search_boost',
+    description: '增强搜索：并行查询多个搜索引擎 (Brave/SearXNG/Serper/Jina)，结果去重合并，多引擎交叉验证的结果排名更高。用于重要查询。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词' },
+        max_results: { type: 'number', description: '最大结果数，默认 15', default: 15 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'deep_research',
+    description: '深度研究：对复杂问题进行多轮搜索、源页面深度提取、LLM 综合分析、事实交叉验证。输出完整研究报告。\n适合：技术选型调研、竞品分析、最佳实践研究、复杂 bug 根因分析。\n深度: quick(1轮) / standard(2轮) / deep(3轮+fact-check)。',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '研究问题（越具体越好）' },
+        context: { type: 'string', description: '额外上下文（项目背景、技术栈等）' },
+        depth: { type: 'string', enum: ['quick', 'standard', 'deep'], description: '研究深度，默认 standard', default: 'standard' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'configure_search',
+    description: '配置搜索引擎 API Keys。配置后搜索质量将大幅提升。\n推荐: Brave Search (免费 2000次/月)、Serper.dev (免费 2500次/月)。\nSearXNG 适合完全离线 LAN 部署。',
+    parameters: {
+      type: 'object',
+      properties: {
+        brave_api_key: { type: 'string', description: 'Brave Search API Key' },
+        searxng_url: { type: 'string', description: 'SearXNG 实例 URL (如 http://localhost:8888)' },
+        tavily_api_key: { type: 'string', description: 'Tavily API Key' },
+        serper_api_key: { type: 'string', description: 'Serper.dev API Key' },
+      },
+    },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // v8.0: Black-Box Test Runner
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'run_blackbox_tests',
+    description: '运行自主黑盒测试 + 迭代修复循环。\n流程: 自动生成测试用例 → 执行 → 分析失败 → 自动修复 → 重跑 → 直到全部通过或达到轮次限制。\n支持: 单元测试(沙箱)、集成测试、API测试、E2E浏览器测试。',
+    parameters: {
+      type: 'object',
+      properties: {
+        feature_description: { type: 'string', description: '要测试的功能描述（需求/验收标准）' },
+        acceptance_criteria: { type: 'string', description: '验收标准（每条一行）' },
+        code_files: { type: 'array', items: { type: 'string' }, description: '相关代码文件路径列表' },
+        max_rounds: { type: 'number', description: '最大修复轮次，默认 5', default: 5 },
+        test_types: { type: 'array', items: { type: 'string', enum: ['unit', 'integration', 'e2e', 'api'] }, description: '要运行的测试类型' },
+        app_url: { type: 'string', description: '应用 URL (E2E 测试用，如 http://localhost:3000)' },
+      },
+      required: ['feature_description'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
 // Role-based Tool Permissions
 // ═══════════════════════════════════════
 
-export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 'researcher';
+export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 'researcher' | 'meta-agent';
 
 /** 各角色可用工具白名单 — 最小权限原则 */
 const ROLE_TOOLS: Record<AgentRole, string[]> = {
@@ -644,6 +938,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'think', 'task_complete', 'todo_write', 'todo_read',
     'read_file', 'list_files', 'search_files', 'glob_files',  // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
     'web_search', 'fetch_url',
+    'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
     'rfc_propose',     // v5.5: RFC 设计变更提案
@@ -653,6 +948,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'read_file', 'list_files', 'search_files', 'glob_files',
     'write_file',
     'web_search', 'fetch_url',
+    'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
     'rfc_propose',     // v5.5: RFC 设计变更提案
@@ -664,6 +960,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'run_command', 'run_test', 'run_lint',
     'git_commit', 'git_diff',
     'web_search', 'fetch_url', 'http_request',
+    'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'spawn_researcher',
     'memory_read', 'memory_append',
     'check_process',   // v6.0: 查询后台进程状态
@@ -674,25 +971,44 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
     'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
     'browser_network', 'browser_close',
+    // v7.0: 浏览器增强
+    'browser_hover', 'browser_select_option', 'browser_press_key', 'browser_fill_form',
+    'browser_drag', 'browser_tabs', 'browser_file_upload', 'browser_console',
     // 视觉验证
     'analyze_image', 'compare_screenshots', 'visual_assert',
     // 技能进化 (v5.1)
     'skill_acquire', 'skill_search', 'skill_improve', 'skill_record_usage',
+    // v7.0: Sub-Agent
+    'spawn_agent', 'spawn_parallel', 'list_sub_agents', 'cancel_sub_agent',
+    // v7.0: Docker Sandbox
+    'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
+    // v8.0: Black-box test runner
+    'run_blackbox_tests',
   ],
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
     'read_file', 'list_files', 'search_files', 'glob_files',
     'run_command', 'run_test', 'run_lint',
     'web_search', 'fetch_url', 'http_request',
+    'web_search_boost', 'deep_research',  // v8.0
     'memory_read', 'memory_append',
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
     'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
     'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
     'browser_network', 'browser_close',
+    // v7.0: 浏览器增强
+    'browser_hover', 'browser_select_option', 'browser_press_key', 'browser_fill_form',
+    'browser_drag', 'browser_tabs', 'browser_file_upload', 'browser_console',
     'analyze_image', 'compare_screenshots', 'visual_assert',
     // 技能进化 (v5.1)
     'skill_search', 'skill_record_usage',
     'rfc_propose',     // v5.5: RFC 设计变更提案
+    // v7.0: Sub-Agent (QA can spawn researcher for analysis)
+    'spawn_agent', 'list_sub_agents',
+    // v7.0: Docker Sandbox (QA can use sandbox for test isolation)
+    'sandbox_init', 'sandbox_exec', 'sandbox_read', 'sandbox_destroy',
+    // v8.0: Black-box test runner
+    'run_blackbox_tests',
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',
@@ -705,6 +1021,16 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'think',
     'read_file', 'list_files', 'search_files', 'glob_files',
     'web_search', 'fetch_url',
+    'web_search_boost', 'deep_research',  // v8.0
+  ],
+  // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询
+  'meta-agent': [
+    'think', 'task_complete',
+    'read_file', 'list_files', 'search_files', 'glob_files',
+    'web_search', 'fetch_url',
+    'web_search_boost', 'deep_research',  // v8.0
+    'memory_read', 'memory_append',
+    'git_log',
   ],
 };
 
@@ -713,7 +1039,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
 // ═══════════════════════════════════════
 
 /** 将 ToolDefinition 转为 OpenAI function-calling 格式 */
-function toOpenAITool(def: ToolDefinition): Record<string, any> {
+function toOpenAITool(def: ToolDefinition): OpenAIFunctionTool {
   return {
     type: 'function',
     function: {
@@ -735,7 +1061,7 @@ function toOpenAITool(def: ToolDefinition): Record<string, any> {
  * @param role - Agent 角色
  * @param gitMode - git 模式 ('local' | 'github')
  */
-export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): any[] {
+export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): OpenAIFunctionTool[] {
   const allowed = new Set(ROLE_TOOLS[role] || ROLE_TOOLS.developer);
 
   if (gitMode !== 'github') {
@@ -754,11 +1080,11 @@ export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): any
   // 3. Skill 工具 (延迟导入避免循环依赖)
   const skillTools = getExternalSkillTools(role);
 
-  return [...builtinTools, ...mcpTools, ...skillTools];
+  return [...builtinTools, ...mcpTools, ...skillTools] as OpenAIFunctionTool[];
 }
 
 /** 返回所有工具 (OpenAI format)，可选按 gitMode 过滤 GitHub 工具 */
-export function getToolsForLLM(gitMode: string = 'local'): any[] {
+export function getToolsForLLM(gitMode: string = 'local'): OpenAIFunctionTool[] {
   const builtinTools = TOOL_DEFINITIONS
     .filter(t => {
       if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
@@ -769,14 +1095,13 @@ export function getToolsForLLM(gitMode: string = 'local'): any[] {
   const mcpTools = getExternalMcpTools();
   const skillTools = getExternalSkillTools();
 
-  return [...builtinTools, ...mcpTools, ...skillTools];
+  return [...builtinTools, ...mcpTools, ...skillTools] as OpenAIFunctionTool[];
 }
-
 /**
  * 从 MCP Manager 获取外部工具 (OpenAI format)。
  * 使用延迟 require 避免模块初始化时的循环依赖。
  */
-function getExternalMcpTools(role?: string): Record<string, unknown>[] {
+function getExternalMcpTools(role?: string): OpenAIFunctionTool[] {
   try {
     // Lazy import to avoid circular dependency
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -796,7 +1121,7 @@ function getExternalMcpTools(role?: string): Record<string, unknown>[] {
 /**
  * 从 Skill Manager 获取外部工具 (OpenAI format)。
  */
-function getExternalSkillTools(role?: string): Record<string, unknown>[] {
+function getExternalSkillTools(role?: string): OpenAIFunctionTool[] {
   try {
     // Lazy import to avoid circular dependency
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -811,9 +1136,9 @@ function getExternalSkillTools(role?: string): Record<string, unknown>[] {
 }
 
 /** 解析 LLM 返回的 tool_calls (OpenAI 格式 → ToolCall[]) */
-export function parseToolCalls(message: any): ToolCall[] {
+export function parseToolCalls(message: { tool_calls?: Array<{ function: { name: string; arguments: string | Record<string, unknown> } }> }): ToolCall[] {
   if (!message?.tool_calls) return [];
-  return message.tool_calls.map((tc: any) => ({
+  return message.tool_calls.map((tc) => ({
     name: tc.function.name,
     arguments: typeof tc.function.arguments === 'string'
       ? JSON.parse(tc.function.arguments)
@@ -828,7 +1153,10 @@ export function isAsyncTool(toolName: string): boolean {
 
   return toolName.startsWith('github_')
     || toolName.startsWith('browser_')
+    || toolName.startsWith('sandbox_')
     || ['web_search', 'fetch_url', 'http_request',
+        'web_search_boost', 'deep_research', 'run_blackbox_tests',
         'analyze_image', 'compare_screenshots', 'visual_assert',
+        'spawn_agent', 'spawn_parallel', 'spawn_researcher',
        ].includes(toolName);
 }

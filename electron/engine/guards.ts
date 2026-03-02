@@ -16,6 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import type { ParsedFeature } from './types';
 
 // ═══════════════════════════════════════
 // 1. Tool Call Guard — 参数校验 + 速率控制
@@ -52,7 +53,7 @@ export interface ToolGuardResult {
   /** 拦截原因 */
   reason?: string;
   /** 修复后的参数 (自动纠正可安全修复的问题) */
-  repairedArgs?: Record<string, any>;
+  repairedArgs?: Record<string, unknown>;
 }
 
 /** 工具的程序化参数规范 */
@@ -212,7 +213,7 @@ function checkRateLimit(toolName: string, limit: number): boolean {
  */
 export function guardToolCall(
   toolName: string,
-  args: Record<string, any>,
+  args: Record<string, unknown>,
   hasWorkspace: boolean,
 ): ToolGuardResult {
   const spec = TOOL_GUARD_SPECS[toolName];
@@ -259,19 +260,19 @@ export function guardToolCall(
 
     // 数值范围钳制
     if (param.type === 'number' && typeof repaired[param.name] === 'number') {
-      if (param.min !== undefined) repaired[param.name] = Math.max(param.min, repaired[param.name]);
-      if (param.max !== undefined) repaired[param.name] = Math.min(param.max, repaired[param.name]);
+      if (param.min !== undefined) repaired[param.name] = Math.max(param.min, repaired[param.name] as number);
+      if (param.max !== undefined) repaired[param.name] = Math.min(param.max, repaired[param.name] as number);
     }
 
     // 字符串长度截断
     if (param.type === 'string' && typeof repaired[param.name] === 'string' && param.maxLength) {
-      if (repaired[param.name].length > param.maxLength) {
-        repaired[param.name] = repaired[param.name].slice(0, param.maxLength);
+      if ((repaired[param.name] as string).length > param.maxLength) {
+        repaired[param.name] = (repaired[param.name] as string).slice(0, param.maxLength);
       }
     }
 
     // 枚举校验
-    if (param.enum && !param.enum.includes(repaired[param.name])) {
+    if (param.enum && !param.enum.includes(repaired[param.name] as string)) {
       return { allowed: false, reason: `${toolName}.${param.name}: "${repaired[param.name]}" not in [${param.enum.join(', ')}]` };
     }
 
@@ -399,9 +400,9 @@ export function checkReactTermination(
 }
 
 /** 生成工具调用签名 (用于重复检测) */
-export function toolCallSignature(name: string, args: Record<string, any>): string {
+export function toolCallSignature(name: string, args: Record<string, unknown>): string {
   // 只用关键参数做签名，忽略 content 等大字段
-  const keyArgs: Record<string, any> = {};
+  const keyArgs: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
     if (k === 'content' || k === 'thought') continue;
     keyArgs[k] = typeof v === 'string' ? v.slice(0, 100) : v;
@@ -557,7 +558,7 @@ export interface GateCheckResult {
 }
 
 /** PM → Architect 门控: features 必须满足基本结构 */
-export function gatePMToArchitect(features: any[]): GateCheckResult {
+export function gatePMToArchitect(features: ParsedFeature[]): GateCheckResult {
   if (!Array.isArray(features) || features.length === 0) {
     return { passed: false, reason: 'PM produced no features' };
   }
@@ -599,7 +600,7 @@ export function gateArchitectToDeveloper(workspacePath: string | null): GateChec
 }
 
 /** 依赖循环检测 (拓扑排序) */
-function detectDependencyCycle(features: any[]): string | null {
+function detectDependencyCycle(features: ParsedFeature[]): string | null {
   const ids = new Set(features.map(f => f.id));
   const adj = new Map<string, string[]>();
 

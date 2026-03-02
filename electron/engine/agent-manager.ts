@@ -194,7 +194,7 @@ export function getTeamMemberLLMConfig(
  * 获取成员级 MCP 服务器列表 (返回 JSON 解析后的数组)。
  * 为空时返回 [] (表示只用全局 MCP)。
  */
-export function getTeamMemberMcpServers(projectId: string, role: string, agentIndex: number = 0): any[] {
+export function getTeamMemberMcpServers(projectId: string, role: string, agentIndex: number = 0): Record<string, unknown>[] {
   try {
     const db = getDb();
     const members = db.prepare(

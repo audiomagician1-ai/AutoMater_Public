@@ -15,6 +15,7 @@
 
 import { getDb } from '../db';
 import { createLogger } from './logger';
+import type { SqliteStatement, EventRow } from './types';
 
 const log = createLogger('event-store');
 
@@ -119,7 +120,7 @@ export function ensureEventTable(): void {
 // Write
 // ═══════════════════════════════════════
 
-let _insertStmt: any = null;
+let _insertStmt: SqliteStatement | null = null;
 
 function getInsertStmt() {
   if (!_insertStmt) {
@@ -149,7 +150,7 @@ export function emitEvent(event: AgentEvent): number {
       event.outputTokens ?? null,
       event.costUsd ?? null,
     );
-    return result.lastInsertRowid as number;
+    return (result as { lastInsertRowid: number }).lastInsertRowid;
   } catch (err) {
     // 事件写入失败不应影响主流程
     log.error('emit failed', err);
@@ -192,7 +193,7 @@ export interface EventQuery {
   offset?: number;
 }
 
-function rowToEvent(row: any): AgentEvent {
+function rowToEvent(row: EventRow): AgentEvent {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -214,7 +215,7 @@ function rowToEvent(row: any): AgentEvent {
 export function queryEvents(query: EventQuery): AgentEvent[] {
   const db = getDb();
   const conditions: string[] = ['project_id = ?'];
-  const params: any[] = [query.projectId];
+  const params: Array<string | number> = [query.projectId];
 
   if (query.featureId) {
     conditions.push('feature_id = ?');

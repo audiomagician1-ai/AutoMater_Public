@@ -397,7 +397,7 @@ export interface GitIssue {
 
 export interface FileTreeNode {
   name: string;
-  type: 'file' | 'directory';
+  type: 'file' | 'dir' | 'directory';
   children?: FileTreeNode[];
 }
 
@@ -426,13 +426,142 @@ export interface QAIssue {
 }
 
 // ═══════════════════════════════════════
-// Mission Runner Task (v12.2)
+// OpenAI Tool Format (v12.3)
 // ═══════════════════════════════════════
 
-export interface MissionTask {
-  title: string;
-  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+/** OpenAI function-calling 格式的工具定义 */
+export interface OpenAIFunctionTool {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
   [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// DB Row Types for mapper functions (v12.3)
+// ═══════════════════════════════════════
+
+/** sessions 表原始行 */
+export interface SessionRow {
+  id: string;
+  project_id: string | null;
+  agent_id: string;
+  agent_role: string;
+  agent_seq: number;
+  status: 'active' | 'completed' | 'archived';
+  backup_path: string | null;
+  created_at: string;
+  completed_at: string | null;
+  message_count: number;
+  total_tokens: number;
+  total_cost: number;
+}
+
+/** feature_sessions 表原始行 */
+export interface FeatureSessionRow {
+  id: string;
+  feature_id: string;
+  session_id: string;
+  project_id: string;
+  agent_id: string;
+  agent_role: string;
+  work_type: string;  // WorkType at runtime
+  expected_output: string;
+  actual_output: string | null;
+  status: 'pending' | 'active' | 'completed' | 'failed';
+  created_at: string;
+  completed_at: string | null;
+}
+
+/** events 表原始行 */
+export interface EventRow {
+  id: number;
+  project_id: string;
+  agent_id: string;
+  feature_id: string | null;
+  type: string;
+  data: string;
+  duration_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: number | null;
+  created_at: string;
+}
+
+// ═══════════════════════════════════════
+// Anthropic API types (v12.3)
+// ═══════════════════════════════════════
+
+/** Anthropic content block */
+export interface AnthropicContentBlock {
+  type: 'text' | 'image' | 'tool_use' | 'tool_result';
+  text?: string;
+  [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// Gate feature (v12.3) — minimal feature shape for guards
+// ═══════════════════════════════════════
+
+/** 最小 Feature 结构 — 用于 guards 门控检查 */
+export interface GateFeature {
+  id: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  category?: string;
+  dependsOn?: string[];
+  depends_on?: string[];
+  affected_files?: string;
+  acceptance_criteria?: string;
+  [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// GitHub API types (v12.3)
+// ═══════════════════════════════════════
+
+/** GitHub label (API response) */
+export interface GitHubApiLabel {
+  name: string;
+  [key: string]: unknown;
+}
+
+/** GitHub issue (API response) */
+export interface GitHubApiIssue {
+  number: number;
+  title: string;
+  state: string;
+  body: string;
+  labels: GitHubApiLabel[];
+  html_url: string;
+  [key: string]: unknown;
+}
+
+// ═══════════════════════════════════════
+// QA Issue item from LLM (v12.3)
+// ═══════════════════════════════════════
+
+export interface QAIssueItem {
+  severity: string;
+  file?: string;
+  line?: number;
+  description: string;
+  suggestion?: string;
+}
+
+// ═══════════════════════════════════════
+// better-sqlite3 Statement type (v12.3)
+// ═══════════════════════════════════════
+
+/** Minimal better-sqlite3 Statement interface */
+export interface SqliteStatement {
+  run(...params: unknown[]): unknown;
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
 }
 
 // ═══════════════════════════════════════

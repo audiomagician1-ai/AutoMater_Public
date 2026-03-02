@@ -12,6 +12,7 @@ import {
   DEFAULT_BUDGET_LIMITS,
   type ReactState,
 } from '../guards';
+import type { ParsedFeature } from '../types';
 
 // ═══════════════════════════════════════
 // 1. Tool Call Guard
@@ -293,7 +294,7 @@ describe('gatePMToArchitect', () => {
     const result = gatePMToArchitect([
       { id: 'F-1', title: 'Login', description: 'Auth' },
       { id: 'F-2', title: 'Dashboard', description: 'Main view' },
-    ]);
+    ] as unknown as ParsedFeature[]);
     expect(result.passed).toBe(true);
   });
 
@@ -307,7 +308,7 @@ describe('gatePMToArchitect', () => {
       { id: '', title: '' },
       { id: '', description: '' },
       { id: 'F-1', title: 'Valid', description: 'OK' },
-    ]);
+    ] as unknown as ParsedFeature[]);
     expect(result.passed).toBe(false);
   });
 
@@ -315,7 +316,7 @@ describe('gatePMToArchitect', () => {
     const result = gatePMToArchitect([
       { id: 'A', title: 'A', description: 'A', dependsOn: ['B'] },
       { id: 'B', title: 'B', description: 'B', dependsOn: ['A'] },
-    ]);
+    ] as unknown as ParsedFeature[]);
     expect(result.passed).toBe(false);
     expect(result.reason).toContain('Circular');
   });

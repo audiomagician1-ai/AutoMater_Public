@@ -9,10 +9,35 @@
  */
 
 import { getDb } from '../db';
-import type { AppSettings } from './types';
+import type { AppSettings, AnthropicContentBlock, OpenAIFunctionTool } from './types';
 import { createLogger } from './logger';
 
 const log = createLogger('llm-client');
+
+// ═══════════════════════════════════════
+// Internal API response shapes (for type safety)
+// ═══════════════════════════════════════
+
+/** OpenAI chat completion response (non-streaming) */
+interface OpenAIChatResponse {
+  choices: Array<{ message: ToolCallMessage }>;
+  usage?: { prompt_tokens: number; completion_tokens: number };
+}
+
+/** Anthropic messages response (non-streaming) */
+interface AnthropicResponse {
+  content: AnthropicContentBlock[];
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+/** Anthropic content block in tool-use response */
+interface AnthropicToolBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
 
 // ═══════════════════════════════════════
 // Helpers
@@ -250,7 +275,7 @@ async function _callOpenAI(
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
   if (!stream) {
-    const data = await res.json() as Record<string, any>;
+    const data = await res.json() as OpenAIChatResponse;
     return {
       content: data.choices[0].message.content ?? '',
       inputTokens: data.usage?.prompt_tokens ?? 0,
@@ -322,9 +347,9 @@ async function _callAnthropic(
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
   if (!stream) {
-    const data = await res.json() as Record<string, any>;
+    const data = await res.json() as AnthropicResponse;
     return {
-      content: data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''),
+      content: data.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''),
       inputTokens: data.usage?.input_tokens ?? 0,
       outputTokens: data.usage?.output_tokens ?? 0,
     };
@@ -383,7 +408,7 @@ export async function callLLMWithTools(
   settings: AppSettings,
   model: string,
   messages: Array<{ role: string; content: unknown }>,
-  tools: Array<Record<string, unknown>>,
+  tools: Array<Record<string, unknown>> | OpenAIFunctionTool[],
   signal?: AbortSignal,
   maxTokens: number = 16384,
 ): Promise<LLMWithToolsResult> {
@@ -427,10 +452,10 @@ async function _callOpenAIWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
-  const data = await res.json() as Record<string, any>;
+  const data = await res.json() as OpenAIChatResponse;
   const choice = data.choices[0];
   return {
-    message: choice.message,
+    message: choice.message as ToolCallMessage,
     inputTokens: data.usage?.prompt_tokens ?? 0,
     outputTokens: data.usage?.completion_tokens ?? 0,
   };
@@ -442,10 +467,10 @@ async function _callAnthropicWithTools(
   tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
 ): Promise<LLMWithToolsResult> {
   // Convert OpenAI tools format to Anthropic format
-  const anthropicTools = tools.map((t: Record<string, any>) => ({
-    name: t.function.name,
-    description: t.function.description,
-    input_schema: t.function.parameters,
+  const anthropicTools = tools.map((t: Record<string, unknown>) => ({
+    name: (t.function as Record<string, unknown>).name,
+    description: (t.function as Record<string, unknown>).description,
+    input_schema: (t.function as Record<string, unknown>).parameters,
   }));
 
   const systemMsg = messages.find(m => m.role === 'system');
@@ -460,9 +485,10 @@ async function _callAnthropicWithTools(
       let anthropicToolContent: unknown;
       if (Array.isArray(toolContent)) {
         // Multimodal content (text + image)
-        anthropicToolContent = (toolContent as Array<Record<string, any>>).map((block) => {
-          if (block.type === 'image_url' && block.image_url?.url) {
-            const dataMatch = block.image_url.url.match(/^data:([^;]+);base64,(.+)/);
+        anthropicToolContent = (toolContent as Array<Record<string, unknown>>).map((block) => {
+          const imageUrl = block.image_url as { url?: string } | undefined;
+          if (block.type === 'image_url' && imageUrl?.url) {
+            const dataMatch = imageUrl.url.match(/^data:([^;]+);base64,(.+)/);
             if (dataMatch) {
               return {
                 type: 'image',
@@ -525,7 +551,7 @@ async function _callAnthropicWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
-  const data = await res.json() as Record<string, any>;
+  const data = await res.json() as { content?: AnthropicToolBlock[]; usage?: { input_tokens: number; output_tokens: number } };
 
   // Convert Anthropic response back to OpenAI format
   let textContent = '';
@@ -533,13 +559,13 @@ async function _callAnthropicWithTools(
 
   for (const block of data.content || []) {
     if (block.type === 'text') {
-      textContent += block.text;
+      textContent += block.text ?? '';
     } else if (block.type === 'tool_use') {
       toolCalls.push({
-        id: block.id,
+        id: block.id ?? '',
         type: 'function',
         function: {
-          name: block.name,
+          name: block.name ?? '',
           arguments: JSON.stringify(block.input),
         },
       });

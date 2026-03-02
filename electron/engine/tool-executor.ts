@@ -19,18 +19,22 @@ import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues
 import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
+import { webSearchBoost } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
 import { takeScreenshot, mouseMove, mouseClick, keyboardType, keyboardHotkey } from './computer-use';
 import {
   launchBrowser, closeBrowser, navigate as browserNavigateFn,
   browserScreenshot, browserSnapshot, browserClick, browserType,
   browserEvaluate, browserWait, browserNetwork,
+  browserHover, browserSelectOption, browserPressKey, browserFillForm,
+  browserDrag, browserTabs, browserFileUpload, browserConsole,
 } from './browser-tools';
 import {
   analyzeImage, compareScreenshots, visualAssert,
   cacheScreenshot, getCachedScreenshot,
 } from './visual-tools';
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
+import type { AppSettings, FileTreeNode } from './types';
 import { trimToolResult } from './context-collector';
 
 const log = createLogger('tool-executor');
@@ -239,7 +243,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         const dir = call.arguments.directory || '';
         const maxDepth = call.arguments.max_depth ?? 3;
         const tree = readDirectoryTree(ctx.workspacePath, dir, maxDepth);
-        const formatTree = (nodes: any[], indent: string = ''): string => {
+        const formatTree = (nodes: FileTreeNode[], indent: string = ''): string => {
           return nodes.map(n => {
             if (n.type === 'dir') {
               return `${indent}${n.name}/\n${n.children ? formatTree(n.children, indent + '  ') : ''}`;
@@ -521,7 +525,12 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'github_create_issue':
       case 'github_list_issues':
       case 'spawn_researcher':
+      case 'spawn_agent':
+      case 'spawn_parallel':
       case 'web_search':
+      case 'web_search_boost':
+      case 'deep_research':
+      case 'run_blackbox_tests':
       case 'fetch_url':
       case 'http_request':
       case 'browser_launch':
@@ -534,10 +543,40 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'browser_wait':
       case 'browser_network':
       case 'browser_close':
+      case 'browser_hover':
+      case 'browser_select_option':
+      case 'browser_press_key':
+      case 'browser_fill_form':
+      case 'browser_drag':
+      case 'browser_tabs':
+      case 'browser_file_upload':
+      case 'browser_console':
       case 'analyze_image':
       case 'compare_screenshots':
       case 'visual_assert':
+      case 'sandbox_init':
+      case 'sandbox_exec':
+      case 'sandbox_write':
+      case 'sandbox_read':
+      case 'sandbox_destroy':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
+
+      // Sync-only tools
+      case 'list_sub_agents': {
+        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
+        const agents = getActiveSubAgents();
+        if (agents.length === 0) return { success: true, output: '无活跃子 Agent', action: 'read' };
+        const lines = agents.map(a => `${a.id} [${a.preset}] 运行 ${Math.round(a.runningMs / 1000)}s — ${a.task}`);
+        return { success: true, output: `活跃子 Agent (${agents.length}):\n${lines.join('\n')}`, action: 'read' };
+      }
+
+      case 'cancel_sub_agent': {
+        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
+        const ok = cancelSubAgent(call.arguments.agent_id);
+        return ok
+          ? { success: true, output: `已取消子 Agent: ${call.arguments.agent_id}`, action: 'write' }
+          : { success: false, output: `子 Agent ${call.arguments.agent_id} 不存在或已完成` };
+      }
 
       default: {
         // MCP / Skill 外部工具 — sync 入口返回 placeholder，实际由 async 路径执行
@@ -677,6 +716,156 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     if (!base64) return { success: false, output: `未找到标签为 "${call.arguments.image_label || 'latest'}" 的截图`, action: 'computer' };
     const result = await visualAssert(base64, call.arguments.assertion, ctx.callVision);
     return { success: result.success, output: result.success ? `视觉断言 ${result.passed ? '✅ PASS' : '❌ FAIL'} (置信度: ${result.confidence}%)\n断言: ${call.arguments.assertion}\n依据: ${result.reasoning}` : `断言失败: ${result.error}`, action: 'computer' };
+  }
+
+  // ── v7.0: Browser Enhancements ──
+  if (call.name === 'browser_hover') {
+    const result = await browserHover(call.arguments.selector);
+    return { success: result.success, output: result.success ? `已悬停: ${call.arguments.selector}` : `悬停失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_select_option') {
+    const result = await browserSelectOption(call.arguments.selector, call.arguments.values || []);
+    return { success: result.success, output: result.success ? `已选择: ${(result.selected || []).join(', ')}` : `选择失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_press_key') {
+    const result = await browserPressKey(call.arguments.key);
+    return { success: result.success, output: result.success ? `已按键: ${call.arguments.key}` : `按键失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_fill_form') {
+    const result = await browserFillForm(call.arguments.fields || []);
+    const msg = `已填写 ${result.filled} 个字段${result.errors.length ? `\n失败: ${result.errors.join('; ')}` : ''}`;
+    return { success: result.success, output: msg, action: 'computer' };
+  }
+  if (call.name === 'browser_drag') {
+    const result = await browserDrag(call.arguments.source_selector, call.arguments.target_selector);
+    return { success: result.success, output: result.success ? `已拖放: ${call.arguments.source_selector} → ${call.arguments.target_selector}` : `拖放失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_tabs') {
+    const result = await browserTabs(call.arguments.action, { index: call.arguments.index, url: call.arguments.url });
+    if (result.tabs) {
+      const lines = result.tabs.map(t => `[${t.index}] ${t.title || '(无标题)'} — ${t.url}`);
+      return { success: true, output: `标签页 (${result.tabs.length}):\n${lines.join('\n')}`, action: 'computer' };
+    }
+    return { success: result.success, output: result.success ? `标签页操作完成: ${call.arguments.action}` : `操作失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_file_upload') {
+    const result = await browserFileUpload(call.arguments.selector, call.arguments.file_paths || []);
+    return { success: result.success, output: result.success ? `已上传 ${(call.arguments.file_paths || []).length} 个文件` : `上传失败: ${result.error}`, action: 'computer' };
+  }
+  if (call.name === 'browser_console') {
+    const result = await browserConsole(call.arguments.level || 'info');
+    if (!result.success) return { success: false, output: `获取失败: ${result.error}`, action: 'computer' };
+    return { success: true, output: result.messages?.length ? result.messages.join('\n') : '(无控制台消息)', action: 'computer' };
+  }
+
+  // ── v7.0: Docker Sandbox ──
+  if (call.name === 'sandbox_init') {
+    const { initSandbox, SANDBOX_PRESETS } = await import('./docker-sandbox');
+    const imageOrPreset = call.arguments.image || 'node';
+    const presetConfig = SANDBOX_PRESETS[imageOrPreset];
+    const config = presetConfig
+      ? { ...presetConfig, mountWorkspace: call.arguments.mount_workspace, hostWorkspacePath: ctx.workspacePath, env: call.arguments.env }
+      : { image: imageOrPreset, mountWorkspace: call.arguments.mount_workspace, hostWorkspacePath: ctx.workspacePath, env: call.arguments.env, memoryLimit: call.arguments.memory_limit || '1g', workDir: '/workspace' };
+    const result = await initSandbox(config);
+    return result.success
+      ? { success: true, output: `🐳 沙箱已创建\n容器 ID: ${result.containerId}\n镜像: ${config.image}\n工作区挂载: ${config.mountWorkspace ? '是' : '否'}`, action: 'shell' }
+      : { success: false, output: `沙箱创建失败: ${result.error}`, action: 'shell' };
+  }
+  if (call.name === 'sandbox_exec') {
+    const { execInContainer } = await import('./docker-sandbox');
+    const result = await execInContainer(call.arguments.container_id, call.arguments.command, { timeout: call.arguments.timeout });
+    return {
+      success: result.success,
+      output: result.success
+        ? `[sandbox] exit=0 ${result.durationMs}ms\n${result.stdout.slice(0, 8000)}`
+        : `[sandbox] exit=${result.exitCode}${result.timedOut ? ' TIMEOUT' : ''} ${result.durationMs}ms\n${result.stderr.slice(0, 3000)}${result.stdout ? '\n--- stdout ---\n' + result.stdout.slice(0, 2000) : ''}`,
+      action: 'shell',
+    };
+  }
+  if (call.name === 'sandbox_write') {
+    const { writeToContainer } = await import('./docker-sandbox');
+    const result = await writeToContainer(call.arguments.container_id, call.arguments.path, call.arguments.content);
+    return result.success
+      ? { success: true, output: `已写入容器文件: ${call.arguments.path} (${Buffer.byteLength(call.arguments.content, 'utf-8')} bytes)`, action: 'write' }
+      : { success: false, output: `写入失败: ${result.error}`, action: 'write' };
+  }
+  if (call.name === 'sandbox_read') {
+    const { readFromContainer } = await import('./docker-sandbox');
+    const result = await readFromContainer(call.arguments.container_id, call.arguments.path);
+    return result.success
+      ? { success: true, output: result.content?.slice(0, 8000) || '(空文件)', action: 'read' }
+      : { success: false, output: `读取失败: ${result.error}`, action: 'read' };
+  }
+  if (call.name === 'sandbox_destroy') {
+    const { destroySandbox } = await import('./docker-sandbox');
+    const result = await destroySandbox(call.arguments.container_id);
+    return result.success
+      ? { success: true, output: `沙箱已销毁: ${call.arguments.container_id}`, action: 'shell' }
+      : { success: false, output: `销毁失败: ${result.error}`, action: 'shell' };
+  }
+
+  // ── v7.0: Sub-Agent Framework ──
+  if (call.name === 'spawn_agent') {
+    const { spawnSubAgent } = await import('./sub-agent-framework');
+    const { getDb } = await import('../db');
+    const db = getDb();
+    const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
+    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+
+    const result = await spawnSubAgent(
+      call.arguments.task,
+      {
+        preset: call.arguments.preset,
+        extraPrompt: call.arguments.extra_prompt,
+        maxIterations: call.arguments.max_iterations,
+      },
+      ctx,
+      settings,
+      (msg: string) => log.info(msg),
+    );
+
+    const summary = [
+      `子Agent [${call.arguments.preset}] ${result.success ? '✅ 完成' : '❌ 失败'}`,
+      `轮次: ${result.iterations} | 耗时: ${Math.round(result.durationMs / 1000)}s | 成本: $${result.cost.toFixed(4)}`,
+      result.filesCreated.length > 0 ? `创建: ${result.filesCreated.join(', ')}` : '',
+      result.filesModified.length > 0 ? `修改: ${result.filesModified.join(', ')}` : '',
+      '',
+      '=== 结论 ===',
+      result.conclusion,
+      '',
+      result.actionSummary ? `=== 操作日志 ===\n${result.actionSummary}` : '',
+    ].filter(Boolean).join('\n');
+
+    return { success: result.success, output: summary.slice(0, 8000), action: 'shell' };
+  }
+
+  if (call.name === 'spawn_parallel') {
+    const { spawnParallel } = await import('./sub-agent-framework');
+    const { getDb } = await import('../db');
+    const db = getDb();
+    const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
+    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+
+    const tasks = (call.arguments.tasks || []).map((t: any) => ({
+      id: t.id,
+      config: { preset: t.preset },
+      task: t.task,
+    }));
+
+    const results = await spawnParallel(tasks, ctx, settings, (msg: string) => log.info(msg));
+
+    const summary = results.map(r => {
+      const res = r.result;
+      return [
+        `[${r.id}] ${res.success ? '✅' : '❌'} ${res.iterations}轮 ${Math.round(res.durationMs / 1000)}s $${res.cost.toFixed(4)}`,
+        `  结论: ${res.conclusion.slice(0, 200)}`,
+        res.filesCreated.length > 0 ? `  创建: ${res.filesCreated.join(', ')}` : '',
+        res.filesModified.length > 0 ? `  修改: ${res.filesModified.join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+    }).join('\n\n');
+
+    const allSuccess = results.every(r => r.result.success);
+    return { success: allSuccess, output: `并行执行完成 (${results.length} 个任务):\n\n${summary}`.slice(0, 8000), action: 'shell' };
   }
 
   // ── MCP 外部工具 ──

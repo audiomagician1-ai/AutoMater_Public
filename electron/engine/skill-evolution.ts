@@ -73,7 +73,7 @@ export interface SkillParameterSchema {
   properties: Record<string, {
     type: string;
     description: string;
-    default?: any;
+    default?: unknown;
     enum?: string[];
   }>;
   required?: string[];

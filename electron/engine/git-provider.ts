@@ -13,6 +13,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
+import type { GitHubApiLabel, GitHubApiIssue } from './types';
 
 const execAsync = promisify(execCb);
 const log = createLogger('git-provider');
@@ -158,8 +159,8 @@ async function githubApi(
   endpoint: string,
   token: string,
   method: string = 'GET',
-  body?: any
-): Promise<any> {
+  body?: Record<string, unknown>
+): Promise<unknown> {
   const res = await fetch(`https://api.github.com${endpoint}`, {
     method,
     headers: {
@@ -191,13 +192,14 @@ export async function createIssue(
       'POST',
       { title, body, labels }
     );
+    const d = data as Record<string, unknown>;
     return {
-      number: data.number,
-      title: data.title,
-      state: data.state,
-      body: data.body,
-      labels: (data.labels || []).map((l: any) => l.name),
-      html_url: data.html_url,
+      number: d.number as number,
+      title: d.title as string,
+      state: d.state as string,
+      body: d.body as string,
+      labels: ((d.labels || []) as GitHubApiLabel[]).map((l) => l.name),
+      html_url: d.html_url as string,
     };
   } catch (err) {
     log.error('GitHub create issue failed', err);
@@ -234,12 +236,12 @@ export async function listIssues(
       `/repos/${config.githubRepo}/issues?state=${state}&per_page=50`,
       config.githubToken
     );
-    return (data || []).map((d: any) => ({
+    return ((data || []) as GitHubApiIssue[]).map((d: GitHubApiIssue) => ({
       number: d.number,
       title: d.title,
       state: d.state,
       body: d.body,
-      labels: (d.labels || []).map((l: any) => l.name),
+      labels: (d.labels || []).map((l: GitHubApiLabel) => l.name),
       html_url: d.html_url,
     }));
   } catch (err) {
@@ -271,7 +273,8 @@ export async function addIssueComment(
 export async function testGitHubConnection(repo: string, token: string): Promise<{ success: boolean; message: string }> {
   try {
     const data = await githubApi(`/repos/${repo}`, token);
-    return { success: true, message: `✅ 已连接: ${data.full_name} (${data.private ? '私有' : '公开'})` };
+    const d = data as Record<string, unknown>;
+    return { success: true, message: `✅ 已连接: ${d.full_name} (${d.private ? '私有' : '公开'})` };
   } catch (err: unknown) {
     return { success: false, message: (err instanceof Error ? err.message : String(err)) };
   }

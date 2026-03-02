@@ -23,6 +23,7 @@ import { generateRepoMap } from './repo-map';
 import { readMemoryForRole } from './memory-system';
 import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
 import { buildCrossProjectContext } from './cross-project';
+import type { FeatureRow } from './types';
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -129,7 +130,7 @@ export interface ContextResult {
 export async function collectDeveloperContext(
   workspacePath: string,
   projectId: string,
-  feature: any,
+  feature: FeatureRow,
   tokenBudget: number = 6000,
   agentId?: string
 ): Promise<ContextResult> {
@@ -532,7 +533,7 @@ export function loadColdMemory(workspacePath: string, moduleId: string): MemoryL
  */
 export function selectColdModules(
   workspacePath: string,
-  feature: any,
+  feature: FeatureRow,
   maxModules: number = 5,
 ): string[] {
   const keywords = extractKeywords(
@@ -583,7 +584,7 @@ export function selectColdModules(
 export function collectLayeredContext(
   workspacePath: string,
   projectId: string,
-  feature: any,
+  feature: FeatureRow,
   tokenBudget: number = 6000,
   agentId?: string,
 ): ContextResult {
@@ -965,7 +966,7 @@ export function compressFileContent(content: string, maxLines: number = 30): str
 export function collectLightContext(
   workspacePath: string,
   projectId: string,
-  feature: any,
+  feature: FeatureRow,
   planSummary?: string,
   tokenBudget: number = 3000,
   agentId?: string

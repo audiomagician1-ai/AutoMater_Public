@@ -194,7 +194,7 @@ const DEFAULT_TEAM = [
 ];
 
 /** 创建默认团队（复用于 project:create 和 team:init-defaults） */
-function initDefaultTeam(db: any, projectId: string): { success: boolean; count: number; message?: string } {
+function initDefaultTeam(db: { prepare(sql: string): { run(...args: unknown[]): unknown; get(...args: unknown[]): unknown } }, projectId: string): { success: boolean; count: number; message?: string } {
   const existing = db.prepare('SELECT COUNT(*) as count FROM team_members WHERE project_id = ?').get(projectId) as { count: number };
   if (existing.count > 0) return { success: true, count: existing.count, message: 'already initialized' };
 
@@ -206,9 +206,9 @@ function initDefaultTeam(db: any, projectId: string): { success: boolean; count:
   return { success: true, count: DEFAULT_TEAM.length };
 }
 
-function getGitConfig(project: any): GitProviderConfig {
+function getGitConfig(project: { git_mode?: string; workspace_path: string; github_repo?: string; github_token?: string }): GitProviderConfig {
   return {
-    mode: project.git_mode || 'local',
+    mode: (project.git_mode || 'local') as import('../engine/git-provider').GitMode,
     workspacePath: project.workspace_path,
     githubRepo: project.github_repo || undefined,
     githubToken: project.github_token || undefined,
@@ -321,7 +321,7 @@ export function setupProjectHandlers() {
   }) => {
     const db = getDb();
     const sets: string[] = [];
-    const vals: any[] = [];
+    const vals: Array<string | number | null> = [];
     if (fields.status !== undefined) { sets.push('status = ?'); vals.push(fields.status); }
     if (fields.pm_analysis !== undefined) { sets.push('pm_analysis = ?'); vals.push(fields.pm_analysis); }
     if (fields.design_doc !== undefined) { sets.push('design_doc = ?'); vals.push(fields.design_doc); }
@@ -388,7 +388,7 @@ export function setupProjectHandlers() {
   }) => {
     const db = getDb();
     const sets: string[] = [];
-    const vals: any[] = [];
+    const vals: Array<string | number | null> = [];
     if (fields.role !== undefined) { sets.push('role = ?'); vals.push(fields.role); }
     if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
     if (fields.model !== undefined) { sets.push('model = ?'); vals.push(fields.model); }
@@ -516,7 +516,7 @@ export function setupProjectHandlers() {
     const offset = options?.offset ?? 0;
 
     const conditions = ['project_id = ?'];
-    const params: any[] = [projectId];
+    const params: Array<string | number> = [projectId];
 
     if (options?.agentId) {
       conditions.push('agent_id = ?');

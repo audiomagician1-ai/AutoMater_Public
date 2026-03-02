@@ -12,6 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
+import type { FeatureRow } from './types';
 
 const log = createLogger('decision-log');
 
@@ -220,7 +221,7 @@ export function getClaimsSummary(workspacePath: string, excludeWorkerId?: string
  * Predict which files a feature will likely modify, based on feature metadata.
  * This is a heuristic — uses affected_files from feature, or falls back to category-based guess.
  */
-export function predictAffectedFiles(feature: any): string[] {
+export function predictAffectedFiles(feature: FeatureRow): string[] {
   // Try parsing affected_files from feature
   if (feature.affected_files) {
     try {

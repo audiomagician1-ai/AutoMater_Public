@@ -1,5 +1,6 @@
 /**
- * PM Phase — 需求分析 + 增量分析 + 设计文档 + 批量验收
+ * PM Phase — 需求分析 + 增量分析 + 批量验收
+ * Extracted from orchestrator.ts for maintainability.
  * @module phases/pm-phase
  */
 
@@ -10,17 +11,19 @@ import {
   reactAgentLoop,
   parseStructuredOutput, PM_FEATURE_SCHEMA, PM_ACCEPTANCE_SCHEMA,
   gatePMToArchitect,
-  writeDoc, readDoc, buildDesignContext, buildFeatureDocContext,
+  writeDoc, buildDesignContext, buildFeatureDocContext,
   backupConversation, linkFeatureSession, completeFeatureSessionLink, getOrCreateSession,
   emitEvent, createCheckpoint,
   resolveMemberModel, safeJsonParse,
-  PM_SYSTEM_PROMPT, PM_DESIGN_DOC_PROMPT, PM_ACCEPTANCE_PROMPT,
+  PM_SYSTEM_PROMPT, PM_ACCEPTANCE_PROMPT,
   type AppSettings, type ProjectRow, type FeatureRow, type ParsedFeature,
 } from './shared';
 import fs from 'fs';
 import path from 'path';
 
 const log = createLogger('phase:pm');
+
+const BATCH_ACCEPT_SIZE = 4;
 
 // ═══════════════════════════════════════
 // Phase 1: PM 需求分析
@@ -109,7 +112,6 @@ export async function phasePMAnalysis(
     return null;
   }
 
-  // 写入 DB
   const insertFeature = db.prepare(`INSERT INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
   db.transaction((items: ParsedFeature[]) => {
     for (let i = 0; i < items.length; i++) {
@@ -137,7 +139,7 @@ export async function phasePMAnalysis(
 }
 
 // ═══════════════════════════════════════
-// 增量 PM 分析 (续跑时新增 Feature)
+// 增量 PM 分析
 // ═══════════════════════════════════════
 
 export async function phaseIncrementalPM(
@@ -153,94 +155,43 @@ export async function phaseIncrementalPM(
   const existingRows = db.prepare("SELECT id, title, status FROM features WHERE project_id = ?")
     .all(projectId) as Array<{ id: string; title: string; status: string }>;
   const existingList = existingRows.map(f => `- ${f.id}: ${f.title} [${f.status}]`).join('\n');
-
   const maxIdNum = existingRows.reduce((max, f) => {
     const match = f.id.match(/F(\d+)/);
     return match ? Math.max(max, parseInt(match[1], 10)) : max;
   }, 0);
+  const capsDescription = newCapabilities.map((c, i) => `${i + 1}. ${c.title}: ${c.description}`).join('\n');
 
-  const capsDescription = newCapabilities
-    .map((c, i) => `${i + 1}. ${c.title}: ${c.description}`)
-    .join('\n');
-
-  sendToUI(win, 'agent:log', {
-    projectId, agentId: pmId,
-    content: `🆕 增量分析: 为 ${newCapabilities.length} 个新功能生成 Feature...`,
-  });
+  sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `🆕 增量分析: 为 ${newCapabilities.length} 个新功能生成 Feature...` });
 
   try {
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
     const pmModel = resolveMemberModel(projectId, 'pm', settings);
     const result = await callLLM(settings, pmModel, [
       { role: 'system', content: pmPrompt },
-      {
-        role: 'user',
-        content: [
-          `## 增量需求 — 仅为以下新功能生成 Feature, 不要重复已有的`,
-          '',
-          `### 新功能列表`,
-          capsDescription,
-          '',
-          `### 已有 Feature (不要重复!)`,
-          existingList,
-          '',
-          `Feature ID 请从 F${String(maxIdNum + 1).padStart(3, '0')} 开始编号。`,
-          '直接输出 JSON 数组。',
-        ].join('\n'),
-      },
+      { role: 'user', content: `## 增量需求 — 仅为以下新功能生成 Feature, 不要重复已有的\n\n### 新功能列表\n${capsDescription}\n\n### 已有 Feature (不要重复!)\n${existingList}\n\nFeature ID 请从 F${String(maxIdNum + 1).padStart(3, '0')} 开始编号。\n直接输出 JSON 数组。` },
     ], signal, 16384);
 
     const cost = calcCost(pmModel, result.inputTokens, result.outputTokens);
     updateAgentStats(pmId, projectId, result.inputTokens, result.outputTokens, cost);
-
-    backupConversation({
-      projectId, agentId: pmId, agentRole: 'pm',
-      messages: [
-        { role: 'system', content: pmPrompt },
-        { role: 'user', content: `增量分析: ${newCapabilities.length} 个新功能` },
-        { role: 'assistant', content: result.content.slice(0, 50000) },
-      ],
-      totalInputTokens: result.inputTokens, totalOutputTokens: result.outputTokens,
-      totalCost: cost, model: settings.strongModel, completed: true,
-    });
+    backupConversation({ projectId, agentId: pmId, agentRole: 'pm', messages: [{ role: 'system', content: pmPrompt }, { role: 'user', content: `增量分析: ${newCapabilities.length} 个新功能` }, { role: 'assistant', content: result.content.slice(0, 50000) }], totalInputTokens: result.inputTokens, totalOutputTokens: result.outputTokens, totalCost: cost, model: settings.strongModel, completed: true });
 
     const parseResult = parseStructuredOutput<ParsedFeature[]>(result.content, PM_FEATURE_SCHEMA);
-    if (!parseResult.ok) {
-      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析输出解析失败: ${parseResult.error}` });
-      return null;
-    }
-
+    if (!parseResult.ok) { sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析输出解析失败: ${parseResult.error}` }); return null; }
     const newFeatures = parseResult.data;
-    if (newFeatures.length === 0) {
-      sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ 增量分析未产生新 Feature' });
-      return null;
-    }
+    if (newFeatures.length === 0) { sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ 增量分析未产生新 Feature' }); return null; }
 
-    const insertFeature = db.prepare(
-      `INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`
-    );
+    const insertFeature = db.prepare(`INSERT OR IGNORE INTO features (id, project_id, category, priority, group_name, sub_group, title, description, depends_on, status, acceptance_criteria, notes, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?)`);
     db.transaction((items: ParsedFeature[]) => {
       for (let i = 0; i < items.length; i++) {
         const f = items[i];
         const groupId = f.group_name || f.category || 'default';
-        insertFeature.run(
-          f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId,
-          f.category || 'core', f.priority ?? 1,
-          f.group_name || f.category || '', f.sub_group || '',
-          f.title || f.description || '', f.description || '',
-          JSON.stringify(f.dependsOn || f.depends_on || []),
-          JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []),
-          f.notes || '',
-          groupId,
-        );
+        insertFeature.run(f.id || `F${String(maxIdNum + i + 1).padStart(3, '0')}`, projectId, f.category || 'core', f.priority ?? 1, f.group_name || f.category || '', f.sub_group || '', f.title || f.description || '', f.description || '', JSON.stringify(f.dependsOn || f.depends_on || []), JSON.stringify(f.acceptanceCriteria || f.acceptance_criteria || []), f.notes || '', groupId);
       }
     })(newFeatures);
 
     sendToUI(win, 'project:features-ready', { projectId, count: newFeatures.length });
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `✅ 新增 ${newFeatures.length} 个 Feature ($${cost.toFixed(4)})` });
     emitEvent({ projectId, agentId: pmId, type: 'phase:incremental-pm:end', data: { newCount: newFeatures.length } });
-
     return newFeatures;
   } catch (err: unknown) {
     if (signal.aborted) return null;
@@ -254,82 +205,44 @@ export async function phaseIncrementalPM(
 // PM 批量验收审查
 // ═══════════════════════════════════════
 
-const BATCH_ACCEPT_SIZE = 4;
-
 export async function phasePMAcceptance(
   projectId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
 ): Promise<void> {
   const db = getDb();
-
-  const qaPassed = db.prepare("SELECT * FROM features WHERE project_id = ? AND status = 'qa_passed'")
-    .all(projectId) as FeatureRow[];
-
-  if (qaPassed.length === 0) {
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 4: 没有 Feature 需要 PM 验收' });
-    return;
-  }
+  const qaPassed = db.prepare("SELECT * FROM features WHERE project_id = ? AND status = 'qa_passed'").all(projectId) as FeatureRow[];
+  if (qaPassed.length === 0) { sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 4: 没有 Feature 需要 PM 验收' }); return; }
 
   const pmAccId = `pm-acc-${Date.now().toString(36)}`;
   spawnAgent(projectId, pmAccId, 'pm', win);
   sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `📋 Phase 4: PM 批量验收审查 (${qaPassed.length} features, 每批 ${BATCH_ACCEPT_SIZE} 个)...` });
 
   const designContext = buildDesignContext(workspacePath, 6000);
-
   const accBatches: FeatureRow[][] = [];
-  for (let i = 0; i < qaPassed.length; i += BATCH_ACCEPT_SIZE) {
-    accBatches.push(qaPassed.slice(i, i + BATCH_ACCEPT_SIZE));
-  }
+  for (let i = 0; i < qaPassed.length; i += BATCH_ACCEPT_SIZE) { accBatches.push(qaPassed.slice(i, i + BATCH_ACCEPT_SIZE)); }
 
   for (let bi = 0; bi < accBatches.length; bi++) {
     if (signal.aborted) return;
     const batch = accBatches[bi];
-
     try {
       const batchInfo = batch.map(feature => {
         const featureDocCtx = buildFeatureDocContext(workspacePath, feature.id);
         const affectedFiles = safeJsonParse(feature.affected_files, []);
         let filePreview = '';
-        for (const fp of affectedFiles.slice(0, 3)) {
-          const fullPath = path.join(workspacePath, fp);
-          if (fs.existsSync(fullPath)) {
-            const content = fs.readFileSync(fullPath, 'utf-8');
-            filePreview += `#### ${fp}\n\`\`\`\n${content.slice(0, 1000)}\n\`\`\`\n`;
-          }
-        }
-        return [
-          `### Feature ${feature.id}`,
-          `标题: ${feature.title}`,
-          `描述: ${feature.description}`,
-          `验收标准: ${feature.acceptance_criteria}`,
-          featureDocCtx ? `文档摘要: ${featureDocCtx.slice(0, 500)}` : '',
-          filePreview ? `代码预览:\n${filePreview}` : '',
-        ].filter(Boolean).join('\n');
+        for (const fp of affectedFiles.slice(0, 3)) { const fullPath = path.join(workspacePath, fp); if (fs.existsSync(fullPath)) { filePreview += `#### ${fp}\n\`\`\`\n${fs.readFileSync(fullPath, 'utf-8').slice(0, 1000)}\n\`\`\`\n`; } }
+        return [`### Feature ${feature.id}`, `标题: ${feature.title}`, `描述: ${feature.description}`, `验收标准: ${feature.acceptance_criteria}`, featureDocCtx ? `文档摘要: ${featureDocCtx.slice(0, 500)}` : '', filePreview ? `代码预览:\n${filePreview}` : ''].filter(Boolean).join('\n');
       }).join('\n\n---\n\n');
 
       const acceptResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [
         { role: 'system', content: PM_ACCEPTANCE_PROMPT },
-        {
-          role: 'user',
-          content: `## 设计文档上下文\n${designContext}\n\n## ${batch.length} 个 Feature 待验收\n\n${batchInfo}\n\n请逐个输出每个 Feature 的验收审查结果。输出 JSON 数组, 每项包含: feature_id, verdict, score, summary, feedback。`,
-        },
+        { role: 'user', content: `## 设计文档上下文\n${designContext}\n\n## ${batch.length} 个 Feature 待验收\n\n${batchInfo}\n\n请逐个输出每个 Feature 的验收审查结果。输出 JSON 数组, 每项包含: feature_id, verdict, score, summary, feedback。` },
       ], signal, 8192);
 
       const accCost = calcCost(resolveMemberModel(projectId, 'pm', settings), acceptResult.inputTokens, acceptResult.outputTokens);
       updateAgentStats(pmAccId, projectId, acceptResult.inputTokens, acceptResult.outputTokens, accCost);
 
       let verdicts: Array<{ feature_id: string; verdict: string; score: number; summary?: string; feedback?: string }> = [];
-      try {
-        const parsed = parseStructuredOutput<Record<string, unknown>>(acceptResult.content, PM_ACCEPTANCE_SCHEMA);
-        if (parsed.ok) {
-          verdicts = (Array.isArray(parsed.data) ? parsed.data : [parsed.data]) as typeof verdicts;
-        }
-      } catch {
-        try {
-          const raw = JSON.parse(acceptResult.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
-          verdicts = Array.isArray(raw) ? raw : [raw];
-        } catch { /* parse failed */ }
-      }
+      try { const parsed = parseStructuredOutput<Record<string, unknown>>(acceptResult.content, PM_ACCEPTANCE_SCHEMA); if (parsed.ok) { verdicts = (Array.isArray(parsed.data) ? parsed.data : [parsed.data]) as typeof verdicts; } } catch { try { const raw = JSON.parse(acceptResult.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()); verdicts = Array.isArray(raw) ? raw : [raw]; } catch { /* parse failed */ } }
 
       const pmAccSession = getOrCreateSession(projectId, pmAccId, 'pm');
       for (const feature of batch) {
@@ -338,37 +251,22 @@ export async function phasePMAcceptance(
         const score = v?.score || 70;
         const feedback = v?.feedback || '';
         const summary = v?.summary || '';
-
-        const accLinkId = linkFeatureSession({
-          featureId: feature.id, sessionId: pmAccSession.id, projectId,
-          agentId: pmAccId, agentRole: 'pm', workType: 'pm-acceptance',
-          expectedOutput: `验收 ${feature.id}: ${(feature.title || '').slice(0, 60)}`,
-        });
-
+        const accLinkId = linkFeatureSession({ featureId: feature.id, sessionId: pmAccSession.id, projectId, agentId: pmAccId, agentRole: 'pm', workType: 'pm-acceptance', expectedOutput: `验收 ${feature.id}: ${(feature.title || '').slice(0, 60)}` });
         const finalStatus = verdict === 'accept' || verdict === 'conditional_accept' ? 'passed' : 'pm_rejected';
-        db.prepare("UPDATE features SET status = ?, pm_verdict = ?, pm_verdict_score = ?, pm_verdict_feedback = ?, completed_at = CASE WHEN ? IN ('passed') THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
-          .run(finalStatus, verdict, score, feedback, finalStatus, feature.id, projectId);
-
+        db.prepare("UPDATE features SET status = ?, pm_verdict = ?, pm_verdict_score = ?, pm_verdict_feedback = ?, completed_at = CASE WHEN ? IN ('passed') THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?").run(finalStatus, verdict, score, feedback, finalStatus, feature.id, projectId);
         completeFeatureSessionLink(accLinkId, `PM 验收: ${verdict} (${score}/100) ${summary.slice(0, 80)}`, finalStatus === 'passed');
-
         const icon = verdict === 'accept' ? '✅' : verdict === 'conditional_accept' ? '⚠️' : '❌';
         sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `${icon} ${feature.id} PM 验收: ${verdict} (${score}/100) — ${summary}` });
         sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: finalStatus, agentId: pmAccId });
       }
-
       sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `  📋 批次 ${bi + 1}/${accBatches.length} 验收完成 ($${accCost.toFixed(4)})` });
     } catch (err: unknown) {
       if (signal.aborted) return;
       const errMsg = err instanceof Error ? err.message : String(err);
       sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `⚠️ 批次 ${bi + 1} PM 验收出错 (全部视为通过): ${errMsg}` });
-      for (const feature of batch) {
-        db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?")
-          .run(`PM 验收异常: ${errMsg}`, feature.id, projectId);
-        sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId });
-      }
+      for (const feature of batch) { db.prepare("UPDATE features SET status = 'passed', pm_verdict = 'conditional_accept', pm_verdict_feedback = ?, completed_at = datetime('now') WHERE id = ? AND project_id = ?").run(`PM 验收异常: ${errMsg}`, feature.id, projectId); sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'passed', agentId: pmAccId }); }
     }
   }
-
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(pmAccId);
   emitEvent({ projectId, agentId: pmAccId, type: 'phase:pm-acceptance:end', data: { reviewed: qaPassed.length } });
   createCheckpoint(projectId, `PM 验收完成 (${qaPassed.length} features)`);

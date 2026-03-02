@@ -14,7 +14,7 @@ import { runTest as sbRunTest, runLint as sbRunLint, type SandboxConfig } from '
 import { parseStructuredOutput, QA_VERDICT_SCHEMA } from './output-parser';
 import { programmaticQACheck } from './guards';
 import { getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
-import type { AppSettings } from './types';
+import type { AppSettings, FeatureRow, QAIssueItem } from './types';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
@@ -71,7 +71,7 @@ function detectTestInfra(workspacePath: string): { hasTests: boolean; hasLint: b
 
 export async function runQAReview(
   settings: AppSettings, signal: AbortSignal,
-  feature: any, filesWritten: string[], workspacePath: string,
+  feature: FeatureRow, filesWritten: string[], workspacePath: string,
   projectId?: string
 ): Promise<QAResult> {
   // ═══ v3.0: 程序化 QA 检查 (不依赖 LLM) ═══
@@ -245,9 +245,10 @@ export async function runQAReview(
 
   let feedbackText = `QA 分数: ${score}/100\n${summary}`;
   if (issues.length > 0) {
-    feedbackText += '\n\n问题列表:\n' + issues.map((iss: any, i: number) =>
-      `${i + 1}. [${iss.severity}] ${iss.file || ''}: ${iss.description}\n   建议: ${iss.suggestion || 'N/A'}`
-    ).join('\n');
+    feedbackText += '\n\n问题列表:\n' + issues.map((iss: unknown, i: number) => {
+      const item = iss as { severity?: string; file?: string; description?: string; suggestion?: string };
+      return `${i + 1}. [${item.severity || 'info'}] ${item.file || ''}: ${item.description || ''}\n   建议: ${item.suggestion || 'N/A'}`;
+    }).join('\n');
   }
 
   return {
@@ -270,7 +271,7 @@ export async function runQAReview(
 export async function generateTestSkeleton(
   settings: AppSettings,
   signal: AbortSignal,
-  feature: any,
+  feature: FeatureRow,
   workspacePath: string,
   projectId?: string,
 ): Promise<{ files: Array<{ path: string; content: string }>; tokensUsed: number }> {

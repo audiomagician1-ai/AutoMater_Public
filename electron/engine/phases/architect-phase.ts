@@ -1,22 +1,20 @@
 /**
- * Architect Phase — 技术架构 + 产品设计
+ * Architect Phase — 技术架构 + 产品设计 (v5.0: 合并原 Phase 2+3)
+ * Extracted from orchestrator.ts for maintainability.
  * @module phases/architect-phase
  */
 
 import {
-  BrowserWindow, getDb, createLogger,
+  BrowserWindow, getDb, createLogger, fs, path,
   callLLM, calcCost, sendToUI, addLog, createStreamCallback,
   spawnAgent, updateAgentStats, getTeamPrompt,
   parseFileBlocks, writeFileBlocks,
-  writeDoc,
-  backupConversation,
+  writeDoc, backupConversation,
   emitEvent, createCheckpoint,
   resolveMemberModel,
   ARCHITECT_SYSTEM_PROMPT,
   type AppSettings, type ProjectRow, type ParsedFeature,
 } from './shared';
-import fs from 'fs';
-import path from 'path';
 
 const log = createLogger('phase:architect');
 
@@ -64,16 +62,7 @@ export async function phaseArchitect(
     }
 
     updateAgentStats(archId, projectId, archResult.inputTokens, archResult.outputTokens, archCost);
-    backupConversation({
-      projectId, agentId: archId, agentRole: 'architect',
-      messages: [
-        { role: 'system', content: archPrompt },
-        { role: 'user', content: `架构+产品设计 (${features.length} features)` },
-        { role: 'assistant', content: archResult.content.slice(0, 50000) },
-      ],
-      totalInputTokens: archResult.inputTokens, totalOutputTokens: archResult.outputTokens,
-      totalCost: archCost, model: settings.strongModel, completed: true,
-    });
+    backupConversation({ projectId, agentId: archId, agentRole: 'architect', messages: [{ role: 'system', content: archPrompt }, { role: 'user', content: `架构+产品设计 (${features.length} features)` }, { role: 'assistant', content: archResult.content.slice(0, 50000) }], totalInputTokens: archResult.inputTokens, totalOutputTokens: archResult.outputTokens, totalCost: archCost, model: settings.strongModel, completed: true });
 
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(archId);
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });

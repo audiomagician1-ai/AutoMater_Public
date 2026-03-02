@@ -295,3 +295,203 @@ export async function browserNetwork(
     return { success: false, requests: '', error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ═══════════════════════════════════════
+// v7.0: 新增浏览器 API — 补齐与 EchoAgent 的差距
+// ═══════════════════════════════════════
+
+// ── browser_hover ──
+
+export async function browserHover(
+  selector: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+    await page.hover(selector, { timeout: 5000 });
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_select_option ──
+
+export async function browserSelectOption(
+  selector: string,
+  values: string[],
+): Promise<{ success: boolean; selected?: string[]; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+    const selected = await page.selectOption(selector, values, { timeout: 5000 });
+    return { success: true, selected };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_press_key ──
+
+export async function browserPressKey(
+  key: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+    await page.keyboard.press(key);
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_fill_form ──
+
+export async function browserFillForm(
+  fields: Array<{ selector: string; value: string; type?: 'text' | 'checkbox' | 'select' }>,
+): Promise<{ success: boolean; filled: number; errors: string[]; }> {
+  const page = await getPage();
+  touch();
+  let filled = 0;
+  const errors: string[] = [];
+
+  for (const field of fields) {
+    try {
+      const fieldType = field.type || 'text';
+      if (fieldType === 'checkbox') {
+        const checked = await page.isChecked(field.selector);
+        const shouldCheck = field.value === 'true';
+        if (checked !== shouldCheck) {
+          await page.click(field.selector, { timeout: 3000 });
+        }
+      } else if (fieldType === 'select') {
+        await page.selectOption(field.selector, field.value, { timeout: 3000 });
+      } else {
+        await page.fill(field.selector, field.value, { timeout: 3000 });
+      }
+      filled++;
+    } catch (err: unknown) {
+      errors.push(`${field.selector}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { success: errors.length === 0, filled, errors };
+}
+
+// ── browser_drag ──
+
+export async function browserDrag(
+  sourceSelector: string,
+  targetSelector: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+    await page.dragAndDrop(sourceSelector, targetSelector, { timeout: 5000 });
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_tabs ──
+
+export async function browserTabs(
+  action: 'list' | 'new' | 'close' | 'select',
+  opts?: { index?: number; url?: string },
+): Promise<{ success: boolean; tabs?: Array<{ index: number; url: string; title: string }>; error?: string }> {
+  try {
+    if (!_context) {
+      return { success: false, error: '浏览器未启动' };
+    }
+    touch();
+    const pages = _context.pages();
+
+    if (action === 'list') {
+      const tabs = await Promise.all(pages.map(async (p, i) => ({
+        index: i,
+        url: p.url(),
+        title: await p.title().catch(() => ''),
+      })));
+      return { success: true, tabs };
+    }
+
+    if (action === 'new') {
+      const newPage = await _context.newPage();
+      if (opts?.url) await newPage.goto(opts.url, { timeout: 15000 });
+      _page = newPage;
+      return { success: true };
+    }
+
+    if (action === 'close') {
+      const idx = opts?.index ?? pages.indexOf(_page!);
+      if (idx >= 0 && idx < pages.length) {
+        await pages[idx].close();
+        _page = _context.pages()[0] || null;
+      }
+      return { success: true };
+    }
+
+    if (action === 'select') {
+      const idx = opts?.index ?? 0;
+      if (idx >= 0 && idx < pages.length) {
+        _page = pages[idx];
+        await _page.bringToFront();
+      }
+      return { success: true };
+    }
+
+    return { success: false, error: `未知操作: ${action}` };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_file_upload ──
+
+export async function browserFileUpload(
+  selector: string,
+  filePaths: string[],
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+    await page.setInputFiles(selector, filePaths, { timeout: 5000 });
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── browser_console ──
+
+export async function browserConsole(
+  level: 'error' | 'warning' | 'info' | 'all',
+): Promise<{ success: boolean; messages?: string[]; error?: string }> {
+  try {
+    const page = await getPage();
+    touch();
+
+    const messages: string[] = [];
+    const handler = (msg: any) => {
+      const msgType = msg.type();
+      if (level === 'all'
+        || (level === 'error' && msgType === 'error')
+        || (level === 'warning' && (msgType === 'warning' || msgType === 'error'))
+        || (level === 'info' && msgType !== 'debug')
+      ) {
+        messages.push(`[${msgType}] ${msg.text()}`);
+      }
+    };
+
+    page.on('console', handler);
+    await page.waitForTimeout(2000);
+    page.off('console', handler);
+
+    return { success: true, messages: messages.slice(0, 50) };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+

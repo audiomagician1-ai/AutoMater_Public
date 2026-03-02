@@ -116,8 +116,8 @@ contextBridge.exposeInMainWorld('automater', {
   },
 
   // ── 事件订阅 (主进程 → 渲染进程) ──
-  on: (channel: string, callback: (...args: any[]) => void) => {
-    const subscription = (_event: any, ...args: any[]) => callback(...args);
+  on: (channel: string, callback: (...args: unknown[]) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
     ipcRenderer.on(channel, subscription);
     return () => ipcRenderer.removeListener(channel, subscription);
   },

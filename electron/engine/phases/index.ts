@@ -5,6 +5,7 @@
 
 export { phasePMAnalysis, phaseIncrementalPM, phasePMAcceptance } from './pm-phase';
 export { phaseArchitect } from './architect-phase';
-export { phaseReqsAndTestSpecs } from './docs-phase';
-// worker-phase, devops-phase, finalize-phase remain in orchestrator.ts for now
-// They will be extracted in subsequent iterations.
+export { phaseReqsAndTestSpecs, phaseIncrementalDocSync } from './docs-phase';
+export { workerLoop } from './worker-phase';
+export { phaseDevOpsBuild } from './devops-phase';
+export { phaseFinalize } from './finalize-phase';

@@ -166,7 +166,7 @@ export function registerWorkflowHandlers(): void {
   }) => {
     const db = getDb();
     const sets: string[] = [];
-    const params: any[] = [];
+    const params: Array<string | number | null> = [];
 
     if (updates.name !== undefined) { sets.push('name = ?'); params.push(updates.name); }
     if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }

@@ -16,6 +16,8 @@
  * v1.3.0: 初始实现
  */
 
+import type { FeatureRow } from './types';
+
 // ═══════════════════════════════════════
 // Types
 // ═══════════════════════════════════════
@@ -150,7 +152,7 @@ export function resolveModel(
 /**
  * 从 feature 数据估算复杂度评分
  */
-export function estimateFeatureComplexity(feature: any): number {
+export function estimateFeatureComplexity(feature: FeatureRow): number {
   let score = 3; // 基础
 
   const desc = (feature.description || '') + ' ' + (feature.title || '');

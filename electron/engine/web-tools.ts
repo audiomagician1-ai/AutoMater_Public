@@ -1,20 +1,32 @@
 ﻿/**
- * Web Tools — 网络搜索 + URL 抓取 (v2.1)
- * 
- * 使用 Jina AI 免费 API（开源、零依赖、返回 Markdown）：
- * - web_search: Jina Search  → https://s.jina.ai/{query}
- * - fetch_url:  Jina Reader  → https://r.jina.ai/{url}
+ * Web Tools — 网络搜索 + URL 抓取 (v8.0)
+ *
+ * v8.0 重构: 底层委托给 search-provider.ts (多引擎 fallback chain)
+ * 对外 API 保持不变: webSearch / fetchUrl / httpRequest
+ *
+ * 配置搜索引擎:
+ *   import { configureSearch } from './search-provider';
+ *   configureSearch({ braveApiKey: '...', searxngUrl: 'http://...' });
  */
 
-const JINA_TIMEOUT = 20_000;
-
-const JINA_HEADERS = {
-  'Accept': 'text/plain',
-  'User-Agent': 'automater/2.1',
-};
+import {
+  search as providerSearch,
+  searchBoost,
+  readUrl,
+  configureSearch,
+  getAvailableProviders,
+  type SearchResult as ProviderSearchResult,
+  type SearchProviderConfig,
+} from './search-provider';
 
 // ═══════════════════════════════════════
-// web_search — Jina Search API
+// Re-exports (方便外部直接配置)
+// ═══════════════════════════════════════
+
+export { configureSearch, getAvailableProviders, type SearchProviderConfig };
+
+// ═══════════════════════════════════════
+// web_search — 委托给 search-provider
 // ═══════════════════════════════════════
 
 export interface SearchResult {
@@ -24,113 +36,67 @@ export interface SearchResult {
 }
 
 /**
- * 使用 Jina Search API 搜索互联网
+ * 搜索互联网 — 自动使用最优搜索引擎 (fallback chain)
  * 返回 Markdown 格式的搜索结果
  */
 export async function webSearch(
   query: string,
   maxResults: number = 8,
 ): Promise<{ success: boolean; content: string; results: SearchResult[]; error?: string }> {
-  try {
-    const url = `https://s.jina.ai/${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        ...JINA_HEADERS,
-        'X-Retain-Images': 'none',
-      },
-      signal: AbortSignal.timeout(JINA_TIMEOUT),
-    });
+  const resp = await providerSearch(query, maxResults);
 
-    if (!res.ok) {
-      return { success: false, content: '', results: [], error: `Jina Search HTTP ${res.status}` };
-    }
+  const results: SearchResult[] = resp.results.map(r => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.snippet,
+  }));
 
-    const text = await res.text();
-
-    // 解析 Jina 返回的 Markdown 格式结果
-    const results = parseJinaSearchResults(text, maxResults);
-
-    // 截断过长内容
-    const trimmed = text.length > 8000 ? text.slice(0, 8000) + '\n\n... [截断]' : text;
-
-    return { success: true, content: trimmed, results };
-  } catch (err: unknown) {
-    return { success: false, content: '', results: [], error: (err instanceof Error ? err.message : String(err)) };
-  }
+  return {
+    success: resp.success,
+    content: resp.content.slice(0, 12000),
+    results,
+    error: resp.error,
+  };
 }
 
-function parseJinaSearchResults(text: string, max: number): SearchResult[] {
-  const results: SearchResult[] = [];
-  // Jina 返回格式通常是:
-  // Title: ...
-  // URL Source: ...
-  // Markdown Content
-  // ---
-  const blocks = text.split(/\n---\n|\n\n(?=Title:)/);
+/**
+ * 增强搜索 — 并行多引擎 + 结果去重合并
+ * 用于重要查询
+ */
+export async function webSearchBoost(
+  query: string,
+  maxResults: number = 15,
+): Promise<{ success: boolean; content: string; results: SearchResult[]; provider: string; error?: string }> {
+  const resp = await searchBoost(query, maxResults);
 
-  for (const block of blocks) {
-    if (results.length >= max) break;
-    const titleMatch = block.match(/Title:\s*(.+)/);
-    const urlMatch = block.match(/URL Source:\s*(.+)/);
-    const contentLines = block.split('\n').filter(
-      l => !l.startsWith('Title:') && !l.startsWith('URL Source:') && l.trim()
-    );
-    if (titleMatch && urlMatch) {
-      results.push({
-        title: titleMatch[1].trim(),
-        url: urlMatch[1].trim(),
-        snippet: contentLines.slice(0, 3).join(' ').slice(0, 200),
-      });
-    }
-  }
-  return results;
+  const results: SearchResult[] = resp.results.map(r => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.snippet,
+  }));
+
+  return {
+    success: resp.success,
+    content: resp.content.slice(0, 15000),
+    results,
+    provider: resp.provider,
+    error: resp.error,
+  };
 }
 
 // ═══════════════════════════════════════
-// fetch_url — Jina Reader API
+// fetch_url — 委托给 search-provider readUrl
 // ═══════════════════════════════════════
 
 /**
- * 使用 Jina Reader API 抓取 URL 内容
+ * 抓取 URL 内容 — Jina Reader + 原生 fetch fallback
  * 自动将 HTML 转为 LLM 友好的 Markdown
  */
 export async function fetchUrl(
   url: string,
   maxLength: number = 15000,
 ): Promise<{ success: boolean; content: string; title: string; length: number; error?: string }> {
-  try {
-    // Jina Reader: 前缀 r.jina.ai/ 即可
-    const jinaUrl = `https://r.jina.ai/${url}`;
-    const res = await fetch(jinaUrl, {
-      method: 'GET',
-      headers: {
-        ...JINA_HEADERS,
-        'X-Retain-Images': 'none',
-        'X-Timeout': '15',
-      },
-      signal: AbortSignal.timeout(JINA_TIMEOUT),
-    });
-
-    if (!res.ok) {
-      return { success: false, content: '', title: '', length: 0, error: `Jina Reader HTTP ${res.status}` };
-    }
-
-    const text = await res.text();
-
-    // 提取标题 (Jina 返回的第一行通常是 Title: ...)
-    const titleMatch = text.match(/^Title:\s*(.+)/m);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-
-    // 截断
-    const content = text.length > maxLength
-      ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]`
-      : text;
-
-    return { success: true, content, title, length: text.length };
-  } catch (err: unknown) {
-    return { success: false, content: '', title: '', length: 0, error: (err instanceof Error ? err.message : String(err)) };
-  }
+  return readUrl(url, maxLength);
 }
 
 // ═══════════════════════════════════════

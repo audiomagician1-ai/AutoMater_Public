@@ -9,11 +9,11 @@ import { getKnowledgeStats, queryKnowledge } from '../engine/cross-project';
 
 export function setupEventHandlers() {
   // ── Events ──
-  ipcMain.handle('events:query', async (_e, projectId: string, options?: any) => {
+  ipcMain.handle('events:query', async (_e, projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }) => {
     return queryEvents({
       projectId,
       featureId: options?.featureId,
-      types: options?.types,
+      types: options?.types as import('../engine/event-store').EventType[] | undefined,
       limit: options?.limit ?? 100,
     });
   });
