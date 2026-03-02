@@ -1,331 +1,244 @@
-# AgentForge 能力完善方案 — 目标：超越 EchoAgent
+# AgentForge 能力完善方案 v3 — 客观差距分析 + 行动计划
 
-> 日期: 2026-03-02
-> 版本: v2.0 (含 v7.0 + v8.0 全部已实现代码)
-> 作者: Tim的开发助手
-
----
-
-## 1. 背景：EchoAgent (对标对象) 的核心能力拆解
-
-EchoAgent 平台为每个 Agent 提供以下能力层：
-
-| 能力层 | 具体工具 | 说明 |
-|--------|----------|------|
-| **多子代理** | `ask_agent` 调用 10 个专用子 Agent (设计助手/WebResearch/GUI Agent/Code Search/CR高手 等) | 按需委派，并行工作 |
-| **Docker Sandbox** | `DockerSandbox_*` (init/exec/write/read/upload/download/expose_port) | 完全隔离的代码执行，多镜像 |
-| **浏览器自动化** | `Playwright_*` (18 个 MCP 工具: snapshot/click/type/fill_form/drag/tabs/evaluate/upload 等) | 基于 Playwright MCP Server |
-| **互联网搜索** | `WebSearch_websearch` (SerpApi, 并行多查询) + `WebSearch_read_url` (智能清洗) | 商业级搜索质量 |
-| **代码搜索** | `code-search_*` (ripgrep/glob/read_many_files/list_directory) | 高性能 + 多文件并行读取 |
-| **文件操作** | `read`/`edit`/`multiedit`/`ls`/`grep` + Windows PowerShell | 原生文件系统完整访问 |
-| **GUI 操作** | `GUI_computer_*` (screenshot/click/type/scroll/key/drag/wait) | 操控桌面应用 |
-| **任务管理** | `todo-plus_*` (create/list/update/complete/clear) | 结构化任务追踪 |
-| **记忆系统** | boot.md → skill_index → lessons_learned → scratchpad | 跨会话持久化 (外部插件) |
-
-## 2. AgentForge 改造前后能力对比
-
-### 2.1 v6.0 (改造前) 能力盘点
-
-| 能力 | 状态 | 工具数 | 质量 |
-|------|------|--------|------|
-| 子代理 | ⚠️ 仅 `spawn_researcher` (只读, 8轮) | 1 | 弱 |
-| 沙箱执行 | ⚠️ 仅宿主 `execSync` (无隔离) | 2 | 弱 |
-| 浏览器 | ✅ Playwright 基础 10 API | 10 | 中等 |
-| 互联网搜索 | ⚠️ 仅 Jina (免费, 无结构化结果, 8K截断) | 2 | 弱 |
-| 深度研究 | ❌ 无 | 0 | 无 |
-| 黑盒测试 | ⚠️ 仅 LLM 审查 (无运行时执行闭环) | 0 | 弱 |
-| 代码搜索 | ✅ 本地 Select-String/grep + 智能排序 | 3 | 中等 |
-| 文件操作 | ✅ read/write/edit/batch_edit/glob | 7 | 好 |
-| GUI 操作 | ✅ screenshot/click/move/type/hotkey | 5 | 中等 |
-| 任务管理 | ✅ todo_write/todo_read | 2 | 好 |
-| 技能进化 | ✅ acquire/search/improve/record | 4 | 好 |
-| 记忆系统 | ✅ memory_read/memory_append (3层) | 2 | 好 |
-
-**总工具数: ~38 | 主要差距: 搜索质量弱、无深度研究、无隔离沙箱、子代理单一、无自主测试闭环**
-
-### 2.2 v8.0 (改造后) 能力盘点
-
-| 能力 | 状态 | 工具数 | 质量 | 对标 EchoAgent |
-|------|------|--------|------|----------------|
-| 子代理 | ✅ 6预设角色 + 并行执行 + 取消 | 4 | **超越** — 角色分化比 ask_agent 更精细 |
-| Docker 沙箱 | ✅ 完整生命周期 + 5预设镜像 + 文件I/O | 5 | **持平** — API 设计对齐 |
-| 浏览器 | ✅ 18 API (完整 Playwright 覆盖) | 18 | **持平** — 功能对齐 |
-| 互联网搜索 | ✅ 5引擎 fallback + Boost并行 + 配置化 | 4 | **超越** — 多引擎冗余 + 自动降级 |
-| 深度研究 | ✅ 多轮搜索 + 源提取 + LLM综合 + Fact-check | 1 | **超越** — EchoAgent 无内置深度研究 |
-| 黑盒测试 | ✅ 完整闭环: 生成→执行→修复→重跑×N | 1 | **超越** — EchoAgent 无自主测试迭代 |
-| 代码搜索 | ✅ (同 v6) | 3 | 持平 |
-| 文件操作 | ✅ (同 v6) | 7 | 持平 |
-| GUI 操作 | ✅ (同 v6) | 5 | 持平 |
-| 任务管理 | ✅ (同 v6) | 2 | 持平 |
-| 技能进化 | ✅ (同 v5.1) | 4 | **超越** — EchoAgent 原生无此能力 |
-| 记忆系统 | ✅ (同 v3.0) | 2 | 持平 |
-
-**总工具数: ~56 | 主要超越点: 搜索+研究+自主测试+技能进化+子代理分化**
-
-## 3. 已实现模块详细说明
-
-### 3.1 Search Provider System (`search-provider.ts`) — v8.0 NEW
-
-**可插拔多搜索引擎 + 自动 Fallback + Boost 模式**
-
-```
-搜索引擎层:
-  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-  │  Brave   │ │ SearXNG  │ │  Tavily  │ │  Serper  │ │   Jina   │
-  │ (免费2K) │ │ (自建)   │ │ (AI优化) │ │ (Google) │ │ (兜底)   │
-  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘
-       │            │            │            │            │
-       └──────────┬─┘──────────┬─┘──────────┬─┘────────────┘
-                  │            │            │
-            ┌─────▼────────────▼────────────▼─────┐
-            │    Search Manager (Fallback Chain)   │
-            │    配置引擎 → 按序尝试 → 首成功返回  │
-            └─────┬───────────────────────┬────────┘
-                  │                       │
-          search()                searchBoost()
-         (fallback)             (并行全引擎, 去重合并)
-```
-
-**关键设计决策:**
-- **零配置即可用**: Jina 作为永久兜底, 无需任何 API Key
-- **渐进增强**: 配置 Brave Key → 搜索质量飞跃; 加 SearXNG → 离线可用
-- **Boost 模式**: 重要查询并行请求所有引擎, 多引擎交叉出现的结果排名更高
-- **统一 SearchResult 格式**: 所有引擎输出标准化, LLM 无感知切换
-
-**工具:**
-| 工具名 | 说明 | 角色 |
-|--------|------|------|
-| `web_search` | 标准搜索 (fallback chain) | 所有 |
-| `web_search_boost` | 增强搜索 (并行多引擎) | pm/architect/developer/qa/researcher |
-| `configure_search` | 配置搜索引擎 API Keys | developer |
-| `fetch_url` | 抓取 URL (Jina + native fallback) | 所有 |
-
-### 3.2 Research Engine (`research-engine.ts`) — v8.0 NEW
-
-**深度研究分析引擎 — 单次调用完成完整研究流程**
-
-```
-                    ┌─── Question ───┐
-                    │                │
-                    ▼                │
-           ┌─────────────────┐      │
-     ┌──── │  LLM 拆解子查询 │      │
-     │     └────────┬────────┘      │
-     │              │               │
-     │    ┌─────────▼──────────┐    │
-Round│    │ 并行搜索 (N queries)│    │
-  1  │    └────────┬───────────┘    │
-     │             │                │
-     │    ┌────────▼───────────┐    │
-     │    │ 深度提取 Top N 页面 │    │
-     │    └────────┬───────────┘    │
-     │             │                │
-     │    ┌────────▼───────────┐    │
-     └──▶ │  LLM 综合分析报告  │    │
-          │  + 置信度评估       │    │
-          │  + follow-up 建议  │    │
-          └────────┬───────────┘    │
-                   │                │
-            confidence < 85% ?      │
-              ├─ YES ───────────────┘ (下一轮)
-              └─ NO
-                   │
-          ┌────────▼───────────┐
-          │  Fact-Check 验证   │ (deep 模式)
-          └────────┬───────────┘
-                   │
-          ┌────────▼───────────┐
-          │   最终研究报告      │
-          │   + 引用来源列表    │
-          │   + 置信度          │
-          └────────────────────┘
-```
-
-**三档深度:**
-| 深度 | 轮次 | 查询数/轮 | 深度提取 | Fact-Check | 适用场景 |
-|------|------|-----------|----------|------------|----------|
-| `quick` | 1 | 2 | 1页 | ❌ | 快速查API/错误解决方案 |
-| `standard` | 2 | 4 | 3页 | ❌ | 技术选型/最佳实践调研 |
-| `deep` | 3 | 4 | 3页 | ✅ | 竞品分析/架构决策/严谨调研 |
-
-**工具:**
-| 工具名 | 说明 |
-|--------|------|
-| `deep_research` | 一键深度研究: question + context + depth → 完整 Markdown 报告 |
-
-### 3.3 Blackbox Test Runner (`blackbox-test-runner.ts`) — v8.0 NEW
-
-**自主黑盒测试 + 迭代修复闭环**
-
-```
-     Feature Description
-           │
-     ┌─────▼─────────────┐
-     │ LLM 生成测试计划   │ (最多10个用例)
-     │ unit/integration/  │
-     │ e2e/api            │
-     └─────┬─────────────┘
-           │
-     ┌─────▼─────────────┐
-     │ 执行全部测试用例   │
-     │  ├ unit → Docker   │
-     │  ├ api  → fetch    │
-     │  └ e2e  → Browser  │
-     └─────┬─────────────┘
-           │
-      All passed? ──YES──▶ ✅ 报告
-           │
-           NO
-           │
-     ┌─────▼─────────────┐
-     │ LLM 分析最严重失败 │
-     │ (错误+stdout+      │
-     │  screenshot+console)│
-     └─────┬─────────────┘
-           │
-     ┌─────▼─────────────┐
-     │ Coder Agent 修复   │ (Sub-Agent: coder)
-     └─────┬─────────────┘
-           │
-     ┌─────▼─────────────┐
-     │ 重跑全部测试       │
-     │ (含回归检测)       │
-     └─────┬─────────────┘
-           │
-      Round < N? ──YES──▶ 回到执行
-           │
-           NO
-           │
-     ┌─────▼─────────────┐
-     │ 最终测试报告       │
-     │ (Markdown表格+详情)│
-     └─────────────────────┘
-```
-
-**测试类型支持:**
-| 类型 | 执行环境 | 失败信息收集 |
-|------|----------|-------------|
-| `unit` | Docker Sandbox (隔离) / 宿主 execSync (fallback) | stdout + stderr + exit code |
-| `integration` | 同上 | 同上 |
-| `api` | fetch / curl | HTTP status + response body |
-| `e2e` | Playwright (headless) | 截图 + console logs + 网络错误 + DOM 断言 |
-
-**工具:**
-| 工具名 | 说明 |
-|--------|------|
-| `run_blackbox_tests` | 一键启动: feature描述 → 自动测试+修复×N → 最终报告 |
-
-### 3.4 Sub-Agent Framework (`sub-agent-framework.ts`) — v7.0
-
-**6 角色预设 + 并行执行 + 权限隔离**
-
-| 角色 | 可写 | 工具集 | 轮次 | 模型 |
-|------|------|--------|------|------|
-| `researcher` | ❌ | 读文件+搜索+web_search_boost+deep_research | 12 | worker |
-| `coder` | ✅ | 全部读写+命令+测试 | 20 | worker |
-| `reviewer` | ❌ | 读文件+搜索 | 12 | strong |
-| `tester` | ✅ | 读写+命令+浏览器+run_blackbox_tests | 15 | worker |
-| `doc_writer` | ✅ | 读写+搜索+web | 10 | worker |
-| `deployer` | ✅ | 命令+HTTP+git | 12 | worker |
-
-### 3.5 Docker Sandbox (`docker-sandbox.ts`) — v7.0
-
-5 预设镜像 (node/python/rust/go/ubuntu) + 完整生命周期 + 文件双向I/O + 命令安全分类
-
-### 3.6 Browser Enhancements (`browser-tools.ts`) — v7.0
-
-在原有 10 API 基础上新增 8 个: hover / select_option / press_key / fill_form / drag / tabs / file_upload / console
-
-## 4. 对比 EchoAgent — AgentForge 的超越点
-
-| 维度 | EchoAgent | AgentForge v8.0 | 谁更强 |
-|------|-----------|-----------------|--------|
-| 搜索引擎数量 | 1 (SerpApi) | 5 (Brave/SearXNG/Tavily/Serper/Jina) | **AF** |
-| 搜索 Boost | ❌ | ✅ 并行多引擎+去重排名 | **AF** |
-| 深度研究 | 需人工编排子Agent | ✅ 一键 deep_research (多轮+fact-check) | **AF** |
-| 自主测试迭代 | ❌ 无 | ✅ run_blackbox_tests (自动修复闭环) | **AF** |
-| 技能进化 | ❌ (记忆系统是外挂) | ✅ 原生 skill acquire/search/improve | **AF** |
-| 子代理角色分化 | 10个独立子Agent (功能固定) | 6个预设+自定义prompt (灵活) | 各有优势 |
-| 离线/LAN | ❌ 依赖云端 | ✅ SearXNG+Docker, 零外部依赖 | **AF** |
-| 桌面GUI操作 | ✅ (Claude限定) | ✅ | 持平 |
-| 代码搜索 | ✅ ripgrep | ✅ Select-String+智能排序 | 持平 |
-| 多模态图片分析 | ✅ (子代理) | ✅ (视觉工具) | 持平 |
-
-## 5. 仍需持续改进的方向 (Phase 3)
-
-| 优先级 | 方向 | 说明 | 预计工作量 |
-|--------|------|------|-----------|
-| 🔴 高 | **MCP 服务器生态** | 接入更多 MCP: GitHub Copilot/Figma/Notion/Slack | 3-5天 |
-| 🔴 高 | **图片生成** | 接入 DALL-E / Stable Diffusion / Gemini Image | 2天 |
-| 🟡 中 | **RAG 增强** | 本地向量检索 (代码+文档) 替代纯 grep | 3天 |
-| 🟡 中 | **Web Worker 并行** | Electron 主进程卸载耗时任务到 Worker | 2天 |
-| 🟢 低 | **语音交互** | Whisper 语音输入 + TTS 语音反馈 | 2天 |
-| 🟢 低 | **实时协作** | 多用户 WebSocket 共享工作区 | 5天 |
-
-## 6. 使用指南：如何发挥最大能力
-
-### 搜索配置 (推荐)
-
-```
-[Agent 调用]
-configure_search({
-  brave_api_key: "BSA...",      // 免费: https://brave.com/search/api/
-  serper_api_key: "...",         // 免费: https://serper.dev/
-  searxng_url: "http://localhost:8888"  // LAN: docker run -p 8888:8080 searxng/searxng
-})
-```
-
-配置后:
-- `web_search` 自动使用 Brave (质量↑300%)
-- `web_search_boost` 并行 Brave+Serper+Jina, 交叉验证
-- `deep_research` 多轮研究, 置信度评估
-
-### 深度研究示例
-
-```
-deep_research({
-  question: "Electron 应用如何实现热更新, 对比 electron-updater vs custom ASAR",
-  context: "我们的项目是 Electron 33 + Vite 6, 需要 LAN 内分发",
-  depth: "deep"
-})
-→ 输出: 3轮搜索 + 深度提取5篇文章 + LLM综合报告 + Fact-check + 来源列表
-```
-
-### 自主黑盒测试
-
-```
-run_blackbox_tests({
-  feature_description: "用户登录功能: 支持邮箱+密码登录, 记住我复选框, 错误提示",
-  acceptance_criteria: "1. 正确邮箱密码可登录\n2. 错误密码显示提示\n3. 记住我勾选后重启保持登录",
-  code_files: ["src/auth/login.ts", "src/components/LoginForm.tsx"],
-  app_url: "http://localhost:3000/login",
-  test_types: ["unit", "e2e"],
-  max_rounds: 3
-})
-→ 自动生成测试 → 执行 → 修复失败 → 重跑 → 最终报告
-```
+> 日期: 2026-03-02  
+> 版本: v3.0 — 客观重新审视版  
+> 作者: Tim的开发助手 (EchoAgent)
+>
+> **v3.0 修订说明**: 前两版文档存在「自我拉高、回避弱点」的倾向。本版引入
+> **验证状态三态标注** — ✅ 已在运行时验证 / 🔶 仅代码存在(未经运行验证) / ❌ 不存在，
+> 以暴露 AgentForge 和 EchoAgent 的真实差距。
 
 ---
 
-## 附录：完整工具清单 (v8.0, 56个)
+## 0. 核心认知前提
 
-| 类别 | 工具 | 新增 |
+**EchoAgent 的能力本质是平台+基建提供的**：SerpApi、Docker 集群、Playwright MCP Server、
+10 个预训练子代理、OSS 存储——这些是企业级后端基建，运维由平台团队负责。
+Agent 开发者（用户）拿到的是"开箱即用的 50+ 工具"。
+
+**AgentForge 是一个单机桌面应用**：所有能力必须自带。没有云端后端，
+所有工具实现都打包在 Electron 主进程或本地 Docker 中。这意味着：
+- 搜索引擎没有 SerpApi 商业订阅做后盾
+- Docker 需要用户自己装
+- Playwright 需要自己管理浏览器生命周期
+- 子代理是进程内的 Promise，不是独立微服务
+
+**这既是劣势（运维靠用户自己），也是优势（零云端依赖、可完全离线、数据不出本机）。**
+
+---
+
+## 1. EchoAgent 真实能力拆解（含弱点）
+
+| 能力 | 工具 | 真实质量 | 弱点 |
+|------|------|----------|------|
+| **搜索** | `WebSearch_websearch` (SerpApi) | ✅ 商业级，并行多查询 | 依赖 SerpApi 订阅；`read_url` 有时清洗不干净；无本地缓存 |
+| **Docker** | `DockerSandbox_*` (7 API) | ✅ 生产级，秒级启动 | 平台侧管理；Agent 无法自定义镜像构建 |
+| **浏览器** | `Playwright_*` (18 MCP API) | ✅ 完整 | MCP 协议开销；ref-based 选择器有时失效需重试 |
+| **子代理** | `ask_agent` 10个预设 | ✅ 丰富 | 每个子代理是黑盒，无法定制 prompt；子代理间无共享内存；调用延迟高 |
+| **代码搜索** | `code-search_*` (ripgrep) | ✅ 快 | 需要 code-search MCP 服务运行 |
+| **文件** | `read`/`edit`/`multiedit`/`ls`/`grep` | ✅ 完整 | Windows 路径偶有问题 |
+| **GUI** | `GUI_computer_*` | ✅ 仅 Claude 模型 | 模型限定；截图→坐标映射有误差；无 a11y tree |
+| **任务管理** | `todo-plus_*` | ✅ | 纯文本，无优先级排序 |
+| **记忆** | boot.md / scratchpad / skill_index | 🔶 外挂，需 read/edit 工具 | 非平台原生；依赖 Agent 主动执行 boot 流程 |
+| **深度研究** | 无专用工具，需 Agent 手动编排 search→read→think | 🔶 涌现能力 | 无结构化流程；质量取决于 Agent 自律 |
+| **自主测试迭代** | ❌ 无 | ❌ | 无 |
+| **技能进化** | ❌ 无原生实现 | ❌ | 记忆系统是近似替代品 |
+| **图片生成** | `ask_agent` → 设计绘画助手 / NanoBanana | ✅ | 子代理调用，非直接工具 |
+| **离线运行** | ❌ 完全依赖云端 | ❌ | — |
+
+**EchoAgent 真实优势**: 搜索质量(SerpApi)、子代理生态(10个)、Docker零运维、图片生成、Claude GUI操作  
+**EchoAgent 真实弱点**: 无离线能力、无自主测试闭环、子代理不可定制、记忆非原生、搜索无冗余
+
+---
+
+## 2. AgentForge v8.0 真实能力盘点（含验证状态）
+
+> 验证状态:  
+> ✅ = 已在运行时成功执行过 (有 commit 记录或 vitest 通过)  
+> 🔶 = 代码已写入 + tsc 编译通过，但**从未在运行时执行过**  
+> ❌ = 不存在
+
+| 能力 | 工具数 | 验证状态 | 诚实评价 |
+|------|--------|----------|----------|
+| **文件操作** | 7 | ✅ 核心流水线每天使用 | 成熟 |
+| **命令执行** | 4 | ✅ run_command/run_test 流水线使用 | 成熟，但 execSync 无隔离 |
+| **Git** | 3 | ✅ 提交/diff 在流水线中使用 | 成熟 |
+| **搜索 (Jina)** | 2 | ✅ web_search/fetch_url 有运行记录 | 可用但质量差 |
+| **搜索 (多引擎 fallback)** | 2 | 🔶 代码存在，未配置任何 API key 运行过 | **高风险：Brave/Serper/SearXNG 的 API 响应格式可能变化** |
+| **深度研究** | 1 | 🔶 代码存在，从未执行 | **高风险：多轮搜索→LLM合成的完整链路未验证** |
+| **黑盒测试** | 1 | 🔶 代码存在，从未执行 | **最高风险：依赖 Docker + Browser + Sub-Agent 三者联动** |
+| **Playwright 浏览器** | 18 | 🔶 10个基础API可能被流水线使用过；8个新增从未运行 | 中风险 |
+| **Docker 沙箱** | 5 | 🔶 代码存在，依赖用户安装 Docker | 中风险：Docker CLI 调用方式在不同平台可能不同 |
+| **子代理** | 4 | 🔶 代码存在，从未执行 | 高风险：ReAct 循环 + 工具分发从未端到端验证 |
+| **GUI 操作** | 5 | 🔶 robotjs 依赖可能未安装 | 中风险 |
+| **视觉验证** | 3 | 🔶 依赖 Vision LLM 回调 | 中风险 |
+| **QA 审查** | — | ✅ qa-loop.ts 在流水线中使用 | 成熟，但仅代码审查，非运行时测试 |
+| **记忆系统** | 2 | ✅ memory_read/append 被流水线使用 | 成熟 |
+| **技能进化** | 4 | 🔶 代码存在，可能从未被 Agent 实际使用 | 中风险 |
+| **任务管理** | 2 | ✅ todo_write/read 在流水线使用 | 成熟 |
+| **MCP 客户端** | — | 🔶 mcp-client.ts 存在，连接状况未知 | 高风险 |
+
+### 关键事实
+
+**总工具定义: 56 个 — 但只有约 20 个经过运行时验证。**  
+**约 36 个工具处于 🔶 状态（代码写了，tsc 通过了，从未真正跑过）。**
+
+这是 AgentForge 和 EchoAgent 之间**最大的结构性差距**：
+EchoAgent 的每一个工具都是平台团队维护的、日常被成千上万 Agent 调用的生产级实现。
+AgentForge 的很多工具是"理论上应该能工作"的代码。
+
+---
+
+## 3. 维度逐项对比（诚实版）
+
+| 维度 | EchoAgent | AgentForge v8.0 | 诚实判断 |
+|------|-----------|-----------------|----------|
+| **搜索质量** | SerpApi 商业级 ✅ | Jina 免费 ✅ + 4 引擎 🔶 | **EA > AF** (AgentForge 配了 key 才有竞争力，且未验证) |
+| **搜索冗余/可靠性** | 单点 SerpApi | 5 引擎 fallback 🔶 | **AF 设计更好**，但未验证 |
+| **深度研究** | 手工编排 🔶 | 结构化引擎 🔶 | **AF 设计更好**，但都未验证 |
+| **自主测试迭代** | ❌ 无 | 完整闭环 🔶 | **AF 有设计**，EA 无此能力 |
+| **Docker 沙箱** | ✅ 生产级 | 🔶 CLI 调用 | **EA >> AF** (AF 未验证，且依赖用户装 Docker) |
+| **浏览器自动化** | ✅ MCP 生产级 | 🔶 自管理 Playwright | **EA > AF** (AF 基础API可能可用，新增未验证) |
+| **子代理** | ✅ 10 个生产级 | 🔶 6 预设未验证 | **EA >> AF** (数量 + 验证程度) |
+| **代码搜索** | ✅ ripgrep | ✅ Select-String | **持平** |
+| **文件操作** | ✅ | ✅ | **持平** |
+| **GUI 桌面操作** | ✅ Claude限定 | 🔶 | **EA > AF** (EA 验证过，AF 不确定) |
+| **图片生成** | ✅ 子代理 | ❌ | **EA >> AF** |
+| **技能进化** | ❌ | 🔶 | **AF 有设计**，EA 无此概念 |
+| **记忆持久化** | 🔶 外挂 | ✅ 3层原生 | **略持平**，各有优劣 |
+| **离线/LAN** | ❌ | ✅ 可离线 | **AF >> EA** |
+| **数据隐私** | ❌ 云端 | ✅ 本地 | **AF >> EA** |
+| **开箱即用** | ✅ 零配置 | ❌ 需装 Docker/配 API key | **EA >> AF** |
+| **模型灵活性** | 平台限定 | ✅ 任意 OpenAI 兼容 API | **AF > EA** |
+
+### 总分对比
+
+| | 验证可靠的优势 | 设计上的优势(未验证) | 明确劣势 |
+|--|-------------|-------------------|---------|
+| **EchoAgent** | 搜索质量、Docker、浏览器、子代理、图片生成、开箱即用 | — | 离线、隐私、定制性、自主测试 |
+| **AgentForge** | 离线、隐私、模型灵活性、文件/记忆 | 搜索冗余、深度研究、自主测试、技能进化 | 搜索质量、Docker、浏览器、子代理、图片生成 |
+
+**结论: 如果只看"已验证能力"，EchoAgent 仍然显著领先。
+AgentForge 的优势主要在架构设计层面，但大量模块处于"写了没跑"状态。**
+
+---
+
+## 4. 行动计划 — 从"写了没跑"到"跑了能用"
+
+### Phase 0: 验证已有代码（最高优先）
+
+> **核心思路: 先把 🔶 变成 ✅，而不是继续写新的 🔶**
+
+| # | 行动 | 验证方法 | 预计 |
+|---|------|----------|------|
+| V1 | **搜索 Provider 端到端验证** | 配置 Brave free key，运行 `web_search` 对比 Jina 结果 | 2h |
+| V2 | **deep_research 端到端验证** | 喂一个真实问题，验证 query 分解→搜索→提取→合成完整链路 | 4h |
+| V3 | **Docker Sandbox 验证** | 在装有 Docker 的机器上 `sandbox_init` → `sandbox_exec` → `sandbox_destroy` | 2h |
+| V4 | **Sub-Agent 单次执行验证** | `spawn_agent` researcher preset 执行一个简单调研任务 | 3h |
+| V5 | **blackbox-test-runner 验证** | 对一个简单 Express 应用运行 `run_blackbox_tests` | 1天 |
+| V6 | **Browser 新增 API 验证** | 对真实页面执行 hover/fillForm/drag/tabs | 3h |
+| V7 | **应用整体启动验证** | `npm run dev` → 创建项目 → 跑一个 Feature → 全链路 | 1天 |
+
+### Phase 1: 弥补关键短板
+
+| # | 行动 | 说明 | 预计 |
+|---|------|------|------|
+| F1 | **图片生成集成** | 接入 DALL-E 3 / Gemini Image API (工具: `generate_image`) | 2天 |
+| F2 | **搜索质量保底** | 内置 Brave Search free API key 申请引导 + SearXNG Docker 一键部署脚本 | 1天 |
+| F3 | **Sub-Agent 可靠性** | 增加超时、重试、graceful degradation | 1天 |
+| F4 | **E2E 测试集成测试** | 为 blackbox-test-runner 编写集成测试，验证 Docker+Browser 联动 | 2天 |
+
+### Phase 2: 形成独特优势
+
+| # | 行动 | 说明 | 预计 |
+|---|------|------|------|
+| A1 | **本地 RAG** | 基于 sqlite-vec 的代码向量检索，替代纯 grep | 3天 |
+| A2 | **研究报告缓存** | 相同/相似问题命中缓存，避免重复搜索消耗 | 1天 |
+| A3 | **测试覆盖率追踪** | blackbox-test-runner 输出覆盖率报告，驱动迭代 | 2天 |
+| A4 | **MCP 生态扩展** | 接入 GitHub MCP / Figma MCP / 自定义 MCP 注册 | 3天 |
+| A5 | **自适应工作流** | Agent 根据项目类型自动选择工具集和测试策略 | 3天 |
+
+### Phase 3: 超越目标
+
+| # | 行动 | 说明 | 预计 |
+|---|------|------|------|
+| S1 | **持续学习系统** | skill-evolution 从 🔶→✅，实现跨项目技能迁移 | 3天 |
+| S2 | **多 Agent 协作协议** | Sub-Agent 间共享发现/冲突检测/自动协调 | 5天 |
+| S3 | **自部署 SearXNG** | 应用内一键启动 SearXNG Docker，实现完全离线搜索 | 1天 |
+| S4 | **可视化调试** | Agent 思考过程、工具调用链、搜索结果的实时可视化 | 3天 |
+
+---
+
+## 5. 已写代码资产清单
+
+### 新建文件 (v7.0 + v8.0)
+
+| 文件 | 行数 | 验证状态 | 功能 |
+|------|------|----------|------|
+| `sub-agent-framework.ts` | 588 | 🔶 | 6 角色子代理 + 并行 |
+| `docker-sandbox.ts` | 397 | 🔶 | Docker 容器沙箱 |
+| `search-provider.ts` | 595 | 🔶 | 5 引擎搜索 + fallback |
+| `research-engine.ts` | 531 | 🔶 | 深度研究引擎 |
+| `blackbox-test-runner.ts` | 857 | 🔶 | 自主黑盒测试闭环 |
+
+### 修改文件 (v7.0 + v8.0)
+
+| 文件 | 修改范围 | 验证状态 |
+|------|----------|----------|
+| `tool-registry.ts` | +23 工具定义 + 权限表更新 | 🔶 (tsc ✅) |
+| `tool-executor.ts` | +19 工具执行分支 | 🔶 (tsc ✅) |
+| `web-tools.ts` | 重构委托 search-provider | 🔶 (tsc ✅, 但改变了运行时行为) |
+| `browser-tools.ts` | +8 API 实现 | 🔶 |
+
+### 代码质量状态
+
+- **tsc**: 非 test 文件零错误 (test 文件缺 `@types/vitest`)
+- **引擎总代码**: 51 文件, 23,284 行
+- **新增代码占比**: ~2,968 行 / 23,284 行 = 12.7%
+- **运行时验证覆盖**: 约 20/56 工具 = 36%
+
+---
+
+## 6. 工具完整清单 (56个, 含验证状态)
+
+| 类别 | 工具 | 状态 |
 |------|------|------|
-| 文件 | read_file, write_file, edit_file, batch_edit, list_files, glob_files, search_files | |
-| 命令 | run_command, run_test, run_lint, check_process | |
-| Git | git_commit, git_diff, git_log | |
-| GitHub | github_create_issue, github_list_issues | |
-| 搜索 | web_search, fetch_url, http_request, **web_search_boost**, **configure_search** | ✅ |
-| 研究 | **deep_research** | ✅ |
-| 测试 | **run_blackbox_tests** | ✅ |
-| 子代理 | **spawn_agent**, **spawn_parallel**, **list_sub_agents**, **cancel_sub_agent** | ✅ |
-| 沙箱 | **sandbox_init**, **sandbox_exec**, **sandbox_write**, **sandbox_read**, **sandbox_destroy** | ✅ |
-| 浏览器 | browser_launch/navigate/screenshot/snapshot/click/type/evaluate/wait/network/close | |
-| 浏览器+ | **browser_hover/select_option/press_key/fill_form/drag/tabs/file_upload/console** | ✅ |
-| GUI | screenshot, mouse_click, mouse_move, keyboard_type, keyboard_hotkey | |
-| 视觉 | analyze_image, compare_screenshots, visual_assert | |
-| 记忆 | memory_read, memory_append | |
-| 技能 | skill_acquire, skill_search, skill_improve, skill_record_usage | |
-| 思考 | think, todo_write, todo_read, task_complete, report_blocked, rfc_propose, spawn_researcher | |
+| 文件 | read_file, write_file, edit_file, batch_edit, list_files, glob_files, search_files | ✅ |
+| 命令 | run_command, run_test, run_lint, check_process | ✅ |
+| Git | git_commit, git_diff, git_log | ✅ |
+| GitHub | github_create_issue, github_list_issues | 🔶 |
+| 搜索 | web_search, fetch_url | ✅ (Jina) |
+| 搜索+ | http_request, **web_search_boost**, **configure_search** | 🔶 |
+| 研究 | **deep_research** | 🔶 |
+| 测试 | **run_blackbox_tests** | 🔶 |
+| 子代理 | spawn_researcher | ✅ (旧版) |
+| 子代理+ | **spawn_agent**, **spawn_parallel**, **list_sub_agents**, **cancel_sub_agent** | 🔶 |
+| 沙箱 | **sandbox_init**, **sandbox_exec**, **sandbox_write**, **sandbox_read**, **sandbox_destroy** | 🔶 |
+| 浏览器 | browser_launch/navigate/screenshot/snapshot/click/type/evaluate/wait/network/close | ✅/🔶 混合 |
+| 浏览器+ | **browser_hover/select_option/press_key/fill_form/drag/tabs/file_upload/console** | 🔶 |
+| GUI | screenshot, mouse_click, mouse_move, keyboard_type, keyboard_hotkey | 🔶 |
+| 视觉 | analyze_image, compare_screenshots, visual_assert | 🔶 |
+| 记忆 | memory_read, memory_append | ✅ |
+| 技能 | skill_acquire, skill_search, skill_improve, skill_record_usage | 🔶 |
+| 思考 | think, todo_write, todo_read, task_complete, report_blocked, rfc_propose | ✅ |
 
-**新增工具: 19 个 | 总计: 56 个**
+**✅ 已验证: ~20 | 🔶 仅代码: ~36 | 验证率: 36%**
+
+---
+
+## 7. 最终结论
+
+AgentForge v8.0 在**架构设计**层面已经具备超越 EchoAgent 的潜力：
+- 搜索冗余设计 > 单点 SerpApi
+- 深度研究引擎 > 手工编排
+- 自主测试闭环 > 完全不存在
+- 技能进化系统 > 外挂记忆
+- 离线/隐私 > 纯云端
+
+但在**实际可用性**层面仍然落后：
+- 64% 的工具从未运行过
+- 核心复杂模块 (deep_research, blackbox-test-runner, sub-agent) 零运行时验证
+- Docker/Browser 依赖链未在真机测试
+
+**下一步的重点不是写更多代码，而是把已有代码跑起来、验证通、修好 bug。**
+Phase 0 (验证已有代码) 完成后，AgentForge 才能真正声称在特定维度超越 EchoAgent。
