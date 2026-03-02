@@ -34,7 +34,7 @@ export function hasGit(): boolean {
 /**
  * 在工作区初始化 git (委托给 git-provider.initRepo)
  */
-export function initGitRepo(workspacePath: string): boolean {
+export async function initGitRepo(workspacePath: string): Promise<boolean> {
   const config: GitProviderConfig = { mode: 'local', workspacePath };
   return initRepo(config);
 }
@@ -42,16 +42,16 @@ export function initGitRepo(workspacePath: string): boolean {
 /**
  * 在工作区做一次 git commit (委托给 git-provider.commit)
  */
-export function commitWorkspace(workspacePath: string, message: string): boolean {
+export async function commitWorkspace(workspacePath: string, message: string): Promise<boolean> {
   const config: GitProviderConfig = { mode: 'local', workspacePath };
-  const result = gpCommit(config, message);
+  const result = await gpCommit(config, message);
   return result.success;
 }
 
 /**
  * 获取 git log（简短）(委托给 git-provider.getLog)
  */
-export function getGitLog(workspacePath: string, maxCount: number = 20): string[] {
+export async function getGitLog(workspacePath: string, maxCount: number = 20): Promise<string[]> {
   return gpGetLog(workspacePath, maxCount);
 }
 

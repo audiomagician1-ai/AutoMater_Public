@@ -8,11 +8,13 @@
  * v0.8: 初始实现
  */
 
-import { execSync } from 'child_process';
+import { exec as execCb } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';
 
+const execAsync = promisify(execCb);
 const log = createLogger('git-provider');
 
 export type GitMode = 'local' | 'github';
@@ -43,42 +45,42 @@ export interface GitHubIssue {
 // Local Git Operations
 // ═══════════════════════════════════════
 
-function hasGit(): boolean {
-  try { execSync('git --version', { stdio: 'ignore' }); return true; } catch { return false; }
+async function hasGit(): Promise<boolean> {
+  try { await execAsync('git --version'); return true; } catch { return false; }
 }
 
-export function initRepo(config: GitProviderConfig): boolean {
-  if (!hasGit()) return false;
+export async function initRepo(config: GitProviderConfig): Promise<boolean> {
+  if (!(await hasGit())) return false;
   const { workspacePath, mode, githubRepo, githubToken } = config;
 
   try {
     const gitDir = path.join(workspacePath, '.git');
     if (!fs.existsSync(gitDir)) {
-      execSync('git init', { cwd: workspacePath, stdio: 'ignore' });
+      await execAsync('git init', { cwd: workspacePath });
 
       const gitignore = `node_modules/\ndist/\nbuild/\n.env\n.env.local\n*.pyc\n__pycache__/\n.DS_Store\nThumbs.db\n*.log\n.vscode/\n.idea/\n`;
       fs.writeFileSync(path.join(workspacePath, '.gitignore'), gitignore, 'utf-8');
 
       try {
-        execSync('git config user.email "agent@automater.dev"', { cwd: workspacePath, stdio: 'ignore' });
-        execSync('git config user.name "AutoMater"', { cwd: workspacePath, stdio: 'ignore' });
+        await execAsync('git config user.email "agent@automater.dev"', { cwd: workspacePath });
+        await execAsync('git config user.name "AutoMater"', { cwd: workspacePath });
       } catch (err) {
         log.debug('Git user config failed (non-fatal)', { error: String(err) });
       }
 
-      execSync('git add -A', { cwd: workspacePath, stdio: 'ignore' });
-      execSync('git commit -m "Initial commit by AutoMater" --allow-empty', { cwd: workspacePath, stdio: 'ignore' });
+      await execAsync('git add -A', { cwd: workspacePath });
+      await execAsync('git commit -m "Initial commit by AutoMater" --allow-empty', { cwd: workspacePath });
     }
 
     // GitHub mode: add remote
     if (mode === 'github' && githubRepo && githubToken) {
       const remoteUrl = `https://${githubToken}@github.com/${githubRepo}.git`;
       try {
-        execSync(`git remote remove origin`, { cwd: workspacePath, stdio: 'ignore' });
+        await execAsync(`git remote remove origin`, { cwd: workspacePath });
       } catch (err) {
         log.debug('No existing origin remote to remove');
       }
-      execSync(`git remote add origin ${remoteUrl}`, { cwd: workspacePath, stdio: 'ignore' });
+      await execAsync(`git remote add origin ${remoteUrl}`, { cwd: workspacePath });
     }
 
     return true;
@@ -88,29 +90,30 @@ export function initRepo(config: GitProviderConfig): boolean {
   }
 }
 
-export function commit(config: GitProviderConfig, message: string): GitCommitResult {
+export async function commit(config: GitProviderConfig, message: string): Promise<GitCommitResult> {
   const { workspacePath, mode } = config;
-  if (!hasGit() || !fs.existsSync(path.join(workspacePath, '.git'))) {
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) {
     return { success: false };
   }
 
   try {
-    execSync('git add -A', { cwd: workspacePath, stdio: 'ignore' });
+    await execAsync('git add -A', { cwd: workspacePath });
 
     // Check for changes
     try {
-      execSync('git diff --cached --quiet', { cwd: workspacePath, stdio: 'ignore' });
+      await execAsync('git diff --cached --quiet', { cwd: workspacePath });
       return { success: false }; // no changes
     } catch { /* has changes — proceed to commit */ }
 
-    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: workspacePath, stdio: 'ignore' });
+    await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: workspacePath });
 
-    const hash = execSync('git rev-parse --short HEAD', { cwd: workspacePath, encoding: 'utf-8' }).trim();
+    const { stdout } = await execAsync('git rev-parse --short HEAD', { cwd: workspacePath, encoding: 'utf-8' });
+    const hash = stdout.trim();
 
     let pushed = false;
     if (mode === 'github') {
       try {
-        execSync('git push origin HEAD', { cwd: workspacePath, stdio: 'ignore', timeout: 30000 });
+        await execAsync('git push origin HEAD', { cwd: workspacePath, timeout: 30000 });
         pushed = true;
       } catch (err) {
         log.error('Push failed', err);
@@ -124,22 +127,23 @@ export function commit(config: GitProviderConfig, message: string): GitCommitRes
   }
 }
 
-export function getLog(workspacePath: string, maxCount: number = 20): string[] {
-  if (!hasGit() || !fs.existsSync(path.join(workspacePath, '.git'))) return [];
+export async function getLog(workspacePath: string, maxCount: number = 20): Promise<string[]> {
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) return [];
   try {
-    const output = execSync(`git log --oneline -${maxCount}`, { cwd: workspacePath, encoding: 'utf-8' });
-    return output.trim().split('\n').filter(Boolean);
+    const { stdout } = await execAsync(`git log --oneline -${maxCount}`, { cwd: workspacePath, encoding: 'utf-8' });
+    return stdout.trim().split('\n').filter(Boolean);
   } catch (err) {
     log.debug('Git log retrieval failed');
     return [];
   }
 }
 
-export function getDiff(workspacePath: string, commitRange?: string): string {
-  if (!hasGit() || !fs.existsSync(path.join(workspacePath, '.git'))) return '';
+export async function getDiff(workspacePath: string, commitRange?: string): Promise<string> {
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) return '';
   try {
     const cmd = commitRange ? `git diff ${commitRange}` : 'git diff HEAD';
-    return execSync(cmd, { cwd: workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+    const { stdout } = await execAsync(cmd, { cwd: workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+    return stdout;
   } catch (err) {
     log.debug('Git diff retrieval failed');
     return '';

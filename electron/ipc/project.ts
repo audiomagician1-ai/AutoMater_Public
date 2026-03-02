@@ -262,7 +262,7 @@ export function setupProjectHandlers() {
 
     // 导入已有项目时不执行 git init（项目已有自己的 git）
     if (!isImport) {
-      initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
+      await initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
     }
 
     // 导入项目用 analyzing 状态; 新项目用 initializing
@@ -708,7 +708,7 @@ export function setupProjectHandlers() {
     }
 
     // 先 commit 最新状态
-    gitCommit(getGitConfig(project), 'Export snapshot');
+    await gitCommit(getGitConfig(project), 'Export snapshot');
 
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     if (!win) return { success: false, error: '无窗口' };
@@ -727,20 +727,20 @@ export function setupProjectHandlers() {
   });
 
   // ── Git commit ──
-  ipcMain.handle('project:git-commit', (_event, projectId: string, message: string) => {
+  ipcMain.handle('project:git-commit', async (_event, projectId: string, message: string) => {
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
     if (!project?.workspace_path) return { success: false };
-    const result = gitCommit(getGitConfig(project), message);
+    const result = await gitCommit(getGitConfig(project), message);
     return { success: result.success, hash: result.hash, pushed: result.pushed };
   });
 
   // ── Git log ──
-  ipcMain.handle('project:git-log', (_event, projectId: string) => {
+  ipcMain.handle('project:git-log', async (_event, projectId: string) => {
     const db = getDb();
     const project = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as { workspace_path?: string } | undefined;
     if (!project?.workspace_path) return [];
-    return gitLog(project.workspace_path);
+    return await gitLog(project.workspace_path);
   });
 
   // ── GitHub 连接测试 ──

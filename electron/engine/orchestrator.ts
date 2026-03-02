@@ -455,7 +455,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     }
   }
 
-  if (workspacePath) commitWorkspace(workspacePath, 'AutoMater: PM analysis + Architecture + Docs');
+  if (workspacePath) await commitWorkspace(workspacePath, 'AutoMater: PM analysis + Architecture + Docs');
   if (workspacePath) ensureAgentsMd(workspacePath, project.wish);
 
   // v3.0: Architect→Developer 程序化门控
@@ -1337,7 +1337,7 @@ async function workerLoop(
 
     const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('qa_passed','passed','failed')").get(projectId) as CountResult).c;
     if (completedCount % 3 === 0) createCheckpoint(projectId, `${completedCount} Features 已处理`);
-    if (passed && workspacePath) commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
+    if (passed && workspacePath) await commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
     await sleep(500);
   }
 }
@@ -1671,7 +1671,7 @@ async function phaseDevOpsBuild(
   emitEvent({ projectId, agentId: devopsId, type: 'phase:dev:end', data: { devops: true, allPassed, steps: results.length, passed: passedCount } });
 
   if (workspacePath && allPassed) {
-    commitWorkspace(workspacePath, 'AutoMater: DevOps build verification passed');
+    await commitWorkspace(workspacePath, 'AutoMater: DevOps build verification passed');
   }
 }
 
@@ -1723,7 +1723,7 @@ async function phaseFinalize(
     );
   }
 
-  if (workspacePath) commitWorkspace(workspacePath, `AutoMater: ${stats.passed}/${stats.total} features delivered`);
+  if (workspacePath) await commitWorkspace(workspacePath, `AutoMater: ${stats.passed}/${stats.total} features delivered`);
 
   emitEvent({
     projectId, agentId: 'system', type: 'project:complete',

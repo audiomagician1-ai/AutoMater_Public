@@ -440,7 +440,7 @@ export async function reactDeveloperLoop(
 
         // 执行工具
         let toolResult: ToolResult;
-        const isAsync = tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_') || tc.function.name.startsWith('mcp_') || tc.function.name.startsWith('skill_') || ['web_search', 'fetch_url', 'http_request', 'analyze_image', 'compare_screenshots', 'visual_assert'].includes(tc.function.name);
+        const isAsync = tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_') || tc.function.name.startsWith('mcp_') || tc.function.name.startsWith('skill_') || tc.function.name.startsWith('git_') || ['web_search', 'fetch_url', 'http_request', 'analyze_image', 'compare_screenshots', 'visual_assert'].includes(tc.function.name);
 
         // ── spawn_researcher 子 Agent ──
         if (tc.function.name === 'spawn_researcher') {
@@ -886,7 +886,8 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         // 执行工具
         const isAsync = ['web_search', 'fetch_url', 'http_request', 'analyze_image', 'compare_screenshots', 'visual_assert'].includes(tc.function.name)
           || tc.function.name.startsWith('github_') || tc.function.name.startsWith('browser_')
-          || tc.function.name.startsWith('mcp_') || tc.function.name.startsWith('skill_');
+          || tc.function.name.startsWith('mcp_') || tc.function.name.startsWith('skill_')
+          || tc.function.name.startsWith('git_');
 
         const toolResult: ToolResult = isAsync
           ? await executeToolAsync(toolCall, toolCtx)

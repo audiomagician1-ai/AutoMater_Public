@@ -368,22 +368,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: `已写入项目记忆: ${call.arguments.entry.slice(0, 100)}`, action: 'write' };
       }
 
-      case 'git_commit': {
-        const result = gitCommit(ctx.gitConfig, call.arguments.message);
-        return result.success
-          ? { success: true, output: `已提交 ${result.hash}${result.pushed ? ' (已 push)' : ''}`, action: 'git' }
-          : { success: false, output: '无变更可提交', action: 'git' };
-      }
-
-      case 'git_diff': {
-        const diff = getDiff(ctx.workspacePath);
-        return { success: true, output: diff.slice(0, 8000) || '无未提交变更', action: 'git' };
-      }
-
-      case 'git_log': {
-        const logs = gitLog(ctx.workspacePath, call.arguments.count ?? 10);
-        return { success: true, output: logs.join('\n') || '无提交记录', action: 'git' };
-      }
+      // git_commit / git_diff / git_log → moved to executeToolAsyncRaw (v6.0 async git)
+      case 'git_commit':
+      case 'git_diff':
+      case 'git_log':
+        throw new Error(`${call.name} is now async-only; route through executeToolAsync`);
 
       case 'task_complete':
         return { success: true, output: `任务完成: ${call.arguments.summary}`, action: 'write' };
@@ -693,6 +682,22 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
   // ── MCP 外部工具 ──
   if (call.name.startsWith('mcp_')) {
     return executeMcpTool(call);
+  }
+
+  // ── Git (async since v6.0) ──
+  if (call.name === 'git_commit') {
+    const result = await gitCommit(ctx.gitConfig, call.arguments.message);
+    return result.success
+      ? { success: true, output: `已提交 ${result.hash}${result.pushed ? ' (已 push)' : ''}`, action: 'git' }
+      : { success: false, output: '无变更可提交', action: 'git' };
+  }
+  if (call.name === 'git_diff') {
+    const diff = await getDiff(ctx.workspacePath);
+    return { success: true, output: diff.slice(0, 8000) || '无未提交变更', action: 'git' };
+  }
+  if (call.name === 'git_log') {
+    const logs = await gitLog(ctx.workspacePath, call.arguments.count ?? 10);
+    return { success: true, output: logs.join('\n') || '无提交记录', action: 'git' };
   }
 
   // ── Skill 外部工具 ──
