@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppStore } from '../../stores/app-store';
 import { AgentWorkFeed } from '../../components/AgentWorkFeed';
 
@@ -17,7 +17,8 @@ function getAgentTabInfo(agentId: string): { icon: string; label: string } {
 }
 
 export function AgentActivityPanel() {
-  const { agentStatuses, agentWorkMessages } = useAppStore();
+  const agentStatuses = useAppStore(s => s.agentStatuses);
+  const agentWorkMessages = useAppStore(s => s.agentWorkMessages);
   const [expanded, setExpanded] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
@@ -43,13 +44,22 @@ export function AgentActivityPanel() {
     return agents;
   }, [agentStatuses, agentWorkMessages]);
 
+  // 稳定化 activeAgents 的 id 列表，避免引用变化触发无限循环
+  const agentIdsKey = activeAgents.map(a => a.id).join(',');
+  const prevAgentIdsRef = useRef(agentIdsKey);
+
   useEffect(() => {
-    if (!selectedAgent || !activeAgents.find(a => a.id === selectedAgent)) {
-      const working = activeAgents.find(a => a.isWorking);
-      if (working) setSelectedAgent(working.id);
-      else if (activeAgents.length > 0) setSelectedAgent(activeAgents[0].id);
+    // 只在 agent 列表变化或 selectedAgent 不在列表中时才更新
+    const needsUpdate = !selectedAgent || !activeAgents.find(a => a.id === selectedAgent);
+    if (!needsUpdate) {
+      prevAgentIdsRef.current = agentIdsKey;
+      return;
     }
-  }, [activeAgents, selectedAgent]);
+    const working = activeAgents.find(a => a.isWorking);
+    if (working) setSelectedAgent(working.id);
+    else if (activeAgents.length > 0) setSelectedAgent(activeAgents[0].id);
+    prevAgentIdsRef.current = agentIdsKey;
+  }, [agentIdsKey]); // 只依赖稳定的字符串 key，不依赖 selectedAgent
 
   const workingCount = activeAgents.filter(a => a.isWorking).length;
   const totalMsgs = activeAgents.reduce((sum, a) => sum + a.msgCount, 0);

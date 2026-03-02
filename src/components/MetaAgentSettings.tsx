@@ -236,7 +236,7 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
   saving: boolean;
   saved: boolean;
 }) {
-  const update = (key: keyof MetaAgentConfig, value: any) => setConfig({ ...config, [key]: value });
+  const update = (key: keyof MetaAgentConfig, value: string | number | boolean) => setConfig({ ...config, [key]: value });
 
   return (
     <div className="space-y-5">

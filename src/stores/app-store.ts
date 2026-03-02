@@ -22,7 +22,7 @@ interface StoreAgentReactState {
   iterations?: ReactIterationState[];
   maxContextWindow?: number;
   phase?: string;
-  toolCalls?: any[];
+  toolCalls?: Array<{ name: string; args: string; success?: boolean }>;
   lastUpdated?: number;
 }
 

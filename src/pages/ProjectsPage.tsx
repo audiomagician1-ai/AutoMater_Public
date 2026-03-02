@@ -34,7 +34,10 @@ export function ProjectsPage() {
 
   const [projects, setProjects] = useState<any[]>([]);
   const [projectStats, setProjectStats] = useState<Record<string, any>>({});
-  const { settingsConfigured, setGlobalPage, enterProject, addLog } = useAppStore();
+  const settingsConfigured = useAppStore(s => s.settingsConfigured);
+  const setGlobalPage = useAppStore(s => s.setGlobalPage);
+  const enterProject = useAppStore(s => s.enterProject);
+  const addLog = useAppStore(s => s.addLog);
 
   const loadProjects = async () => {
     const list = await window.automater.project.list();
@@ -58,7 +61,7 @@ export function ProjectsPage() {
 
     setCreating(true);
     try {
-      const options: any = { gitMode };
+      const options: { gitMode: string; workspacePath?: string; historyPath?: string; githubRepo?: string; githubToken?: string } = { gitMode };
       if (workspacePath.trim()) options.workspacePath = workspacePath.trim();
       if (historyPath.trim()) options.historyPath = historyPath.trim();
       if (gitMode === 'github' && githubRepo && githubToken) {
@@ -127,7 +130,7 @@ export function ProjectsPage() {
     setImportProgress({ phase: 0, step: '准备导入...', progress: 0 });
     try {
       const name = importName.trim() || importPath.split(/[\\/]/).pop() || 'Imported Project';
-      const options: any = {
+      const options = {
         gitMode: 'local' as const,
         workspacePath: importPath.trim(),
         importExisting: true,

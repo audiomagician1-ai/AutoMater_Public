@@ -1,7 +1,13 @@
 import { useAppStore } from '../stores/app-store';
 
-export function StatusBar({ stats }: { stats: any }) {
-  const { currentProjectId, logs } = useAppStore();
+interface ProjectStats {
+  features?: { total?: number; done?: number; in_progress?: number; reviewing?: number; passed?: number; failed?: number };
+  agents?: { total?: number; total_tokens?: number; total_cost?: number; active_count?: number };
+}
+
+export function StatusBar({ stats }: { stats: ProjectStats | null }) {
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const logs = useAppStore(s => s.logs);
 
   const f = stats?.features || {};
   const a = stats?.agents || {};

@@ -35,7 +35,7 @@ function formatTokens(n: number): string {
 // MiniAgentCard — 左侧精简成员卡片 (v6.0)
 // ═══════════════════════════════════════
 function MiniAgentCard({ agent, isSelected, onClick }: {
-  agent: any; isSelected: boolean; onClick: () => void;
+  agent: TeamMember & { status?: string; current_task?: string }; isSelected: boolean; onClick: () => void;
 }) {
   const reactState = useAppStore(s => s.agentReactStates.get(agent.id));
   const liveStatus = useAppStore(s => s.agentStatuses.get(agent.id));
@@ -54,7 +54,7 @@ function MiniAgentCard({ agent, isSelected, onClick }: {
       <div className="relative shrink-0">
         <span className="text-xl">{info.icon}</span>
         <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
-          isWorking ? 'bg-emerald-500 animate-pulse' : (STATUS_STYLES[agent.status] || 'bg-slate-600')
+          isWorking ? 'bg-emerald-500 animate-pulse' : (STATUS_STYLES[agent.status ?? ''] || 'bg-slate-600')
         }`} />
       </div>
       <div className="flex-1 min-w-0">
@@ -102,7 +102,7 @@ function MemberEditModal({ member, onClose, onSave, onChange }: {
   const updateLLM = (patch: Partial<MemberLLMConfig>) => {
     const next = { ...llmConfig, ...patch };
     // 移除空字段 (让 fallback 到全局)
-    const cleaned: any = {};
+    const cleaned: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(next)) {
       if (v !== undefined && v !== '') cleaned[k] = v;
     }

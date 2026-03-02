@@ -317,7 +317,7 @@ export function DocsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('document');
   const [changelogFilter, setChangelogFilter] = useState<string>('all');
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: DocTreeItem } | null>(null);
-  const [versionModal, setVersionModal] = useState<{ item: DocTreeItem; versions: any[] } | null>(null);
+  const [versionModal, setVersionModal] = useState<{ item: DocTreeItem; versions: Array<{ version: number; date: string; summary: string; action?: string; agent?: string }> } | null>(null);
 
   // ── Load doc list + changelog ──
   const loadDocList = useCallback(async () => {
@@ -614,7 +614,7 @@ export function DocsPage() {
               <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {versionModal.versions.map((v: any, i: number) => (
+              {versionModal.versions.map((v, i) => (
                 <div key={`${v.version}-${i}`} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono shrink-0 ${
                     i === 0 ? 'bg-forge-600/20 text-forge-400' : 'bg-slate-800 text-slate-400'

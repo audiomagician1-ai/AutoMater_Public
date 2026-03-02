@@ -45,7 +45,8 @@ export function InteractiveGraph({
   features: Feature[];
   onDrillDown: (level: ViewLevel, value: string) => void;
 }) {
-  const { featureStatuses, agentStatuses } = useAppStore();
+  const featureStatuses = useAppStore(s => s.featureStatuses);
+  const agentStatuses = useAppStore(s => s.agentStatuses);
   const containerRef = useRef<HTMLDivElement>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [dragging, setDragging] = useState(false);

@@ -56,7 +56,11 @@ const VERDICT_STYLES: Record<string, { icon: string; text: string; color: string
 // ═══════════════════════════════════════
 
 export function AcceptancePanel() {
-  const { currentProjectId, showAcceptancePanel, setShowAcceptancePanel, addLog, setProjectPage } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const showAcceptancePanel = useAppStore(s => s.showAcceptancePanel);
+  const setShowAcceptancePanel = useAppStore(s => s.setShowAcceptancePanel);
+  const addLog = useAppStore(s => s.addLog);
+  const setProjectPage = useAppStore(s => s.setProjectPage);
   const [features, setFeatures] = useState<FeatureSummary[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [hasDesignDoc, setHasDesignDoc] = useState(false);

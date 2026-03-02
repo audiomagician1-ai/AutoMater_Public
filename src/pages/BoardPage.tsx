@@ -24,7 +24,8 @@ const STATUS_COLS = [
 ];
 
 export function BoardPage() {
-  const { currentProjectId, featureStatuses } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const featureStatuses = useAppStore(s => s.featureStatuses);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [sessionSummaries, setSessionSummaries] = useState<Record<string, FeatureSessionSummary>>({});
 

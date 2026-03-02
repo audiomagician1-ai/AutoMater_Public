@@ -323,14 +323,14 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
     setPreview(null);
     const budget = member.max_context_tokens ?? 128000;
     (window as any).automater.context.previewBaseline(projectId, member.role, budget)
-      .then((res: any) => {
-        if (res.success) {
+      .then((res: { success: boolean; snapshot?: ContextSnapshot; error?: string }) => {
+        if (res.success && res.snapshot) {
           setBaseline(res.snapshot);
         } else {
           setError(res.error || '加载失败');
         }
       })
-      .catch((e: any) => setError(e.message))
+      .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [projectId, member.id, member.role]);
 
@@ -491,7 +491,9 @@ function findAgentStatusForMember(
 // ContextPage — 主页面
 // ═══════════════════════════════════════
 export function ContextPage() {
-  const { currentProjectId, contextSnapshots, agentStatuses } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const contextSnapshots = useAppStore(s => s.contextSnapshots);
+  const agentStatuses = useAppStore(s => s.agentStatuses);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [previewSection, setPreviewSection] = useState<ContextSection | null>(null);

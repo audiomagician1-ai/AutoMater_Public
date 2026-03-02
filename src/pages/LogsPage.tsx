@@ -222,7 +222,9 @@ function LogRow({ log, agentNameMap }: {
 // ═══════════════════════════════════════
 
 export function LogsPage() {
-  const { logs: realtimeLogs, activeStreams, currentProjectId } = useAppStore();
+  const realtimeLogs = useAppStore(s => s.logs);
+  const activeStreams = useAppStore(s => s.activeStreams);
+  const currentProjectId = useAppStore(s => s.currentProjectId);
 
   // ── 持久化日志 ──
   const [dbLogs, setDbLogs] = useState<DBLogEntry[]>([]);
@@ -244,7 +246,7 @@ export function LogsPage() {
 
   useEffect(() => {
     if (!currentProjectId) return;
-    window.automater.team.list(currentProjectId).then((members: any[]) => {
+    window.automater.team.list(currentProjectId).then((members: TeamMember[]) => {
       const map: Record<string, string> = {};
       // 内置名称
       map['system'] = '🖥️ 系统';

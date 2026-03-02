@@ -22,7 +22,14 @@ import {
 } from './overview';
 
 export function OverviewPage() {
-  const { currentProjectId, featureStatuses, addLog, settingsConfigured, setGlobalPage, setProjectPage, showAcceptancePanel, setShowAcceptancePanel } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const featureStatuses = useAppStore(s => s.featureStatuses);
+  const addLog = useAppStore(s => s.addLog);
+  const settingsConfigured = useAppStore(s => s.settingsConfigured);
+  const setGlobalPage = useAppStore(s => s.setGlobalPage);
+  const setProjectPage = useAppStore(s => s.setProjectPage);
+  const showAcceptancePanel = useAppStore(s => s.showAcceptancePanel);
+  const setShowAcceptancePanel = useAppStore(s => s.setShowAcceptancePanel);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
@@ -63,14 +70,14 @@ export function OverviewPage() {
 
   // 订阅后端 import-progress 事件
   useEffect(() => {
-    const unsub = window.automater.on('project:import-progress', (data: any) => {
+    const unsub = window.automater.on('project:import-progress', (data: IpcImportProgressData) => {
       if (data.projectId === currentProjectId) {
         setImportProgress({
           phase: data.phase,
           step: data.step,
           progress: data.progress,
           done: data.done,
-          error: data.error,
+          error: !!data.error,
         });
         if (data.done) load(); // 刷新项目数据
       }

@@ -141,14 +141,14 @@ interface AutoMaterAPI {
     }): Promise<{ success: boolean; projectId: string; name: string; workspacePath: string }>;
     setWish(projectId: string, wish: string): Promise<{ success: boolean }>;
     start(projectId: string): Promise<{ success: boolean }>;
-    list(): Promise<any[]>;
-    get(id: string): Promise<any>;
-    getFeatures(projectId: string): Promise<any[]>;
-    getAgents(projectId: string): Promise<any[]>;
+    list(): Promise<Array<ProjectRow>>;
+    get(id: string): Promise<ProjectRow | null>;
+    getFeatures(projectId: string): Promise<Array<FeatureRow>>;
+    getAgents(projectId: string): Promise<Array<TeamMember & { status?: string; current_task?: string }>>;
     getLogs(projectId: string, options?: {
       limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
-    }): Promise<{ rows: any[]; total: number }>;
-    getStats(projectId: string): Promise<{ features: any; agents: any }>;
+    }): Promise<{ rows: Array<LogRow>; total: number }>;
+    getStats(projectId: string): Promise<{ features: Record<string, number>; agents: Record<string, number> }>;
     stop(projectId: string): Promise<{ success: boolean }>;
     delete(projectId: string): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
@@ -340,6 +340,100 @@ interface AutoMaterAPI {
     /** v8.1: 批量获取项目所有 Feature 的 Session 摘要 (看板用) */
     batchFeatureSummaries(projectId: string): Promise<Record<string, FeatureSessionSummary>>;
   };
+}
+
+// ═══════════════════════════════════════════════════
+// IPC Event Data Types — 主进程推送到渲染进程的事件
+// ═══════════════════════════════════════════════════
+
+interface IpcAgentLogData {
+  projectId: string;
+  agentId: string;
+  content: string;
+}
+
+interface IpcAgentSpawnedData {
+  projectId: string;
+  agentId: string;
+  role: string;
+}
+
+interface IpcAgentStatusData {
+  agentId: string;
+  status: string;
+  currentTask?: string | null;
+  featureTitle?: string;
+}
+
+interface IpcFeatureStatusData {
+  featureId: string;
+  status: string;
+}
+
+interface IpcProjectStatusData {
+  projectId: string;
+  status: string;
+}
+
+interface IpcProjectFeaturesReadyData {
+  projectId: string;
+  count: number;
+}
+
+interface IpcAgentErrorData {
+  projectId: string;
+  error: string;
+}
+
+interface IpcAgentToolCallData {
+  projectId: string;
+  agentId: string;
+  tool: string;
+  args: string;
+  success: boolean;
+  outputPreview: string;
+}
+
+interface IpcContextSnapshotData {
+  snapshot?: ContextSnapshot;
+}
+
+interface IpcReactStateData {
+  state?: AgentReactState;
+}
+
+interface IpcStreamStartData {
+  agentId: string;
+  label?: string;
+}
+
+interface IpcStreamData {
+  agentId: string;
+  chunk: string;
+}
+
+interface IpcStreamEndData {
+  agentId: string;
+}
+
+interface IpcAwaitingAcceptanceData {
+  projectId: string;
+}
+
+interface IpcImportProgressData {
+  projectId: string;
+  phase: number;
+  step: string;
+  progress: number;
+  done?: boolean;
+  error?: string;
+  message?: string;
+}
+
+interface IpcWorkspaceChangedData {
+  projectId: string;
+  file: string;
+  changeType: string;
 }
 
 /** 需求条目 (v3.1) */

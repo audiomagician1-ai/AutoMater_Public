@@ -243,6 +243,38 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 10,
+    description: 'v13.0: project_secrets 加密密钥表 + features GitHub 关联字段',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_secrets (
+          project_id TEXT NOT NULL,
+          key TEXT NOT NULL,
+          value TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (project_id, key),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_secrets_provider ON project_secrets(project_id, provider);
+      `);
+      // features 表: GitHub Issue/PR/Branch 关联
+      safeAddColumn('ALTER TABLE features ADD COLUMN github_issue_number INTEGER');
+      safeAddColumn('ALTER TABLE features ADD COLUMN github_pr_number INTEGER');
+      safeAddColumn('ALTER TABLE features ADD COLUMN github_branch TEXT');
+
+      // 迁移旧 github_token 到 project_secrets
+      try {
+        const { migrateGitHubTokensFromProjects } = require('./engine/secret-manager') as typeof import('./engine/secret-manager');
+        migrateGitHubTokensFromProjects();
+      } catch (err) {
+        // 非致命: 首次安装时 projects 表可能为空
+        log.debug('GitHub token migration skipped (likely first install)', { error: String(err) });
+      }
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */

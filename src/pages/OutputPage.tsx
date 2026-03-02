@@ -146,7 +146,7 @@ export function OutputPage() {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
-  const [versionModal, setVersionModal] = useState<{ filePath: string; versions: any[] } | null>(null);
+  const [versionModal, setVersionModal] = useState<{ filePath: string; versions: Array<{ hash: string; date: string; summary: string }> } | null>(null);
 
   const loadTree = useCallback(async () => {
     if (!currentProjectId) return;
@@ -163,7 +163,7 @@ export function OutputPage() {
 
   // 监听工作区变化事件
   useEffect(() => {
-    const unsub = window.automater.on('workspace:changed', (data: any) => {
+    const unsub = window.automater.on('workspace:changed', (data: IpcWorkspaceChangedData) => {
       if (data.projectId === currentProjectId) loadTree();
     });
     return unsub;
@@ -192,7 +192,7 @@ export function OutputPage() {
     await window.automater.project.export(currentProjectId);
   };
 
-  const handleFileRightClick = (e: React.MouseEvent, node: any) => {
+  const handleFileRightClick = (e: React.MouseEvent, node: FileNode) => {
     if (node.type === 'file') {
       setCtxMenu({ x: e.clientX, y: e.clientY, filePath: node.path });
     }
@@ -316,7 +316,7 @@ export function OutputPage() {
               <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {versionModal.versions.map((v: any, i: number) => (
+              {versionModal.versions.map((v, i) => (
                 <div key={v.hash} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30">
                   <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400 font-mono shrink-0">
                     {i === 0 ? '⭐' : `v${versionModal.versions.length - i}`}

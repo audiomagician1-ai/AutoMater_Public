@@ -298,7 +298,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
               {/* Messages */}
               <div className="space-y-2">
                 <h3 className="text-xs font-medium text-slate-400 uppercase">对话历史</h3>
-                {(backupContent.messages || []).map((msg: any, i: number) => {
+                {(backupContent.messages || []).map((msg: { role: string; content: string; tool_call_id?: string; tool_calls?: Array<{ function?: { name: string; arguments: string } }> }, i: number) => {
                   const roleColors: Record<string, string> = {
                     system: 'border-purple-700 bg-purple-900/20',
                     user: 'border-blue-700 bg-blue-900/20',
@@ -336,7 +336,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
                       </pre>
                       {msg.tool_calls && (
                         <div className="mt-1 space-y-1">
-                          {msg.tool_calls.map((tc: any, j: number) => (
+                          {msg.tool_calls.map((tc, j) => (
                             <div key={j} className="text-xs text-orange-300 bg-orange-900/10 rounded px-2 py-1">
                               🔧 {tc.function?.name}({typeof tc.function?.arguments === 'string' ? tc.function.arguments.slice(0, 100) : JSON.stringify(tc.function?.arguments).slice(0, 100)})
                             </div>

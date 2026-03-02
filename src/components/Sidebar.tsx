@@ -22,11 +22,15 @@ const projectNavItems: { id: ProjectPageId; icon: string; label: string }[] = [
 ];
 
 export function Sidebar() {
-  const {
-    insideProject, globalPage, projectPage,
-    setGlobalPage, setProjectPage, exitProject, settingsConfigured,
-    pendingNotifications, clearNotifications,
-  } = useAppStore();
+  const insideProject = useAppStore(s => s.insideProject);
+  const globalPage = useAppStore(s => s.globalPage);
+  const projectPage = useAppStore(s => s.projectPage);
+  const setGlobalPage = useAppStore(s => s.setGlobalPage);
+  const setProjectPage = useAppStore(s => s.setProjectPage);
+  const exitProject = useAppStore(s => s.exitProject);
+  const settingsConfigured = useAppStore(s => s.settingsConfigured);
+  const pendingNotifications = useAppStore(s => s.pendingNotifications);
+  const clearNotifications = useAppStore(s => s.clearNotifications);
 
   return (
     <aside className="w-16 bg-slate-900/95 backdrop-blur-sm border-r border-slate-800/80 flex flex-col items-center py-3 gap-1 flex-shrink-0 relative">

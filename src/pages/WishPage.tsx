@@ -551,7 +551,11 @@ function WishDetailPanel({
 // ═══════════════════════════════════════
 
 export function WishPage() {
-  const { currentProjectId, addLog, settingsConfigured, setGlobalPage, setProjectPage } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const addLog = useAppStore(s => s.addLog);
+  const settingsConfigured = useAppStore(s => s.settingsConfigured);
+  const setGlobalPage = useAppStore(s => s.setGlobalPage);
+  const setProjectPage = useAppStore(s => s.setProjectPage);
 
   // ── State ──
   const [wishes, setWishes] = useState<WishItem[]>([]);

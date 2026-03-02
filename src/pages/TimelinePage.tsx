@@ -399,7 +399,7 @@ export default function TimelinePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {stats.toolStats.map((t: any) => (
+                      {stats.toolStats.map((t: { toolName: string; calls: number; avgDurationMs: number; successRate: number }) => (
                         <tr key={t.toolName} className="border-b border-slate-700/50 text-slate-300">
                           <td className="px-3 py-1.5 font-mono">{t.toolName}</td>
                           <td className="px-3 py-1.5 text-right">{t.calls}</td>
@@ -433,7 +433,7 @@ export default function TimelinePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {stats.featureStats.map((f: any) => (
+                      {stats.featureStats.map((f: { featureId: string; events: number; toolCalls: number; llmCalls: number; costUsd: number }) => (
                         <tr key={f.featureId} className="border-b border-slate-700/50 text-slate-300">
                           <td className="px-3 py-1.5 font-mono">{f.featureId}</td>
                           <td className="px-3 py-1.5 text-right">{f.events}</td>
@@ -509,7 +509,7 @@ export default function TimelinePage() {
                 {knowledgeStats.topUsed?.length > 0 && (
                   <div className="bg-slate-800 rounded-lg p-4">
                     <h3 className="text-sm font-medium text-slate-300 mb-2">🔥 最常引用经验</h3>
-                    {knowledgeStats.topUsed.map((e: any, i: number) => (
+                    {knowledgeStats.topUsed.map((e: { useCount: number; summary: string }, i: number) => (
                       <div key={i} className="flex items-center gap-2 py-1 text-xs">
                         <span className="text-indigo-400">×{e.useCount}</span>
                         <span className="text-slate-300">{e.summary}</span>
