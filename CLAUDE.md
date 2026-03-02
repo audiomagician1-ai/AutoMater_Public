@@ -1,11 +1,11 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-02 | 版本: v20.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-02 | 版本: v21.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v20.0 — Agent 智能增强 + 能力差距分析15项改进 + 多模态交互 + 安全加固
-**最高优先级**: Agent 产出质量提升 (验证门控, 语义死循环检测, 自适应上下文)
+**当前阶段**: v21.0 — 元Agent 管家4模式系统 + 管理员模式 + 守护进程 + 导入详细进度
+**最高优先级**: 管家智能体验优化 (模式切换, 自主行为, 团队管理对话化)
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
 ## 2. PROJECT IDENTITY
@@ -23,7 +23,7 @@
 | State | Zustand 5 (单 Store, Map-based) |
 | Agent Engine | TypeScript (Electron Main Process, 全同步架构) |
 | LLM | 统一适配层: OpenAI 兼容 + Anthropic 原生双协议 |
-| Database | SQLite (better-sqlite3, 同步 API, **19 张表**, 12 版迁移) |
+| Database | SQLite (better-sqlite3, 同步 API, **22 张表**, 15 版迁移) |
 | Build | pnpm + Vite (renderer) + tsc (main/preload) + electron-builder |
 | Test | Vitest 4 + @vitest/coverage-v8 (43 测试文件, 817 tests) |
 | Lint | ESLint 10 + Prettier 3 |
@@ -198,15 +198,25 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | DevOps | devops-* | 10 | 自动构建验证 (install→lint→test→build) |
 | Researcher | researcher-* | 6 | 只读子 Agent, 8 轮上限 |
 
-### 元 Agent (v5.4 → v7.0)
+### 元 Agent (v5.4 → v21.0 管家4模式系统)
 
 - **位置**: 全局右侧可收起面板 + WishPage 右侧
-- **职责**: 跨项目路由, 需求接收转发, 工作流管理, 查询项目技术/设计细节
-- **后端**: `electron/ipc/meta-agent.ts`
-- **功能**: 意图检测 (wish/query/control/general), 配置管理, **持久记忆 (CRUD + 语义搜索)**
-- **数据表**: `meta_agent_config` + `meta_agent_memories`
+- **职责**: 跨项目路由, 需求接收转发, 工作流管理, 查询项目技术/设计细节, **团队/项目直接管理 (admin模式)**
+- **后端**: `electron/ipc/meta-agent.ts` + `electron/engine/meta-agent-daemon.ts`
+- **4种对话模式**:
+  | 模式 | ID | 职责 | 工具集 | 迭代上限 |
+  |------|-----|------|--------|--------|
+  | 工作模式 | work | 需求接收→create_wish→委派团队 | 全量工具 | 50 |
+  | 闲聊模式 | chat | 轻松对话, 技术咨询, 不执行任务 | 最小工具集 | 5 |
+  | 深度讨论 | deep | 深度分析, 可写文件/编辑/派任务 | 全量+write/edit | 80 |
+  | 管理模式 | admin | 直接管理团队/工作流/项目配置 | 9个admin_*工具 | 30 |
+- **Per-Mode 配置**: `ModeConfig { maxReactIterations, maxResponseTokens, contextHistoryLimit, contextTokenLimit }` 可在设置面板独立调整
+- **管家守护进程**: Heartbeat 定时检查 + 事件钩子 + Cron 任务 (meta-agent-daemon.ts ~400行)
+- **设置面板**: 4 Tab — 基础配置 / 模式参数 / 记忆管理 / 自主行为
+- **数据表**: `meta_agent_config` + `meta_agent_memories` + `meta_agent_chat_messages` + `meta_agent_heartbeat_log`
+- **模式切换**: ModeSwitchBadge UI组件, session.updateChatMode IPC, sessions.chat_mode 列持久化
 
-### 数据库 (SQLite, 19 张表, schema_version 迁移体系, 12 版)
+### 数据库 (SQLite, 22 张表, schema_version 迁移体系, 15 版)
 
 **核心建表** (initDatabase 创建):
 
@@ -219,7 +229,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | agents | id, project_id, role, status, token/cost 统计 | Agent 实例 |
 | agent_logs | project_id, agent_id, type, content | 持久化日志 |
 
-**迁移创建** (MIGRATIONS v1-v10):
+**迁移创建** (MIGRATIONS v1-v15):
 
 | 表 | 迁移版本 | 主要字段 | 用途 |
 |----|---------|---------|------|
@@ -230,11 +240,15 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | mission_tasks | v5 | id, mission_id, title, status, input, output | 工作流子任务 |
 | meta_agent_config | v7 | key, value | 元Agent 配置 |
 | meta_agent_memories | v7 | id, category, content, importance | 元Agent 持久记忆 |
+| meta_agent_chat_messages | v7 (ensureTable) | session_id, role, content | 管家对话消息持久化 |
 | workflow_presets | v9 | id, project_id, name, stages, is_active | 工作流预设 (v12) |
 | project_secrets | v10 | project_id, key, value (加密), provider | 密钥安全存储 (v13) |
 
 v11: team_members 增加 max_iterations 列 (可配置 Agent 最大迭代数)
 v12: context_window 默认值从 128000 升级到 256000
+v13: features.summary 列 — PM 一句话摘要用于索引层
+v14: agents 表改复合主键 (id, project_id)
+v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 
 **模块自管理表** (ensureXxxTable):
 
@@ -242,10 +256,11 @@ v12: context_window 默认值从 128000 升级到 256000
 |----|---------|------|
 | events | event-store.ts | 事件流持久化 |
 | checkpoints | mission.ts | 流水线断点恢复 |
-| sessions | conversation-backup.ts | 会话备份/恢复 |
+| sessions | conversation-backup.ts | 会话备份/恢复 (v15: +chat_mode列) |
 | feature_sessions | conversation-backup.ts | Feature↔Session 关联 (v8.1) |
+| meta_agent_heartbeat_log | meta-agent-daemon.ts | 守护进程心跳日志 |
 
-### 84+ 工具体系
+### 93+ 工具体系
 
 | 类别 | 工具名 | 状态 |
 |------|--------|------|
@@ -261,9 +276,11 @@ v12: context_window 默认值从 128000 升级到 256000
 | **视觉** (3) | analyze_image, compare_screenshots, visual_assert | ✅ Vision LLM |
 | **技能** (4) | skill_acquire, skill_search, skill_improve, skill_record_usage | ✅ |
 | **部署** (2+) | deploy_tools | ✅ v10 |
+| **元Agent** (1) | create_wish | ✅ 委派任务给团队 |
+| **Admin** (9) | admin_list_members, admin_add_member, admin_update_member, admin_remove_member, admin_list_workflows, admin_activate_workflow, admin_update_workflow, admin_update_project, admin_get_available_stages | ✅ v21 (仅admin模式) |
 | **MCP** | 动态加载外部工具 | ✅ mcp-client.ts |
 
-### IPC 命名空间 (preload.ts — 22 个)
+### IPC 命名空间 (preload.ts — 23 个)
 
 | 命名空间 | 引入版本 | 说明 |
 |----------|---------|------|
@@ -282,13 +299,14 @@ v12: context_window 默认值从 128000 升级到 256000
 | `skillEvolution` | v5.1 | 技能进化索引/排名/详情 |
 | `dialog` | v5.1 | 文件夹选择对话框 |
 | `secrets` | v13 | 密钥加密存储 CRUD |
-| `metaAgent` | v5.4→v7 | 元Agent 对话 + 配置 + 记忆 CRUD |
+| `metaAgent` | v5.4→v21 | 元Agent 对话 + 配置 + 记忆 + 守护进程 (7 daemon API) |
 | `ephemeralMission` | v5.5 | 临时工作流 CRUD + cancel + patches |
 | `context` | v5.6 | 上下文基线预览 |
-| `session` | v8→v8.1 | 会话管理 + Feature-Session 关联 |
+| `session` | v8→v21 | 会话管理 + Feature-Session 关联 + updateChatMode |
 | `workflow` | v12 | 工作流预设 CRUD + activate + stages |
 | `zoom` | v5.2 | 缩放控制 (webFrame, 无 IPC) |
 | `monitor` | v6 | 系统性能/活动时序/模型价格 |
+| `issues` | v20 | GitHub Issues 查询 |
 
 ### 核心设计决策
 
@@ -305,7 +323,7 @@ v12: context_window 默认值从 128000 升级到 256000
 
 ## 4. CURRENT STATE
 
-**版本**: v20.0 (Agent 智能增强 + 能力差距15项改进 + 多模态 + 安全加固)
+**版本**: v21.0 (元Agent 4模式系统 + 管理员模式 + 守护进程 + 导入详细进度 + 流式修复)
 
 ### 版本演进总览
 
@@ -327,12 +345,13 @@ v12: context_window 默认值从 128000 升级到 256000
 | v18 | Agent 智能增强 5 大模块 (迭代学习/自适应工具/子Agent压缩/观察遮蔽/Scratchpad) |
 | v19 | 多模态交互 (图片/文件上传 + 网络图片搜索), 大文件拆分 (tool-registry/executor) |
 | v20 | Agent 能力差距15项改进 (验证门控/语义死循环/纯文本容忍/自适应Prompt/架构裁剪/经验提取) |
+| v21 | 元Agent 4模式系统 (work/chat/deep/admin) + 9管理工具 + per-mode配置 + 守护进程 + 流式通信修复 + 导入详细进度 |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
-- [x] ReAct Developer 循环 (50 轮, 84+ 工具 + MCP 动态加载)
+- [x] ReAct Developer 循环 (50 轮, 93+ 工具 + MCP 动态加载)
 - [x] QA 程序化检查 + LLM 审查 + 硬规则评分 + TDD 模式
-- [x] 84+ 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy/Docker/SubAgent)
+- [x] 93+ 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy/Docker/SubAgent/Admin)
 - [x] 3 层上下文记忆 (Hot/Warm/Cold) + 压缩 + Scratchpad 持久化
 - [x] 3 层持久记忆 (Global/Project/Role) + 元Agent 持久记忆
 - [x] **v20.0 验证门控** — task_complete 前强制验证 (写过文件必须 run_command/test)
@@ -347,6 +366,12 @@ v12: context_window 默认值从 128000 升级到 256000
 - [x] 临时工作流 (5 种 Mission 类型) + 断点恢复
 - [x] 已有项目导入分析 (4-Phase Scanner + 增量更新 + 7 探针 + 缓存)
 - [x] 元Agent (跨项目管家, 意图检测, 配置管理, 持久记忆, 多会话)
+- [x] **v21.0 元Agent 4模式系统** — work(委派团队)/chat(轻松对话)/deep(深度分析+写文件)/admin(9个管理工具直接操作DB)
+- [x] **v21.0 Per-Mode 配置** — 每种模式独立的 maxReactIterations/maxResponseTokens/contextHistoryLimit
+- [x] **v21.0 管家守护进程** — Heartbeat 定时检查 + 事件钩子 + Cron 任务 + HEARTBEAT_OK 协议
+- [x] **v21.0 LLM 流式通信修复** — _callOpenAIWithTools() 强制 stream:true + SSE 解析
+- [x] **v21.0 导入分析详细进度** — ImportLogCallback + 每个探针实时流式日志 + 5分钟超时保护
+- [x] **v21.0 模式切换 UI** — ModeSwitchBadge 组件 + session.updateChatMode IPC
 - [x] 技能进化系统 + 跨项目经验迁移
 - [x] MCP 协议动态工具加载 + 成员级 MCP 配置
 - [x] 会话备份/恢复 + Feature-Session 关联追踪
@@ -398,12 +423,14 @@ v12: context_window 默认值从 128000 升级到 256000
 | 自适应工具选择 | `electron/engine/adaptive-tool-selector.ts` |
 | 子Agent压缩 | `electron/engine/sub-agent-compressor.ts` |
 | LLM 调用 | `electron/engine/llm-client.ts` |
-| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 12 版) |
+| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 15 版) |
 | 密钥管理 | `electron/engine/secret-manager.ts` |
 | 会话管理 | `electron/engine/conversation-backup.ts` + `electron/ipc/sessions.ts` |
 | 工作流预设 | `electron/ipc/workflow.ts` |
 | 前端状态 | `src/stores/app-store.ts` + `src/stores/slices/*.ts` |
-| 元Agent 后端 | `electron/ipc/meta-agent.ts` |
+| 元Agent 后端 | `electron/ipc/meta-agent.ts` (含 4模式提示词 + admin工具执行 + ModeConfig) |
+| 元Agent 守护进程 | `electron/engine/meta-agent-daemon.ts` (heartbeat/hooks/cron) |
+| 元Agent 设置面板 | `src/components/MetaAgentSettings.tsx` (4 tab: 配置/模式/记忆/守护) |
 | 项目导入分析 | `electron/engine/project-importer.ts` + `electron/engine/probes/*.ts` |
 | 系统监控 | `electron/engine/system-monitor.ts` + `src/components/SystemMonitor.tsx` |
 
