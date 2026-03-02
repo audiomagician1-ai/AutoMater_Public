@@ -10,7 +10,10 @@
  * v4.5: 重构为 git-provider 的薄包装层
  */
 
-import { execSync } from 'child_process';
+import { execSync, exec as execCb } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(execCb);
 import fs from 'fs';
 import path from 'path';
 import { initRepo, commit as gpCommit, getLog as gpGetLog, type GitProviderConfig } from './git-provider';
@@ -24,7 +27,7 @@ const log = createLogger('workspace-git');
  */
 export function hasGit(): boolean {
   try {
-    execSync('git --version', { stdio: 'ignore' });
+    execSync('git --version', { stdio: 'ignore' }); // SYNC-OK: <1ms 存在性探测, 仅启动时调用一次
     return true;
   } catch { /* silent: git not installed */
     return false;
@@ -63,7 +66,7 @@ export async function exportWorkspaceZip(workspacePath: string, outputPath: stri
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
     const cmd = `powershell -NoProfile -Command "Compress-Archive -Path '${workspacePath}\\*' -DestinationPath '${outputPath}' -Force"`;
-    execSync(cmd, { stdio: 'ignore', timeout: 60000 });
+    await execAsync(cmd, { timeout: 60000 });
     return fs.existsSync(outputPath);
   } catch (err) {
     log.error('Workspace zip export failed', err);

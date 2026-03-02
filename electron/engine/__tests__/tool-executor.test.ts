@@ -62,11 +62,14 @@ vi.mock('../git-provider', () => ({
 vi.mock('../sandbox-executor', () => ({
   execInSandbox: vi.fn(() => ({ success: true, stdout: 'output', stderr: '', exitCode: 0, duration: 100, timedOut: false })),
   execInSandboxAsync: vi.fn(() => ({ pid: 1234, getStdout: () => 'bg', getStderr: () => '' })),
+  execInSandboxPromise: vi.fn(async () => ({ success: true, stdout: 'async output', stderr: '', exitCode: 0, duration: 80, timedOut: false })),
   isAsyncHandle: vi.fn(() => true),
   registerProcess: vi.fn(),
   getActiveProcess: vi.fn(() => null),
   runTest: vi.fn(() => ({ success: true, stdout: 'PASS', stderr: '', exitCode: 0, duration: 500, timedOut: false })),
   runLint: vi.fn(() => ({ success: true, stdout: 'No errors', stderr: '', exitCode: 0, duration: 200 })),
+  runTestAsync: vi.fn(async () => ({ success: true, stdout: 'PASS async', stderr: '', exitCode: 0, duration: 400, timedOut: false })),
+  runLintAsync: vi.fn(async () => ({ success: true, stdout: 'No errors async', stderr: '', exitCode: 0, duration: 150, timedOut: false })),
 }));
 
 vi.mock('../memory-system', () => ({
@@ -351,31 +354,31 @@ describe('tool-executor', () => {
     });
   });
 
-  describe('run_command (sync)', () => {
-    it('dispatches to sandbox executor', () => {
-      const r = executeTool(makeCall('run_command', { command: 'echo hello' }), ctx);
+  describe('run_command (async v17.1)', () => {
+    it('dispatches to async sandbox executor', async () => {
+      const r = await executeToolAsync(makeCall('run_command', { command: 'echo hello' }), ctx);
       expect(r.success).toBe(true);
       expect(r.output).toContain('output');
       expect(r.action).toBe('shell');
     });
 
-    it('handles background execution', () => {
-      const r = executeTool(makeCall('run_command', { command: 'long-task', background: true }), ctx);
+    it('handles background execution', async () => {
+      const r = await executeToolAsync(makeCall('run_command', { command: 'long-task', background: true }), ctx);
       expect(r.success).toBe(true);
       expect(r.output).toContain('后台进程已启动');
     });
   });
 
-  describe('run_test & run_lint', () => {
-    it('run_test returns test results', () => {
-      const r = executeTool(makeCall('run_test', {}), ctx);
+  describe('run_test & run_lint (async v17.1)', () => {
+    it('run_test returns test results', async () => {
+      const r = await executeToolAsync(makeCall('run_test', {}), ctx);
       expect(r.success).toBe(true);
       expect(r.output).toContain('run_test');
       expect(r.action).toBe('shell');
     });
 
-    it('run_lint returns lint results', () => {
-      const r = executeTool(makeCall('run_lint', {}), ctx);
+    it('run_lint returns lint results', async () => {
+      const r = await executeToolAsync(makeCall('run_lint', {}), ctx);
       expect(r.success).toBe(true);
       expect(r.output).toContain('run_lint');
     });

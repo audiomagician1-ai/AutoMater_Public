@@ -102,7 +102,7 @@ let _dockerAvailable: boolean | null = null;
 export function isDockerAvailable(): boolean {
   if (_dockerAvailable !== null) return _dockerAvailable;
   try {
-    execSync('docker info', { stdio: 'ignore', timeout: 5000 });
+    execSync('docker info', { stdio: 'ignore', timeout: 5000 }); // SYNC-OK: 存在性探测, 结果已缓存至 _dockerAvailable
     _dockerAvailable = true;
   } catch { /* silent: docker not available */
     _dockerAvailable = false;

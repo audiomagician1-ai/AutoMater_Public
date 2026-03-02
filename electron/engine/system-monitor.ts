@@ -142,7 +142,7 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
   _gpuSamplePending = true;
   try {
     const { execSync } = await import('child_process');
-    const output = execSync(
+    const output = execSync( // SYNC-OK: nvidia-smi <50ms, 已有 _gpuSamplePending guard 防并发
       'nvidia-smi --query-gpu=utilization.gpu,utilization.memory,name --format=csv,noheader,nounits',
       { timeout: 3000, encoding: 'utf8', windowsHide: true },
     );

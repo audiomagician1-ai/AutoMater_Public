@@ -12,7 +12,7 @@ import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type StreamCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
-import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
+import { updateAgentStats, checkBudget, getTeamPrompt, getTeamMemberLLMConfig, getTeamMemberMaxIterations } from './agent-manager';
 import type { AppSettings, EnrichedFeature, LLMMessage, LLMToolCall } from './types';
 import { collectDeveloperContext, collectLightContext, loadKnownIssues, type ContextSnapshot } from './context-collector';
 import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from './tool-system';
@@ -51,6 +51,8 @@ export interface ReactResult {
   totalInputTokens: number;
   totalOutputTokens: number;
   iterations: number;
+  /** v18.0: 终止原因 (null = task_complete 正常完成) */
+  terminationReason?: string;
 }
 
 export interface MessageTokenBreakdown {
@@ -158,7 +160,9 @@ export async function reactDeveloperLoop(
   permissions?: import('./tool-registry').AgentPermissions,
 ): Promise<ReactResult> {
   const db = getDb();
-  const MAX_ITERATIONS = 25;
+  // v18.0: 成员级 maxIterations 优先 → 系统默认 25
+  const memberMaxIter = getTeamMemberMaxIterations(projectId, 'developer', parseInt(workerId.replace('dev-', ''), 10) - 1 || 0);
+  const MAX_ITERATIONS = memberMaxIter ?? 25;
 
   // v3.0: 程序化终止控制器 (替代依赖 LLM 调用 task_complete)
   const guardState: GuardReactState = {
@@ -314,6 +318,8 @@ export async function reactDeveloperLoop(
     content: `🔄 ${feature.id} 开始 ReAct 工具循环 (最多 ${MAX_ITERATIONS} 轮)`,
   });
 
+  let terminationReason: string | undefined;
+
   const reactState: AgentReactState = {
     agentId: workerId,
     featureId: feature.id,
@@ -326,6 +332,7 @@ export async function reactDeveloperLoop(
     guardState.iteration = iter;
     const termCheck = checkReactTermination(guardState, DEFAULT_REACT_CONFIG, signal.aborted);
     if (!termCheck.shouldContinue) {
+      terminationReason = termCheck.reason;
       sendToUI(win, 'agent:log', {
         projectId, agentId: workerId,
         content: `🛑 ${feature.id} 程序化终止: ${termCheck.reason} — ${termCheck.message}`,
@@ -709,6 +716,7 @@ export async function reactDeveloperLoop(
     totalInputTokens: totalIn,
     totalOutputTokens: totalOut,
     iterations: reactState.iterations.length,
+    terminationReason,
   };
 }
 

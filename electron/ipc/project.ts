@@ -448,6 +448,7 @@ export function setupProjectHandlers() {
     llm_config?: string | null;      // v11.0: JSON string or null
     mcp_servers?: string | null;     // v11.0: JSON string or null
     skills?: string | null;          // v11.0: JSON string or null
+    max_iterations?: number;         // v18.0: 成员级最大迭代轮数
   }) => {
     const db = getDb();
     const sets: string[] = [];
@@ -463,6 +464,8 @@ export function setupProjectHandlers() {
     if (fields.llm_config !== undefined) { sets.push('llm_config = ?'); vals.push(fields.llm_config); }
     if (fields.mcp_servers !== undefined) { sets.push('mcp_servers = ?'); vals.push(fields.mcp_servers); }
     if (fields.skills !== undefined) { sets.push('skills = ?'); vals.push(fields.skills); }
+    // v18.0: 成员级最大迭代轮数
+    if (fields.max_iterations !== undefined) { sets.push('max_iterations = ?'); vals.push(fields.max_iterations); }
     if (sets.length === 0) return { success: false };
     vals.push(memberId);
     db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -558,6 +561,18 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-features', (_event, projectId: string) => {
     const db = getDb();
     return db.prepare('SELECT * FROM features WHERE project_id = ? ORDER BY priority ASC, id ASC').all(projectId);
+  });
+
+  // ── v18.0: Feature 续跑 — 将 paused feature 重置为 todo 状态 ──
+  ipcMain.handle('feature:resume', (_event, projectId: string, featureId: string) => {
+    const db = getDb();
+    const feature = db.prepare("SELECT status, resume_snapshot FROM features WHERE id = ? AND project_id = ?").get(featureId, projectId) as { status: string; resume_snapshot: string | null } | undefined;
+    if (!feature) return { success: false, message: 'Feature 不存在' };
+    if (feature.status !== 'paused') return { success: false, message: `Feature 状态为 ${feature.status}，只有 paused 状态可以续跑` };
+
+    // 重置为 todo，清除锁定，保留 resume_snapshot 供 worker 参考
+    db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE id = ? AND project_id = ?").run(featureId, projectId);
+    return { success: true, message: `Feature ${featureId} 已重置为待执行，将在下次启动时继续` };
   });
 
   // ── 获取项目的 agents ──

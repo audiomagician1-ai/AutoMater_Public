@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/app-store';
 type Feature = {
   id: string; title: string; description: string; priority: number;
   category: string; status: string; locked_by: string | null;
+  resume_snapshot?: string | null;
 };
 
 /** v8.1: 工作类型 → 简短中文标签 */
@@ -19,6 +20,7 @@ const STATUS_COLS = [
   { key: 'todo',        label: '待做',   color: 'bg-slate-500',   ring: 'ring-slate-500/30' },
   { key: 'in_progress', label: '开发中', color: 'bg-blue-500',    ring: 'ring-blue-500/30' },
   { key: 'reviewing',   label: '审查中', color: 'bg-amber-500',   ring: 'ring-amber-500/30' },
+  { key: 'paused',      label: '已暂停', color: 'bg-orange-500',  ring: 'ring-orange-500/30' },
   { key: 'passed',      label: '已完成', color: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
   { key: 'failed',      label: '失败',   color: 'bg-red-500',     ring: 'ring-red-500/30' },
 ];
@@ -94,6 +96,29 @@ export function BoardPage() {
                       </div>
                       <p className="text-xs text-slate-300 leading-snug line-clamp-2">{f.title || f.description}</p>
                       {f.locked_by && <p className="text-[10px] text-forge-400">🔨 {f.locked_by}</p>}
+                      {/* v18.0: paused 状态 — 显示续跑信息和按钮 */}
+                      {f.status === 'paused' && (() => {
+                        let snap: { iterations?: number; cost?: number } = {};
+                        try { snap = f.resume_snapshot ? JSON.parse(f.resume_snapshot) : {}; } catch { /* ignore */ }
+                        return (
+                          <div className="pt-1 space-y-1">
+                            <p className="text-[10px] text-orange-400">
+                              ⏸️ 已执行 {snap.iterations ?? '?'} 轮{snap.cost ? ` · $${snap.cost.toFixed(4)}` : ''}
+                            </p>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!currentProjectId) return;
+                                await window.automater.project.resumeFeature(currentProjectId, f.id);
+                                load();
+                              }}
+                              className="w-full text-[10px] px-2 py-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 rounded transition-colors font-medium"
+                            >
+                              ▶ 继续执行
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {/* v8.1: Session 关联摘要 */}
                       {ss && ss.totalSessions > 0 && (
                         <div className="flex items-center gap-1 flex-wrap pt-0.5">

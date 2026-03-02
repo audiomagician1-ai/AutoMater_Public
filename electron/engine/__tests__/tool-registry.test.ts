@@ -224,9 +224,9 @@ describe('isAsyncTool', () => {
 
   it('identifies sync tools (local file/think)', () => {
     // v17.0: read_file moved to async (stream-based large file reading)
+    // v17.1: run_command/run_test/run_lint/search_files/code_search moved to async
     const syncTools = ['write_file', 'edit_file', 'list_files',
-      'search_files', 'think', 'task_complete', 'todo_write', 'todo_read',
-      'run_command', 'run_test', 'run_lint'];
+      'think', 'task_complete', 'todo_write', 'todo_read'];
     for (const t of syncTools) {
       expect(isAsyncTool(t), `${t} should be sync`).toBe(false);
     }

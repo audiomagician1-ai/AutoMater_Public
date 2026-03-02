@@ -23,7 +23,7 @@ export { callLLM, calcCost, getSettings, sleep, validateModel, NonRetryableError
 export { sendToUI, addLog, notify, createStreamCallback } from '../ui-bridge';
 export {
   spawnAgent, updateAgentStats, checkBudget, lockNextFeature, getTeamPrompt,
-  getTeamMemberLLMConfig, stopOrchestrator,
+  getTeamMemberLLMConfig, getTeamMemberMaxIterations, stopOrchestrator,
 } from '../agent-manager';
 export { reactDeveloperLoop, reactAgentLoop } from '../react-loop';
 export type { GenericReactResult } from '../react-loop';

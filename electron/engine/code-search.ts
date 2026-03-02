@@ -14,7 +14,10 @@
  * v1.0 — 2026-03-02
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { execSync, spawnSync, exec as execCb } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(execCb);
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -283,22 +286,7 @@ function fallbackSearch(
   startTime: number,
 ): SearchResult {
   try {
-    let cmd: string;
-    const escapedPattern = pattern.replace(/'/g, "''");
-
-    if (process.platform === 'win32') {
-      const includeFilter = options.include && options.include.length > 0
-        ? ` -Include ${options.include.map(i => `'${i}'`).join(',')}`
-        : '';
-      const caseFlag = options.caseSensitive ? '' : ' -CaseSensitive:$false';
-      cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}'${caseFlag} -Context ${options.context},${options.context} | Select-Object -First ${options.maxResults} | Out-String -Width 300"`;
-    } else {
-      const includeFlag = options.include && options.include.length > 0
-        ? options.include.map(i => `--include="${i}"`).join(' ')
-        : '';
-      const caseFlag = options.caseSensitive ? '' : '-i';
-      cmd = `grep -rn ${caseFlag} ${includeFlag} -C ${options.context} "${pattern.replace(/"/g, '\\"')}" . | grep -v node_modules | grep -v '.git/' | head -${options.maxResults * 5}`;
-    }
+    const cmd = buildFallbackCmd(pattern, options);
 
     const rawOutput = execSync(cmd, {
       cwd: workspacePath,
@@ -307,7 +295,6 @@ function fallbackSearch(
       timeout: 20000,
     });
 
-    // 简单解析为 SearchMatch 格式
     const matches = parseFallbackOutput(rawOutput, workspacePath, options.maxResults);
 
     return {
@@ -320,6 +307,93 @@ function fallbackSearch(
   } catch { /* silent: grep搜索异常 */
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
+}
+
+/** 构建 fallback 搜索命令 (PowerShell / grep) */
+function buildFallbackCmd(
+  pattern: string,
+  options: { include?: string[]; context: number; maxResults: number; caseSensitive?: boolean },
+): string {
+  const escapedPattern = pattern.replace(/'/g, "''");
+
+  if (process.platform === 'win32') {
+    const includeFilter = options.include && options.include.length > 0
+      ? ` -Include ${options.include.map(i => `'${i}'`).join(',')}`
+      : '';
+    const caseFlag = options.caseSensitive ? '' : ' -CaseSensitive:$false';
+    return `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}'${caseFlag} -Context ${options.context},${options.context} | Select-Object -First ${options.maxResults} | Out-String -Width 300"`;
+  } else {
+    const includeFlag = options.include && options.include.length > 0
+      ? options.include.map(i => `--include="${i}"`).join(' ')
+      : '';
+    const caseFlag = options.caseSensitive ? '' : '-i';
+    return `grep -rn ${caseFlag} ${includeFlag} -C ${options.context} "${pattern.replace(/"/g, '\\"')}" . | grep -v node_modules | grep -v '.git/' | head -${options.maxResults * 5}`;
+  }
+}
+
+/** 异步 fallback 搜索 — 不阻塞主进程 */
+async function fallbackSearchAsync(
+  workspacePath: string,
+  pattern: string,
+  options: {
+    include?: string[];
+    context: number;
+    maxResults: number;
+    caseSensitive?: boolean;
+  },
+  startTime: number,
+): Promise<SearchResult> {
+  try {
+    const cmd = buildFallbackCmd(pattern, options);
+
+    const { stdout: rawOutput } = await execAsync(cmd, {
+      cwd: workspacePath,
+      encoding: 'utf-8',
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 20000,
+    });
+
+    const matches = parseFallbackOutput(rawOutput, workspacePath, options.maxResults);
+
+    return {
+      matches,
+      totalMatches: matches.length,
+      truncated: false,
+      engine: 'fallback',
+      durationMs: Date.now() - startTime,
+    };
+  } catch { /* silent: grep搜索异常 */
+    return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
+  }
+}
+
+/**
+ * 异步代码搜索 — 不阻塞主进程
+ * ripgrep 路径仍同步 (<50ms), fallback 路径改为 async
+ */
+export async function codeSearchAsync(
+  workspacePath: string,
+  pattern: string,
+  options: {
+    include?: string[];
+    exclude?: string[];
+    context?: number;
+    maxResults?: number;
+    caseSensitive?: boolean;
+    respectGitignore?: boolean;
+    fixedString?: boolean;
+    wholeWord?: boolean;
+  } = {},
+): Promise<SearchResult> {
+  const start = Date.now();
+  const ctx = options.context ?? 2;
+  const maxResults = options.maxResults ?? 50;
+
+  if (isRipgrepAvailable()) {
+    // ripgrep is fast (<50ms), sync is acceptable
+    return ripgrepSearch(workspacePath, pattern, { ...options, context: ctx, maxResults }, start);
+  }
+  return fallbackSearchAsync(workspacePath, pattern, { ...options, context: ctx, maxResults }, start);
 }
 
 function parseFallbackOutput(raw: string, workspacePath: string, maxResults: number): SearchMatch[] {

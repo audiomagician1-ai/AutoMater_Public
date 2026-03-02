@@ -23,7 +23,7 @@
 import {
   BrowserWindow, getDb, createLogger, execSync, fs, path, execAsync,
   sendToUI, addLog,
-  spawnAgent, reactAgentLoop,
+  spawnAgent, reactAgentLoop, getTeamMemberMaxIterations,
   emitEvent, commitWorkspace,
   resolveMemberModel,
   type AppSettings, type GenericReactResult,
@@ -269,7 +269,7 @@ export async function phaseDeployPipeline(
   if (signal.aborted) return;
 
   const db = getDb();
-  const devopsId = `devops-${Date.now().toString(36)}`;
+  const devopsId = 'devops-0';  // 固定 ID: 复用同一 DevOps Agent
   spawnAgent(projectId, devopsId, 'devops', win);
   sendToUI(win, 'agent:status', {
     projectId, agentId: devopsId, status: 'working',
@@ -321,7 +321,7 @@ export async function phaseDeployPipeline(
       gitConfig,
       win,
       signal,
-      maxIterations: 25,  // 部署流程可能步骤较多
+      maxIterations: getTeamMemberMaxIterations(projectId, 'devops') ?? 25,  // 部署流程可能步骤较多
       model,
       timeoutMs: 300_000, // 5 分钟超时 (部署可能较慢)
     });

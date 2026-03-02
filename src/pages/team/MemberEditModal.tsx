@@ -143,6 +143,24 @@ export function MemberEditModal({ member, onClose, onSave, onChange }: {
                 <label className={LABEL_CLS}>上下文窗口 (tokens)</label>
                 <input value={member.max_context_tokens} onChange={e => onChange({ ...member, max_context_tokens: parseInt(e.target.value) || 128000 })} className={INPUT_CLS} />
               </div>
+              <div>
+                <label className={LABEL_CLS}>最大工作轮数 <span className="text-slate-600">— 留空使用系统默认</span></label>
+                <input
+                  type="number"
+                  value={member.max_iterations ?? ''}
+                  onChange={e => {
+                    const v = e.target.value.trim();
+                    onChange({ ...member, max_iterations: v === '' ? null : Math.max(1, parseInt(v) || 25) });
+                  }}
+                  placeholder={member.role === 'pm' ? '默认 15' : member.role === 'architect' ? '默认 15' : member.role === 'developer' ? '默认 25' : member.role === 'qa' ? '默认 15' : '默认 25'}
+                  className={INPUT_CLS}
+                  min={1}
+                  max={500}
+                />
+                <p className="text-[10px] text-slate-600 mt-1">
+                  Agent 在单个 Feature 上的最大 ReAct 迭代次数。复杂任务建议设大 (50~200)。
+                </p>
+              </div>
             </div>
           )}
 

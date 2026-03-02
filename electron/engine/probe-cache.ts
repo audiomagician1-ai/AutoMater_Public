@@ -294,7 +294,7 @@ export function detectIncrementalChanges(workspacePath: string): IncrementalResu
 
   // Try git diff first
   try {
-    const { execSync } = require('child_process');
+    const { execSync } = require('child_process'); // SYNC-OK: git diff <20ms, 缓存探测专用
     // Get the cache timestamp as ISO date for git
     const cacheDate = new Date(cache.cachedAt).toISOString();
     const gitOutput = execSync(

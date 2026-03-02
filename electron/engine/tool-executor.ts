@@ -11,17 +11,17 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+// execSync removed — v17.1: all shell execution now goes through async sandbox
 import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import {
-  codeSearch, formatSearchResult, codeSearchFiles,
+  codeSearch, codeSearchAsync, formatSearchResult, codeSearchFiles,
   readManyFiles, formatReadManyResult,
   streamReadFile, queryCodeGraph, getRepoMap,
 } from './code-search';
 import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment, getIssue, createBranch, switchBranch, deleteBranch, listBranches, getCurrentBranch, gitPull, gitPush, gitFetch, createPR, listPRs, getPR, mergePR } from './git-provider';
-import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
+import { execInSandbox, execInSandboxAsync, execInSandboxPromise, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, runTestAsync, runLintAsync, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
@@ -231,25 +231,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: formatTree(tree) || '(空目录)', action: 'read' };
       }
 
-      case 'glob_files': {
-        const pattern = call.arguments.pattern;
-        try {
-          let cmd: string;
-          if (process.platform === 'win32') {
-            const psPattern = pattern.replace(/\*\*\//g, '').replace(/\*/g, '*');
-            cmd = `powershell -NoProfile -Command "Get-ChildItem -Recurse -File -Filter '${psPattern}' | ForEach-Object { $_.FullName.Substring((Get-Location).Path.Length + 1).Replace('\\\\', '/') }"`;
-          } else {
-            cmd = `find . -type f -name "${pattern.replace(/\*\*\//g, '')}" | head -50`;
-          }
-          const output = execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', maxBuffer: 256 * 1024, timeout: 10000 });
-          const files = output.trim().split('\n')
-            .filter(f => f && !f.includes('node_modules') && !f.includes('.git'))
-            .slice(0, 50);
-          return { success: true, output: files.length > 0 ? files.join('\n') : '无匹配文件', action: 'search' };
-        } catch (err) {
-          return { success: true, output: '无匹配文件', action: 'search' };
-        }
-      }
+      // v17.1: glob_files 已迁移到 executeToolAsyncRaw (不再阻塞主进程)
+      case 'glob_files':
+        return { success: false, output: 'glob_files should route to async path', action: 'search' };
 
       // v17.0: search_files → 升级为 ripgrep + 结构化搜索
       case 'search_files': {
@@ -301,42 +285,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         return { success: true, output: map || '(空项目, 无代码文件)', action: 'read' };
       }
 
-      case 'run_command': {
-        // v16.0: 需要 shellExec 权限
-        if (!ctx.permissions?.shellExec) {
-          return { success: false, output: '执行命令被拒绝。请在全景页开启「执行命令」权限。', action: 'shell' };
-        }
-        const background = call.arguments.background === true;
-        const timeoutSec = call.arguments.timeout_seconds;
-        const timeoutMs = timeoutSec ? timeoutSec * 1000 : (background ? 1800_000 : 60_000);
-        const sandboxCfg: SandboxConfig = { workspacePath: ctx.workspacePath, timeoutMs };
-
-        if (background) {
-          // v6.0: 异步后台执行
-          const handleOrErr = execInSandboxAsync(call.arguments.command, sandboxCfg);
-          if (!isAsyncHandle(handleOrErr)) {
-            // 安全检查失败, 返回同步错误
-            return { success: false, output: handleOrErr.stderr || '命令被拦截', action: 'shell' };
-          }
-          const processId = `proc-${Date.now().toString(36)}`;
-          registerProcess(processId, handleOrErr);
-          return {
-            success: true,
-            output: `后台进程已启动 (PID: ${handleOrErr.pid}, ID: ${processId})\n命令: ${call.arguments.command}\n超时: ${Math.round(timeoutMs / 1000)}s\n\n使用 run_command 查询状态: {"command": "echo __CHECK_PROCESS__${processId}"}`,
-            action: 'shell',
-          };
-        }
-
-        // 同步执行
-        const result = execInSandbox(call.arguments.command, sandboxCfg);
-        if (result.success) {
-          return { success: true, output: (result.stdout || '(无输出)').slice(0, 8000), action: 'shell' };
-        } else if (result.timedOut) {
-          return { success: false, output: `命令超时 (${Math.round(result.duration / 1000)}s):\n${result.stderr.slice(0, 2000)}`, action: 'shell' };
-        } else {
-          return { success: false, output: `命令失败 (exit ${result.exitCode}):\n${result.stderr.slice(0, 3000)}${result.stdout ? '\n--- stdout ---\n' + result.stdout.slice(0, 2000) : ''}`, action: 'shell' };
-        }
-      }
+      // v17.1: run_command 已迁移到 executeToolAsyncRaw (不再阻塞主进程)
+      case 'run_command':
+        return { success: false, output: 'run_command should route to async path', action: 'shell' };
 
       // v6.0: 查询后台进程状态
       case 'check_process': {
@@ -354,16 +305,13 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         };
       }
 
-      case 'run_test': {
-        const result = sandboxRunTest({ workspacePath: ctx.workspacePath });
-        const output = result.stdout + (result.stderr ? '\n[stderr] ' + result.stderr : '');
-        return { success: result.success, output: `[run_test] exit=${result.exitCode} duration=${result.duration}ms${result.timedOut ? ' TIMEOUT' : ''}\n${output.slice(0, 8000)}`, action: 'shell' };
-      }
+      // v17.1: run_test 已迁移到 executeToolAsyncRaw (不再阻塞主进程)
+      case 'run_test':
+        return { success: false, output: 'run_test should route to async path', action: 'shell' };
 
-      case 'run_lint': {
-        const result = sandboxRunLint({ workspacePath: ctx.workspacePath });
-        return { success: result.success, output: `[run_lint] exit=${result.exitCode}\n${result.stdout.slice(0, 8000)}`, action: 'shell' };
-      }
+      // v17.1: run_lint 已迁移到 executeToolAsyncRaw (不再阻塞主进程)
+      case 'run_lint':
+        return { success: false, output: 'run_lint should route to async path', action: 'shell' };
 
       case 'memory_read': {
         const mem = readMemoryForRole(ctx.workspacePath, call.arguments.role || 'developer');
@@ -1555,6 +1503,107 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
   // ── Skill 外部工具 ──
   if (call.name.startsWith('skill_')) {
     return executeSkillTool(call);
+  }
+
+  // ── v17.1: execSync → async 迁移 — glob_files / run_command / run_test / run_lint / search ──
+  if (call.name === 'search_files') {
+    const searchPattern = call.arguments.pattern;
+    const searchInclude = call.arguments.include;
+    const includeArr = searchInclude && searchInclude !== '*' ? [searchInclude] : undefined;
+    const result = await codeSearchAsync(ctx.workspacePath, searchPattern, {
+      include: includeArr,
+      maxResults: 50,
+      context: 2,
+    });
+    return { success: true, output: formatSearchResult(result) || '无匹配', action: 'search' };
+  }
+
+  if (call.name === 'code_search') {
+    const csPattern = call.arguments.pattern;
+    const csInclude = call.arguments.include ? (Array.isArray(call.arguments.include) ? call.arguments.include : [call.arguments.include]) : undefined;
+    const csExclude = call.arguments.exclude ? (Array.isArray(call.arguments.exclude) ? call.arguments.exclude : [call.arguments.exclude]) : undefined;
+    const csResult = await codeSearchAsync(ctx.workspacePath, csPattern, {
+      include: csInclude,
+      exclude: csExclude,
+      maxResults: call.arguments.max_results ?? 50,
+      context: call.arguments.context ?? 2,
+      caseSensitive: call.arguments.case_sensitive ?? false,
+      fixedString: call.arguments.fixed_string ?? false,
+      wholeWord: call.arguments.whole_word ?? false,
+    });
+    return { success: true, output: formatSearchResult(csResult) || '无匹配', action: 'search' };
+  }
+
+  if (call.name === 'glob_files') {
+    const pattern = call.arguments.pattern;
+    try {
+      const globResult = await execInSandboxPromise(
+        process.platform === 'win32'
+          ? `powershell -NoProfile -Command "Get-ChildItem -Recurse -File -Filter '${pattern.replace(/\*\*\//g, '').replace(/\*/g, '*')}' | ForEach-Object { $_.FullName.Substring((Get-Location).Path.Length + 1).Replace('\\\\', '/') }"`
+          : `find . -type f -name "${pattern.replace(/\*\*\//g, '')}" | head -50`,
+        { workspacePath: ctx.workspacePath, timeoutMs: 10000, maxOutputBytes: 256 * 1024 },
+      );
+      if (globResult.success) {
+        const files = globResult.stdout.trim().split('\n')
+          .filter(f => f && !f.includes('node_modules') && !f.includes('.git'))
+          .slice(0, 50);
+        return { success: true, output: files.length > 0 ? files.join('\n') : '无匹配文件', action: 'search' };
+      }
+      return { success: true, output: '无匹配文件', action: 'search' };
+    } catch {
+      return { success: true, output: '无匹配文件', action: 'search' };
+    }
+  }
+
+  if (call.name === 'run_command') {
+    // v16.0: 需要 shellExec 权限
+    if (!ctx.permissions?.shellExec) {
+      return { success: false, output: '执行命令被拒绝。请在全景页开启「执行命令」权限。', action: 'shell' };
+    }
+    const sandboxCfg: SandboxConfig = {
+      workspacePath: ctx.workspacePath,
+      timeoutMs: call.arguments.timeout ? call.arguments.timeout * 1000 : 120_000,
+    };
+
+    // 后台模式 (timeout > 60s 或用户显式指定)
+    const isBackground = call.arguments.background === true
+      || (call.arguments.timeout && call.arguments.timeout > 60);
+    if (isBackground) {
+      const timeoutMs = sandboxCfg.timeoutMs ?? 120_000;
+      const handleOrErr = execInSandboxAsync(call.arguments.command, { ...sandboxCfg, timeoutMs });
+      if (!isAsyncHandle(handleOrErr)) {
+        return { success: false, output: handleOrErr.stderr || '启动失败', action: 'shell' };
+      }
+      const processId = `proc-${Date.now().toString(36)}`;
+      registerProcess(processId, handleOrErr);
+      return {
+        success: true,
+        output: `后台进程已启动 (PID: ${handleOrErr.pid}, ID: ${processId})\n命令: ${call.arguments.command}\n超时: ${Math.round(timeoutMs / 1000)}s`,
+        action: 'shell',
+      };
+    }
+
+    // 异步执行 (不阻塞主进程)
+    const result = await execInSandboxPromise(call.arguments.command, sandboxCfg);
+    if (result.success) {
+      return { success: true, output: (result.stdout || '(无输出)').slice(0, 8000), action: 'shell' };
+    } else if (result.timedOut) {
+      return { success: false, output: `命令超时 (${Math.round(result.duration / 1000)}s):\n${result.stderr.slice(0, 2000)}`, action: 'shell' };
+    } else {
+      return { success: false, output: `命令失败 (exit ${result.exitCode}):\n${result.stderr.slice(0, 3000)}${result.stdout ? '\n--- stdout ---\n' + result.stdout.slice(0, 2000) : ''}`, action: 'shell' };
+    }
+  }
+
+  if (call.name === 'run_test') {
+    const result = await runTestAsync({ workspacePath: ctx.workspacePath });
+    const output = result.stdout + (result.stderr ? '\n[stderr] ' + result.stderr : '');
+    return { success: result.success, output: `[run_test] exit=${result.exitCode} duration=${result.duration}ms${result.timedOut ? ' TIMEOUT' : ''}\n${output.slice(0, 8000)}`, action: 'shell' };
+  }
+
+  if (call.name === 'run_lint') {
+    const result = await runLintAsync({ workspacePath: ctx.workspacePath });
+    const output = result.stdout + (result.stderr ? '\n[stderr] ' + result.stderr : '');
+    return { success: result.success, output: `[run_lint] exit=${result.exitCode} duration=${result.duration}ms${result.timedOut ? ' TIMEOUT' : ''}\n${output.slice(0, 8000)}`, action: 'shell' };
   }
 
   // Fallback to sync

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('automater', {
     list: () => ipcRenderer.invoke('project:list'),
     get: (id: string) => ipcRenderer.invoke('project:get', id),
     getFeatures: (projectId: string) => ipcRenderer.invoke('project:get-features', projectId),
+    resumeFeature: (projectId: string, featureId: string) => ipcRenderer.invoke('feature:resume', projectId, featureId),
     getAgents: (projectId: string) => ipcRenderer.invoke('project:get-agents', projectId),
     getLogs: (projectId: string, options?: {
       limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;

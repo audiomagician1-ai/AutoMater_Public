@@ -66,7 +66,9 @@ export function stopOrchestrator(projectId: string) {
 
 export function spawnAgent(projectId: string, id: string, role: string, win: BrowserWindow | null) {
   const db = getDb();
-  db.prepare('INSERT OR REPLACE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(id, projectId, role, 'working');
+  // 先尝试插入（如果不存在），再更新状态为 working（保留累计的 stats）
+  db.prepare('INSERT OR IGNORE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(id, projectId, role, 'working');
+  db.prepare("UPDATE agents SET status = 'working', role = ? WHERE id = ? AND project_id = ?").run(role, id, projectId);
   sendToUI(win, 'agent:spawned', { projectId, agentId: id, role });
 }
 
@@ -226,6 +228,22 @@ export function getTeamMemberSkills(projectId: string, role: string, agentIndex:
   } catch { /* silent: skills JSON parse fallback */
     return [];
   }
+}
+
+/**
+ * v18.0: 获取成员级最大迭代轮数
+ * 返回 null 表示使用系统默认值
+ */
+export function getTeamMemberMaxIterations(projectId: string, role: string, agentIndex: number = 0): number | null {
+  try {
+    const db = getDb();
+    const members = db.prepare(
+      'SELECT max_iterations FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
+    ).all(projectId) as Array<{ max_iterations: number | null }>;
+    if (members.length === 0) return null;
+    const member = members[Math.min(agentIndex, members.length - 1)];
+    return member.max_iterations ?? null;
+  } catch { return null; }
 }
 
 export function lockNextFeature(projectId: string, workerId: string): FeatureRow | null {

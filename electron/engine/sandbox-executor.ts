@@ -499,6 +499,87 @@ export function isAsyncHandle(result: AsyncSandboxHandle | SandboxResult): resul
   return 'promise' in result;
 }
 
+/**
+ * 异步执行命令并直接返回 Promise<SandboxResult>
+ * 对 execInSandboxAsync 的便捷封装 — 适用于只需要最终结果的场景
+ */
+export async function execInSandboxPromise(
+  command: string,
+  config: SandboxConfig,
+  signal?: AbortSignal,
+): Promise<SandboxResult> {
+  const result = execInSandboxAsync(command, config, signal);
+  if (isAsyncHandle(result)) {
+    return result.promise;
+  }
+  // 安全检查失败 — 直接返回同步错误
+  return result;
+}
+
+/** 异步运行 npm/pnpm/yarn 测试 */
+export async function runTestAsync(config: SandboxConfig): Promise<SandboxResult> {
+  let cmd = 'npm test';
+  if (fs.existsSync(path.join(config.workspacePath, 'pnpm-lock.yaml'))) cmd = 'pnpm test';
+  else if (fs.existsSync(path.join(config.workspacePath, 'yarn.lock'))) cmd = 'yarn test';
+  else if (fs.existsSync(path.join(config.workspacePath, 'requirements.txt'))) cmd = 'python -m pytest';
+  else if (fs.existsSync(path.join(config.workspacePath, 'Cargo.toml'))) cmd = 'cargo test';
+  else if (fs.existsSync(path.join(config.workspacePath, 'go.mod'))) cmd = 'go test ./...';
+
+  return execInSandboxPromise(cmd, { ...config, timeoutMs: config.timeoutMs ?? 180_000 });
+}
+
+/** 异步运行 lint / type-check */
+export async function runLintAsync(config: SandboxConfig): Promise<SandboxResult> {
+  const commands: string[] = [];
+
+  if (fs.existsSync(path.join(config.workspacePath, 'tsconfig.json'))) {
+    commands.push('npx tsc --noEmit');
+  }
+  if (fs.existsSync(path.join(config.workspacePath, '.eslintrc.json')) ||
+      fs.existsSync(path.join(config.workspacePath, '.eslintrc.js')) ||
+      fs.existsSync(path.join(config.workspacePath, 'eslint.config.js'))) {
+    commands.push('npx eslint . --max-warnings 50');
+  }
+  if (fs.existsSync(path.join(config.workspacePath, 'requirements.txt')) ||
+      fs.existsSync(path.join(config.workspacePath, 'pyproject.toml'))) {
+    commands.push('python -m py_compile');
+  }
+
+  if (commands.length === 0) {
+    return { success: true, exitCode: 0, stdout: '未检测到 lint/type-check 配置', stderr: '', timedOut: false, duration: 0 };
+  }
+
+  const results: string[] = [];
+  let anyFailed = false;
+
+  for (const cmd of commands) {
+    const r = await execInSandboxPromise(cmd, { ...config, timeoutMs: 60_000 });
+    results.push(`$ ${cmd}\n${r.stdout}${r.stderr ? '\n[stderr] ' + r.stderr : ''}\n[exit: ${r.exitCode}]`);
+    if (!r.success) anyFailed = true;
+  }
+
+  return {
+    success: !anyFailed,
+    exitCode: anyFailed ? 1 : 0,
+    stdout: results.join('\n\n'),
+    stderr: '',
+    timedOut: false,
+    duration: 0,
+  };
+}
+
+/** 异步安装依赖 */
+export async function installDepsAsync(config: SandboxConfig): Promise<SandboxResult> {
+  let cmd = 'npm install';
+  if (fs.existsSync(path.join(config.workspacePath, 'pnpm-lock.yaml'))) cmd = 'pnpm install';
+  else if (fs.existsSync(path.join(config.workspacePath, 'yarn.lock'))) cmd = 'yarn install';
+  else if (fs.existsSync(path.join(config.workspacePath, 'requirements.txt'))) cmd = 'pip install -r requirements.txt';
+  else if (fs.existsSync(path.join(config.workspacePath, 'Cargo.toml'))) cmd = 'cargo build';
+  else if (fs.existsSync(path.join(config.workspacePath, 'go.mod'))) cmd = 'go mod download';
+
+  return execInSandboxPromise(cmd, { ...config, timeoutMs: config.timeoutMs ?? 300_000 });
+}
+
 // ═══════════════════════════════════════
 // v6.0: 活跃子进程管理
 // ═══════════════════════════════════════

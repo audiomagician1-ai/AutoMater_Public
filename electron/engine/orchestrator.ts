@@ -534,7 +534,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   const maxWorkers = settings.workerCount > 0 ? settings.workerCount : featureCount;
   const workerCount = Math.min(maxWorkers, featureCount);
 
-  const qaId = `qa-${Date.now().toString(36)}`;
+  const qaId = 'qa-0';  // 固定 ID: 复用同一 QA Agent
   spawnAgent(projectId, qaId, 'qa', win);
   sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: '🧪 QA 工程师就绪' });
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(qaId, projectId);

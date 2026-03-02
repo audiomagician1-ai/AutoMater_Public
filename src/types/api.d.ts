@@ -202,6 +202,8 @@ interface FeatureRow {
   group_name?: string | null;
   notes?: string | null;
   completed_at?: string | null;
+  /** v18.0: 中断续跑快照 (JSON string or null) */
+  resume_snapshot?: string | null;
 }
 
 /** 日志行 */
@@ -299,6 +301,7 @@ interface AutoMaterAPI {
     list(): Promise<Array<ProjectRow>>;
     get(id: string): Promise<ProjectRow | null>;
     getFeatures(projectId: string): Promise<Array<FeatureRow>>;
+    resumeFeature(projectId: string, featureId: string): Promise<{ success: boolean; message?: string }>;
     getAgents(projectId: string): Promise<Array<TeamMember & { status?: string; current_task?: string }>>;
     getLogs(projectId: string, options?: {
       limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
@@ -650,6 +653,8 @@ interface TeamMember {
   mcp_servers: string | null;
   /** v11.0: 成员级 Skill 列表 (JSON string or null) */
   skills: string | null;
+  /** v18.0: 成员级最大工作轮数 (null = 使用系统默认) */
+  max_iterations: number | null;
 }
 
 /** v11.0: 成员级 LLM 配置 — 覆盖全局设置 */

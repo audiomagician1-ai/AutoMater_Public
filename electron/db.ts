@@ -276,6 +276,14 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 11,
+    description: 'v18.0: team_members 成员级最大迭代轮数 + features 中断续跑快照',
+    up: () => {
+      safeAddColumn('ALTER TABLE team_members ADD COLUMN max_iterations INTEGER');
+      safeAddColumn('ALTER TABLE features ADD COLUMN resume_snapshot TEXT');
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */

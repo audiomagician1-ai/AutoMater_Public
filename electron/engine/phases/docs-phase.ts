@@ -82,7 +82,7 @@ export async function phaseReqsAndTestSpecs(
 
     // 批量子需求
     try {
-      const pmReqId = `pm-req-batch-${bi}-${Date.now().toString(36)}`;
+      const pmReqId = 'pm-0';  // 固定 ID: 批量子需求复用 PM Agent
       const batchFeatureDesc = batch.map((f) => {
         const fid = f.id || `F${features.indexOf(f) + 1}`;
         return `### Feature ${fid}\n标题: ${f.title || f.description}\n描述: ${f.description}\n验收标准: ${JSON.stringify(f.acceptance_criteria || f.acceptanceCriteria || [])}\n依赖: ${JSON.stringify(f.dependsOn || f.depends_on || [])}\n备注: ${f.notes || '无'}`;
@@ -110,7 +110,7 @@ export async function phaseReqsAndTestSpecs(
 
     // 批量测试规格
     try {
-      const qaSpecId = `qa-spec-batch-${bi}-${Date.now().toString(36)}`;
+      const qaSpecId = 'qa-0';  // 固定 ID: 批量测试规格复用 QA Agent
       const batchReqDocs = batchIds.map(fid => { const c = readDoc(workspacePath, 'requirement', fid); return c ? `### Feature ${fid}\n${c}` : null; }).filter(Boolean).join('\n\n---\n\n');
       if (batchReqDocs) {
         const specResult = await callLLM(settings, resolveMemberModel(projectId, 'pm', settings), [

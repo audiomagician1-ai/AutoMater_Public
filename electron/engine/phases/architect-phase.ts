@@ -25,7 +25,7 @@ export async function phaseArchitect(
   if (signal.aborted) return;
 
   const db = getDb();
-  const archId = `arch-${Date.now().toString(36)}`;
+  const archId = 'arch-0';  // 固定 ID: 复用同一 Architect Agent
   spawnAgent(projectId, archId, 'architect', win);
   sendToUI(win, 'agent:status', { projectId, agentId: archId, status: 'working', currentTask: 'architecture', featureTitle: '架构 + 产品设计' });
   sendToUI(win, 'agent:log', { projectId, agentId: archId, content: '🏗️ Phase 2: 架构师开始设计技术方案 + 产品设计...' });

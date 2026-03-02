@@ -122,7 +122,7 @@ export async function workerLoop(
     }
 
     // TDD mode — QA generates test skeleton first
-    const localQaId = `qa-${workerId}-${Date.now().toString(36)}`;
+    const localQaId = `qa-${workerId}`;  // 固定 ID: 每个 worker 对应一个 QA
     if (settings.tddMode && workspacePath) {
       try {
         spawnAgent(projectId, localQaId, 'qa', win);
@@ -165,6 +165,31 @@ export async function workerLoop(
       try {
         const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback, permissions);
         if (!reactResult.completed) {
+          // v18.0: 区分「达到轮数上限」和「其他终止」
+          const isMaxIter = reactResult.terminationReason === 'max_iterations';
+          if (isMaxIter) {
+            // 保存续跑快照 — 标记 feature 为 paused，用户可手动继续
+            const snapshot = JSON.stringify({
+              workerId,
+              qaAttempt,
+              qaFeedback,
+              filesWritten: reactResult.filesWritten,
+              iterations: reactResult.iterations,
+              cost: reactResult.totalCost,
+              terminationReason: reactResult.terminationReason,
+              timestamp: new Date().toISOString(),
+            });
+            db.prepare("UPDATE features SET status = 'paused', resume_snapshot = ? WHERE id = ? AND project_id = ?")
+              .run(snapshot, feature.id, projectId);
+            sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'paused' });
+            sendToUI(win, 'agent:log', {
+              projectId, agentId: workerId,
+              content: `⏸️ ${feature.id} 达到最大工作轮数 (${reactResult.iterations} 轮)，已暂停。可在看板页点击「继续」按钮恢复执行。`,
+            });
+            completeFeatureSessionLink(devLinkId, `暂停: 达到 ${reactResult.iterations} 轮上限`, false);
+            break; // 不重试，等待用户手动恢复
+          }
+
           sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ ${feature.id} ReAct 未完成 (${qaAttempt}/${maxQARetries})` });
           completeFeatureSessionLink(devLinkId, `ReAct 未完成 (iter=${reactResult.iterations})`, false);
           if (qaAttempt >= maxQARetries) break;

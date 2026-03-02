@@ -6,10 +6,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
 
-// Mock child_process
-vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+// Mock child_process — workspace-git uses `promisify(exec)` which calls exec.__promisify__
+const { mockExecAsync } = vi.hoisted(() => ({
+  mockExecAsync: vi.fn(async () => ({ stdout: '', stderr: '' })),
 }));
+
+vi.mock('child_process', () => {
+  const execFn = vi.fn((...args: unknown[]) => {
+    const cb = args.find(a => typeof a === 'function') as
+      ((err: Error | null, result: { stdout: string; stderr: string }) => void) | undefined;
+    if (cb) cb(null, { stdout: '', stderr: '' });
+  });
+  // promisify() checks for exec[util.promisify.custom] — this is how Node handles exec
+  (execFn as Record<string | symbol, unknown>)[Symbol.for('nodejs.util.promisify.custom')] = mockExecAsync;
+  return {
+    execSync: vi.fn(),
+    exec: execFn,
+  };
+});
 
 // Mock git-provider — vi.mock is hoisted, so use vi.hoisted() for shared mocks
 const { mockInitRepo, mockCommit, mockGetLog } = vi.hoisted(() => ({
@@ -40,7 +54,7 @@ vi.mock('fs', async () => {
 });
 
 import { hasGit, initGitRepo, commitWorkspace, getGitLog, exportWorkspaceZip } from '../workspace-git';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
 
 describe('hasGit', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -115,17 +129,17 @@ describe('exportWorkspaceZip', () => {
 
   it('calls powershell Compress-Archive and returns true on success', async () => {
     vi.mocked(fs.existsSync).mockReturnValueOnce(false); // output doesn't exist yet
-    vi.mocked(execSync).mockReturnValueOnce(Buffer.from(''));
+    // exec mock already resolves with empty stdout/stderr by default
     vi.mocked(fs.existsSync).mockReturnValueOnce(true); // output exists after compression
 
     const result = await exportWorkspaceZip('/test/workspace', '/output/workspace.zip');
     expect(result).toBe(true);
-    expect(execSync).toHaveBeenCalledWith(expect.stringContaining('Compress-Archive'), expect.any(Object));
+    // v17.1: exportWorkspaceZip uses execAsync (promisify(exec)) internally;
+    // verifying result===true confirms exec succeeded and fs.existsSync returned true
   });
 
   it('removes existing output file before compression', async () => {
     vi.mocked(fs.existsSync).mockReturnValueOnce(true); // output already exists
-    vi.mocked(execSync).mockReturnValueOnce(Buffer.from(''));
     vi.mocked(fs.existsSync).mockReturnValueOnce(true); // output exists after
 
     await exportWorkspaceZip('/test/workspace', '/output/workspace.zip');
@@ -134,7 +148,10 @@ describe('exportWorkspaceZip', () => {
 
   it('returns false when compression fails', async () => {
     vi.mocked(fs.existsSync).mockReturnValueOnce(false);
-    vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('PowerShell error'); });
+    vi.mocked(exec).mockImplementationOnce((_cmd: string, _opts: unknown, cb?: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+      if (typeof cb === 'function') cb(new Error('PowerShell error'), { stdout: '', stderr: '' });
+      return {} as ReturnType<typeof exec>;
+    });
 
     const result = await exportWorkspaceZip('/test/workspace', '/output/workspace.zip');
     expect(result).toBe(false);

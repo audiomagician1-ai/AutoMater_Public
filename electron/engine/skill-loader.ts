@@ -40,7 +40,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { exec as execCb } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(execCb);
 import { createLogger } from './logger';
 import type { ToolDefinition } from './tool-registry';
 
@@ -260,7 +263,7 @@ export async function executeSkill(
   try {
     switch (exec.type) {
       case 'command':
-        return executeCommandSkill(exec, args, timeout);
+        return await executeCommandSkill(exec, args, timeout);
       case 'http':
         return await executeHttpSkill(exec, args, timeout);
       case 'script':
@@ -281,25 +284,25 @@ function interpolate(template: string, args: Record<string, unknown>): string {
   });
 }
 
-/** command 类型执行 */
-function executeCommandSkill(
+/** command 类型执行 (async — 不阻塞主进程) */
+async function executeCommandSkill(
   exec: SkillExecution,
   args: Record<string, unknown>,
   timeout: number,
-): { success: boolean; output: string } {
+): Promise<{ success: boolean; output: string }> {
   const command = exec.command!;
   const cmdArgs = (exec.args || []).map(a => interpolate(a, args));
   const fullCommand = [command, ...cmdArgs].join(' ');
 
   try {
-    const output = execSync(fullCommand, {
+    const { stdout } = await execAsync(fullCommand, {
       cwd: exec.cwd || undefined,
       encoding: 'utf-8',
       timeout,
       maxBuffer: 1024 * 1024,
       windowsHide: true,
     });
-    return { success: true, output: output.slice(0, 10_000) };
+    return { success: true, output: stdout.slice(0, 10_000) };
   } catch (err: unknown) {
     const execErr = err as { stderr?: Buffer | string; stdout?: Buffer | string; status?: number };
     const stderr = execErr.stderr?.toString() || '';

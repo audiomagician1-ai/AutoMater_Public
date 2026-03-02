@@ -7,7 +7,7 @@
 import {
   BrowserWindow, getDb, createLogger,
   callLLM, calcCost, sendToUI, addLog, notify, createStreamCallback,
-  spawnAgent, updateAgentStats, getTeamPrompt, getTeamMemberLLMConfig,
+  spawnAgent, updateAgentStats, getTeamPrompt, getTeamMemberLLMConfig, getTeamMemberMaxIterations,
   reactAgentLoop,
   parseStructuredOutput, PM_FEATURE_SCHEMA, PM_ACCEPTANCE_SCHEMA,
   gatePMToArchitect,
@@ -35,7 +35,7 @@ export async function phasePMAnalysis(
   permissions?: import('../tool-registry').AgentPermissions,
 ): Promise<ParsedFeature[] | null> {
   const db = getDb();
-  const pmId = `pm-${Date.now().toString(36)}`;
+  const pmId = 'pm-0';  // 固定 ID: 复用同一 Agent 行
   spawnAgent(projectId, pmId, 'pm', win);
   sendToUI(win, 'agent:status', { projectId, agentId: pmId, status: 'working', currentTask: 'pm-analysis', featureTitle: '需求分析' });
   sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '🧠 Phase 1: 产品经理开始分析需求...' });
@@ -58,7 +58,7 @@ export async function phasePMAnalysis(
       workspacePath: workspacePath || null,
       gitConfig,
       win, signal,
-      maxIterations: 15,
+      maxIterations: getTeamMemberMaxIterations(projectId, 'pm') ?? 15,
       model: getTeamMemberLLMConfig(projectId, 'pm', 0, settings).model,
       permissions,
     });
@@ -151,7 +151,7 @@ export async function phaseIncrementalPM(
   workspacePath: string | null,
 ): Promise<ParsedFeature[] | null> {
   const db = getDb();
-  const pmId = `pm-incr-${Date.now().toString(36)}`;
+  const pmId = 'pm-0';  // 固定 ID: 增量分析复用 PM Agent
   spawnAgent(projectId, pmId, 'pm', win);
 
   const existingRows = db.prepare("SELECT id, title, status FROM features WHERE project_id = ?")
@@ -215,7 +215,7 @@ export async function phasePMAcceptance(
   const qaPassed = db.prepare("SELECT * FROM features WHERE project_id = ? AND status = 'qa_passed'").all(projectId) as FeatureRow[];
   if (qaPassed.length === 0) { sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 4: 没有 Feature 需要 PM 验收' }); return; }
 
-  const pmAccId = `pm-acc-${Date.now().toString(36)}`;
+  const pmAccId = 'pm-0';  // 固定 ID: 验收复用 PM Agent
   spawnAgent(projectId, pmAccId, 'pm', win);
   sendToUI(win, 'agent:log', { projectId, agentId: pmAccId, content: `📋 Phase 4: PM 批量验收审查 (${qaPassed.length} features, 每批 ${BATCH_ACCEPT_SIZE} 个)...` });
 

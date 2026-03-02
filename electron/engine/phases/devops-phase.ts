@@ -23,7 +23,7 @@ export async function phaseDevOpsBuild(
   if (signal.aborted) return;
 
   const db = getDb();
-  const devopsId = `devops-${Date.now().toString(36)}`;
+  const devopsId = 'devops-0';  // 固定 ID: 复用同一 DevOps Agent
   spawnAgent(projectId, devopsId, 'devops', win);
   sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'working', currentTask: 'build-verify', featureTitle: '构建验证' });
   sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: '🚀 Phase 4d: DevOps 自动构建验证...' });

@@ -214,7 +214,7 @@ async function analyzeImpact(
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
 ): Promise<ImpactAnalysis | null> {
   const db = getDb();
-  const pmId = `pm-impact-${Date.now().toString(36)}`;
+  const pmId = 'pm-0';  // 固定 ID: 影响分析复用 PM Agent
   spawnAgent(projectId, pmId, 'pm', win);
   sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '🔍 PM 开始影响分析...' });
 
@@ -278,7 +278,7 @@ async function updateDesignDoc(
   projectId: string, changeDescription: string, impact: ImpactAnalysis,
   settings: AppSettings, win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
 ): Promise<void> {
-  const pmId = `pm-upd-design-${Date.now().toString(36)}`;
+  const pmId = 'pm-0';  // 固定 ID: 更新设计文档复用 PM Agent
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📝 PM 更新设计文档...' });
 
   const currentDesign = readDoc(workspacePath, 'design') || '(设计文档不存在)';
@@ -341,7 +341,7 @@ async function updateRequirementDoc(
     ], signal, 8192);
 
     const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
-    const pmId = `pm-upd-req-${Date.now().toString(36)}`;
+    const pmId = 'pm-0';  // 固定 ID: 更新需求文档复用 PM Agent
     const version = writeDoc(workspacePath, 'requirement', result.content, pmId, `变更: ${changeDescription.slice(0, 80)}`, featureId);
 
     const db = getDb();
@@ -387,7 +387,7 @@ async function updateTestSpecDoc(
     ], signal, 8192);
 
     const cost = calcCost(settings.strongModel, result.inputTokens, result.outputTokens);
-    const qaId = `qa-upd-spec-${Date.now().toString(36)}`;
+    const qaId = 'qa-0';  // 固定 ID: 更新测试文档复用 QA Agent
     const version = writeDoc(workspacePath, 'test_spec', result.content, qaId, `变更: ${changeDescription.slice(0, 80)}`, featureId);
 
     const db = getDb();
@@ -468,7 +468,7 @@ export async function detectImplicitChanges(
   workspacePath: string,
 ): Promise<WishTriageResult | null> {
   const db = getDb();
-  const pmId = `pm-triage-${Date.now().toString(36)}`;
+  const pmId = 'pm-0';  // 固定 ID: 分诊复用 PM Agent
 
   sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '🔎 Phase 0: 分诊新需求 — 识别隐式变更...' });
 

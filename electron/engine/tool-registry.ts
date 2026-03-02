@@ -1792,5 +1792,7 @@ export function isAsyncTool(toolName: string): boolean {
         'spawn_agent', 'spawn_parallel', 'spawn_researcher',
         'read_file', 'read_many_files', 'code_graph_query',  // v17.0: async file ops
         'generate_image', 'edit_image',
+        'glob_files', 'run_command', 'run_test', 'run_lint', // v17.1: execSync → async migration
+        'search_files', 'code_search', // v17.1: codeSearch fallback async
        ].includes(toolName);
 }

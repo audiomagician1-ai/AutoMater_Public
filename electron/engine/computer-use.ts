@@ -8,7 +8,7 @@
  * 推荐分辨率: 1024x768 或 1280x720（降低 token 消耗）
  */
 
-import { execSync } from 'child_process';
+import { execSync } from 'child_process'; // SYNC-OK: 所有调用为 PowerShell GUI 操作 (截图/鼠标/键盘), 必须同步等待完成
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
