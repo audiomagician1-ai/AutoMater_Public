@@ -499,6 +499,35 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
 
+  // ── File Download & Image Search (v19.0) ──
+  {
+    name: 'download_file',
+    description: '从 URL 下载文件（二进制安全）到 workspace。支持图片、PDF、压缩包等任意格式。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要下载的文件 URL' },
+        save_path: { type: 'string', description: '保存路径（相对 workspace 或绝对路径）' },
+        filename: { type: 'string', description: '可选文件名' },
+        timeout: { type: 'number', description: '下载超时 ms，默认 60000', default: 60000 },
+        max_size: { type: 'number', description: '最大文件大小 bytes，默认 50MB', default: 52428800 },
+      },
+      required: ['url', 'save_path'],
+    },
+  },
+  {
+    name: 'search_images',
+    description: '搜索网络图片。返回图片 URL 列表。配合 download_file 可实现「搜索 → 下载」。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '图片搜索关键词' },
+        count: { type: 'number', description: '返回数量，默认 5，最大 20', default: 5 },
+      },
+      required: ['query'],
+    },
+  },
+
   // ── Computer Use (v2.2) ──
   {
     name: 'screenshot',
@@ -1522,6 +1551,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
+    'download_file', 'search_images',  // v19.0
     'generate_image', 'configure_image_gen',  // v9.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
@@ -1534,6 +1564,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'write_file',
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
+    'download_file', 'search_images',  // v19.0
     'generate_image', 'configure_image_gen',  // v9.0
     'memory_read', 'memory_append',
     'report_blocked',  // v5.5: 信息不足时阻塞反馈给用户
@@ -1553,6 +1584,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'github_create_pr', 'github_list_prs', 'github_get_pr', 'github_merge_pr',
     'web_search', 'fetch_url', 'http_request',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
+    'download_file', 'search_images',  // v19.0
     'spawn_researcher',
     'memory_read', 'memory_append',
     'check_process', 'wait_for_process',   // v6.0/v19.0: 查询/等待后台进程
@@ -1595,6 +1627,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'run_command', 'run_test', 'run_lint',
     'web_search', 'fetch_url', 'http_request',
     'web_search_boost', 'deep_research',  // v8.0
+    'download_file', 'search_images',  // v19.0
     'memory_read', 'memory_append',
     'screenshot', 'mouse_click', 'mouse_move', 'keyboard_type', 'keyboard_hotkey',
     'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
@@ -1642,6 +1675,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
     // 搜索
     'web_search', 'web_search_boost',
+    'download_file', 'search_images',  // v19.0
     // 记忆
     'memory_read', 'memory_append',
     // v14.0: Supabase (全部)
@@ -1657,6 +1691,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research',  // v8.0
+    'download_file', 'search_images',  // v19.0
   ],
   // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询
   'meta-agent': [
@@ -1665,6 +1700,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'web_search', 'fetch_url',
     'web_search_boost', 'deep_research',  // v8.0
+    'download_file', 'search_images',  // v19.0
     'memory_read', 'memory_append',
     'git_log',
   ],
@@ -1809,5 +1845,6 @@ export function isAsyncTool(toolName: string): boolean {
         'glob_files', 'run_command', 'run_test', 'run_lint', // v17.1: execSync → async migration
         'wait_for_process', // v19.0: 阻塞等待后台进程完成
         'search_files', 'code_search', // v17.1: codeSearch fallback async
+        'download_file', 'search_images',  // v19.0
        ].includes(toolName);
 }

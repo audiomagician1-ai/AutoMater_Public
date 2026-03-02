@@ -41,8 +41,10 @@ export function MetaAgentSettings({ onClose }: Props) {
     personality: '专业、友好、高效',
     systemPrompt: '',
     contextHistoryLimit: 20,
-    contextTokenLimit: 8192,
-    maxResponseTokens: 2048,
+    contextTokenLimit: 512000,
+    maxResponseTokens: 128000,
+    maxReactIterations: 50,
+    readFileLineLimit: 1000,
     autoMemory: true,
     memoryInjectLimit: 30,
     greeting: '',
@@ -322,7 +324,7 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.contextHistoryLimit}
               onChange={e => update('contextHistoryLimit', parseInt(e.target.value) || 20)}
-              min={2} max={100}
+              min={2} max={200}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -330,8 +332,8 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
             <input
               type="number"
               value={config.contextTokenLimit}
-              onChange={e => update('contextTokenLimit', parseInt(e.target.value) || 8192)}
-              min={1024} max={128000} step={1024}
+              onChange={e => update('contextTokenLimit', parseInt(e.target.value) || 512000)}
+              min={4096} max={2000000} step={1024}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -339,8 +341,28 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
             <input
               type="number"
               value={config.maxResponseTokens}
-              onChange={e => update('maxResponseTokens', parseInt(e.target.value) || 2048)}
-              min={256} max={16384} step={256}
+              onChange={e => update('maxResponseTokens', parseInt(e.target.value) || 128000)}
+              min={1024} max={256000} step={1024}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+            />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="工具迭代轮数" desc="ReAct 循环最大轮数（每轮可调用工具）">
+            <input
+              type="number"
+              value={config.maxReactIterations}
+              onChange={e => update('maxReactIterations', Math.max(1, Math.min(200, parseInt(e.target.value) || 50)))}
+              min={1} max={200}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
+            />
+          </Field>
+          <Field label="文件默认读取行数" desc="read_file 工具默认读取行数（最大 2000）">
+            <input
+              type="number"
+              value={config.readFileLineLimit}
+              onChange={e => update('readFileLineLimit', Math.max(50, Math.min(2000, parseInt(e.target.value) || 1000)))}
+              min={50} max={2000} step={50}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>

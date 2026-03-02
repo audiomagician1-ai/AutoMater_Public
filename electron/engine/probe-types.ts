@@ -263,3 +263,22 @@ export interface ImportProgressEvent {
 }
 
 export type ImportProgressCallbackV7 = (event: ImportProgressEvent) => void;
+
+/**
+ * Detailed log callback for import process.
+ * Sends granular logs (probe thinking, file reads, LLM content) to the UI.
+ */
+export type ImportLogCallback = (entry: ImportLogEntry) => void;
+
+export interface ImportLogEntry {
+  /** Which agent/probe is producing this log */
+  agentId: string;
+  /** Log content */
+  content: string;
+  /** Log type: info=normal, stream=LLM streaming chunk, thinking=reasoning */
+  type: 'info' | 'stream' | 'thinking' | 'error';
+  /** Optional probe details */
+  probeId?: string;
+  probeType?: ProbeType;
+  round?: number;
+}

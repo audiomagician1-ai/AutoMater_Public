@@ -25,6 +25,7 @@ import type {
   ProbeDepEdge,
   ProbeIssue,
   ScanResult,
+  ImportLogCallback,
 } from '../probe-types';
 import { createLogger } from '../logger';
 
@@ -192,6 +193,10 @@ export interface ProbeContext {
   settings: AppSettings;
   signal?: AbortSignal;
   onProgress?: (status: string, progress: number) => void;
+  /** Detailed log callback for streaming LLM output, probe actions, etc. */
+  onLog?: ImportLogCallback;
+  /** Per-probe timeout in ms (default: 300000 = 5min) */
+  timeoutMs?: number;
 }
 
 /** LLM message for probe conversations */
@@ -235,6 +240,8 @@ export abstract class BaseProbe {
   protected readonly settings: AppSettings;
   protected readonly signal?: AbortSignal;
   protected readonly onProgress?: (status: string, progress: number) => void;
+  protected readonly onLog?: ImportLogCallback;
+  protected readonly timeoutMs: number;
   protected readonly ws: string;
 
   /** Accumulate files examined across rounds */
@@ -248,7 +255,21 @@ export abstract class BaseProbe {
     this.settings = ctx.settings;
     this.signal = ctx.signal;
     this.onProgress = ctx.onProgress;
+    this.onLog = ctx.onLog;
+    this.timeoutMs = ctx.timeoutMs ?? 300_000; // 5min default
     this.ws = ctx.scan.workspacePath;
+  }
+
+  /** Send a detailed log entry to the UI */
+  protected emitLog(content: string, type: 'info' | 'stream' | 'thinking' | 'error' = 'info', round?: number) {
+    this.onLog?.({
+      agentId: `probe:${this.config.id}`,
+      content,
+      type,
+      probeId: this.config.id,
+      probeType: this.config.type,
+      round,
+    });
   }
 
   /**
@@ -259,71 +280,106 @@ export abstract class BaseProbe {
     const t0 = Date.now();
     let round = 0;
 
-    // Gather initial context
-    this.onProgress?.(`探索中...`, 0.1);
-    const context = this.gatherContext();
+    // Per-probe timeout via AbortController
+    const probeTimeout = new AbortController();
+    const timeoutTimer = setTimeout(() => probeTimeout.abort(), this.timeoutMs);
 
-    // Build initial messages
-    const messages = this.buildMessages(context);
+    try {
+      // Gather initial context
+      this.onProgress?.(`探索中...`, 0.1);
+      this.emitLog(`🔍 开始探测: ${this.config.description}`);
+      this.emitLog(`  种子文件: ${this.config.seeds.join(', ') || '(自动选择)'}`);
 
-    // Choose model: prefer fastModel, fall back to workerModel
-    const model = this.settings.fastModel?.trim() || this.settings.workerModel;
+      const context = this.gatherContext();
+      this.emitLog(`  已收集 ${this.filesExamined.size} 个文件作为上下文`);
 
-    let lastResponse = '';
-    const allRoundResponses: string[] = [];
+      // Build initial messages
+      const messages = this.buildMessages(context);
 
-    while (round < this.config.maxRounds) {
-      if (this.signal?.aborted) throw new Error('Probe aborted');
-      round++;
+      // Choose model: prefer fastModel, fall back to workerModel
+      const model = this.settings.fastModel?.trim() || this.settings.workerModel;
+      this.emitLog(`  使用模型: ${model}, 最大 ${this.config.maxRounds} 轮`);
 
-      this.onProgress?.(
-        `第 ${round}/${this.config.maxRounds} 轮探索...`,
-        0.1 + (round / this.config.maxRounds) * 0.7,
-      );
+      let lastResponse = '';
+      const allRoundResponses: string[] = [];
 
-      log.info(`Probe ${this.config.id}: round ${round}/${this.config.maxRounds}`);
-
-      const result = await callLLM(
-        this.settings,
-        model,
-        messages,
-        this.signal,
-        this.config.tokenBudget,  // 由调度器根据项目规模动态设置, 不再硬限 4096
-        1, // 1 retry for probes (they're cheap)
-      );
-
-      lastResponse = result.content;
-      allRoundResponses.push(lastResponse);
-      this.totalTokensUsed += (result.inputTokens || 0) + (result.outputTokens || 0);
-
-      // Check if we need another round
-      if (round < this.config.maxRounds && this.shouldContinue(lastResponse, round)) {
-        // Build follow-up context for next round
-        const followUp = this.buildFollowUp(lastResponse, round);
-        if (followUp) {
-          messages.push({ role: 'assistant', content: lastResponse });
-          messages.push({ role: 'user', content: followUp });
-        } else {
-          break; // No follow-up needed
+      while (round < this.config.maxRounds) {
+        if (this.signal?.aborted || probeTimeout.signal.aborted) {
+          const reason = probeTimeout.signal.aborted
+            ? `探针超时 (${Math.round(this.timeoutMs / 1000)}s)`
+            : '用户中断';
+          this.emitLog(`⚠️ ${reason}`, 'error');
+          throw new Error(reason);
         }
-      } else {
-        break;
+        round++;
+
+        this.onProgress?.(
+          `第 ${round}/${this.config.maxRounds} 轮探索...`,
+          0.1 + (round / this.config.maxRounds) * 0.7,
+        );
+        this.emitLog(`🧠 第 ${round}/${this.config.maxRounds} 轮 LLM 调用...`, 'info', round);
+
+        log.info(`Probe ${this.config.id}: round ${round}/${this.config.maxRounds}`);
+
+        // Stream the LLM output for real-time visibility
+        const onChunk = (chunk: string) => {
+          this.emitLog(chunk, 'stream', round);
+        };
+
+        const result = await callLLM(
+          this.settings,
+          model,
+          messages,
+          this.signal,
+          this.config.tokenBudget,
+          1, // 1 retry for probes
+          onChunk, // stream LLM output to UI
+        );
+
+        lastResponse = result.content;
+        allRoundResponses.push(lastResponse);
+        this.totalTokensUsed += (result.inputTokens || 0) + (result.outputTokens || 0);
+
+        this.emitLog(
+          `  ✅ 第 ${round} 轮完成: ${result.outputTokens || 0} output tokens`,
+          'info', round,
+        );
+
+        // Check if we need another round
+        if (round < this.config.maxRounds && this.shouldContinue(lastResponse, round)) {
+          const followUp = this.buildFollowUp(lastResponse, round);
+          if (followUp) {
+            this.emitLog(`  📝 需要继续探索，准备第 ${round + 1} 轮...`, 'info', round);
+            messages.push({ role: 'assistant', content: lastResponse });
+            messages.push({ role: 'user', content: followUp });
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
       }
+
+      // Parse the final (or accumulated) response into a ProbeReport
+      this.onProgress?.('解析结果...', 0.9);
+      const report = this.parseReport(allRoundResponses, round, Date.now() - t0);
+
+      this.emitLog(
+        `📊 探针完成: ${report.findings.length} 发现, ${report.filesExamined.length} 文件, ${this.totalTokensUsed} tokens, ${Math.round(report.durationMs / 1000)}s`,
+      );
+
+      log.info(`Probe ${this.config.id}: done`, {
+        rounds: round,
+        filesExamined: report.filesExamined.length,
+        findings: report.findings.length,
+        tokens: this.totalTokensUsed,
+        durationMs: report.durationMs,
+      });
+
+      return report;
+    } finally {
+      clearTimeout(timeoutTimer);
     }
-
-    // Parse the final (or accumulated) response into a ProbeReport
-    this.onProgress?.('解析结果...', 0.9);
-    const report = this.parseReport(allRoundResponses, round, Date.now() - t0);
-
-    log.info(`Probe ${this.config.id}: done`, {
-      rounds: round,
-      filesExamined: report.filesExamined.length,
-      findings: report.findings.length,
-      tokens: this.totalTokensUsed,
-      durationMs: report.durationMs,
-    });
-
-    return report;
   }
 
   /**

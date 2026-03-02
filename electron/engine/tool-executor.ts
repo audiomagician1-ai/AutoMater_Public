@@ -497,6 +497,8 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'run_blackbox_tests':
       case 'fetch_url':
       case 'http_request':
+      case 'download_file':   // v19.0
+      case 'search_images':   // v19.0
       // v17.0: async file operations
       case 'read_many_files':
       case 'code_graph_query':
@@ -688,6 +690,39 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     });
     const headersSummary = Object.entries(result.headers).slice(0, 10).map(([k, v]) => `${k}: ${v}`).join('\n');
     return { success: result.success, output: `HTTP ${result.status}\n--- Headers ---\n${headersSummary}\n--- Body ---\n${result.body}`.slice(0, 8000), action: 'web' };
+  }
+
+  // ── v19.0: File Download ──
+  if (call.name === 'download_file') {
+    const { downloadFile } = await import('./web-tools');
+    const result = await downloadFile(
+      {
+        url: call.arguments.url as string,
+        savePath: call.arguments.save_path as string,
+        filename: call.arguments.filename as string | undefined,
+        timeout: call.arguments.timeout as number | undefined,
+        maxSize: call.arguments.max_size as number | undefined,
+      },
+      ctx.workspacePath,
+    );
+    if (!result.success) {
+      return { success: false, output: `下载失败: ${result.error}`, action: 'web' };
+    }
+    const sizeMB = (result.size / 1024 / 1024).toFixed(2);
+    return { success: true, output: `✅ 已下载文件\n路径: ${result.filePath}\n大小: ${sizeMB} MB\n类型: ${result.mimeType}`, action: 'web' };
+  }
+
+  // ── v19.0: Image Search ──
+  if (call.name === 'search_images') {
+    const { searchImages } = await import('./web-tools');
+    const result = await searchImages(call.arguments.query as string, (call.arguments.count as number) ?? 5);
+    if (!result.success) {
+      return { success: false, output: `图片搜索失败: ${result.error}`, action: 'web' };
+    }
+    const lines = result.images.map((img: { url: string; thumbnailUrl: string; title: string; source: string; width?: number; height?: number }, i: number) =>
+      `[${i + 1}] ${img.title}\n    URL: ${img.url}\n    缩略图: ${img.thumbnailUrl}\n    来源: ${img.source}${img.width ? `\n    尺寸: ${img.width}×${img.height}` : ''}`
+    );
+    return { success: true, output: `找到 ${result.images.length} 张图片:\n\n${lines.join('\n\n')}`, action: 'web' };
   }
 
   // ── v8.0: Enhanced Search & Research ──

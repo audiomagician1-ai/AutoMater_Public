@@ -39,6 +39,10 @@ interface MetaAgentConfig {
   contextHistoryLimit: number;
   contextTokenLimit: number;
   maxResponseTokens: number;
+  /** ReAct 工具循环最大迭代轮数 (默认50) */
+  maxReactIterations: number;
+  /** read_file 工具默认行数上限 (默认1000, 最大2000) */
+  readFileLineLimit: number;
   autoMemory: boolean;
   memoryInjectLimit: number;
   greeting: string;
@@ -432,7 +436,12 @@ interface AutoMaterAPI {
 
   /** v5.4 → v7.0: 元Agent对话 + 管理 + 记忆 */
   metaAgent: {
-    chat(projectId: string | null, message: string, history?: Array<{ role: string; content: string }>): Promise<{
+    chat(
+      projectId: string | null,
+      message: string,
+      history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+      attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
+    ): Promise<{
       reply: string;
       intent: 'wish' | 'query' | 'workflow' | 'general';
       wishCreated?: boolean;

@@ -45,8 +45,10 @@ export interface MetaAgentConfig {
   personality: string;        // 性格描述 (简短)
   systemPrompt: string;       // 完整系统提示词 (可覆盖默认)
   contextHistoryLimit: number; // 对话历史保留条数 (默认 20)
-  contextTokenLimit: number;  // 上下文 token 上限 (默认 4096)
-  maxResponseTokens: number;  // 回复最大 token (默认 2048)
+  contextTokenLimit: number;  // 上下文 token 上限 (默认 512000)
+  maxResponseTokens: number;  // 回复最大 token (默认 128000)
+  maxReactIterations: number; // ReAct 工具循环最大迭代轮数 (默认 50)
+  readFileLineLimit: number;  // read_file 工具默认行数上限 (默认 1000, 最大2000)
   autoMemory: boolean;        // 是否自动积累记忆 (默认 true)
   memoryInjectLimit: number;  // 每次对话注入记忆条数上限 (默认 30)
   greeting: string;           // 自定义开场白
@@ -72,8 +74,10 @@ const DEFAULT_CONFIG: MetaAgentConfig = {
   personality: '专业、友好、高效',
   systemPrompt: '',  // 空 = 使用内置默认
   contextHistoryLimit: 20,
-  contextTokenLimit: 8192,
-  maxResponseTokens: 2048,
+  contextTokenLimit: 512000,
+  maxResponseTokens: 128000,
+  maxReactIterations: 50,
+  readFileLineLimit: 1000,
   autoMemory: true,
   memoryInjectLimit: 30,
   greeting: '',  // 空 = 使用内置默认
@@ -389,8 +393,22 @@ export function setupMetaAgentHandlers() {
   });
 
   // ── Chat (v6.1: ReAct 模式 — callLLMWithTools + 只读工具集) ──
+  // v19.0: 支持多模态消息 — 用户可发送图片/文件附件
 
-  ipcMain.handle('meta-agent:chat', async (_event, projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) => {
+  interface ChatAttachment {
+    type: string;
+    name: string;
+    data: string;
+    mimeType: string;
+  }
+
+  ipcMain.handle('meta-agent:chat', async (
+    _event,
+    projectId: string | null,
+    message: string,
+    history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+    attachments?: ChatAttachment[],
+  ) => {
     assertNonEmptyString('meta-agent:chat', 'message', message);
     const settings = getSettings();
     if (!settings?.apiKey) {
@@ -401,22 +419,18 @@ export function setupMetaAgentHandlers() {
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     const agentId = 'meta-agent';
 
-    // Load relevant memories (capped by config limit)
     const memories = getMemories(undefined, config.memoryInjectLimit);
 
-    // Build messages for LLM
     const systemPrompt = buildSystemPrompt(config, memories);
-    const messages: Array<{ role: string; content: string; tool_calls?: LLMToolCall[]; tool_call_id?: string }> = [
+    const messages: Array<{ role: string; content: string | Array<Record<string, unknown>>; tool_calls?: LLMToolCall[]; tool_call_id?: string }> = [
       { role: 'system', content: systemPrompt },
     ];
 
-    // Add project context if available
     if (projectId) {
       const ctx = collectProjectContext(projectId);
       messages.push({ role: 'system', content: `当前项目上下文:\n${ctx}` });
     }
 
-    // Add conversation history (capped by config)
     if (history?.length) {
       const recent = history.slice(-(config.contextHistoryLimit || 20));
       for (const h of recent) {
@@ -424,11 +438,38 @@ export function setupMetaAgentHandlers() {
       }
     }
 
-    // Add current user message
-    messages.push({ role: 'user', content: message });
+    // v19.0: Build multimodal user message if attachments exist
+    if (attachments?.length) {
+      const contentBlocks: Array<Record<string, unknown>> = [];
+      if (message) contentBlocks.push({ type: 'text', text: message });
+      for (const att of attachments) {
+        if (att.type === 'image' && att.data) {
+          contentBlocks.push({
+            type: 'image_url',
+            image_url: {
+              url: att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`,
+              detail: 'high',
+            },
+          });
+        } else if (att.type === 'file') {
+          try {
+            const fs = require('fs');
+            if (fs.existsSync(att.data)) {
+              const fileContent = fs.readFileSync(att.data, 'utf-8').slice(0, 10000);
+              contentBlocks.push({ type: 'text', text: `[附件: ${att.name}]\n\`\`\`\n${fileContent}\n\`\`\`` });
+            }
+          } catch {
+            contentBlocks.push({ type: 'text', text: `[附件: ${att.name} — 读取失败]` });
+          }
+        }
+      }
+      messages.push({ role: 'user', content: contentBlocks });
+    } else {
+      messages.push({ role: 'user', content: message });
+    }
 
     // ── v6.1: ReAct Tool Loop ──
-    const MAX_REACT_ITERATIONS = 8;
+    const MAX_REACT_ITERATIONS = config.maxReactIterations || 50;
     const model = settings.strongModel || settings.workerModel || settings.fastModel || 'gpt-4o';
 
     // 获取 meta-agent 角色的工具集
@@ -439,6 +480,9 @@ export function setupMetaAgentHandlers() {
       workspacePath,
       projectId: projectId || '',
       gitConfig: { mode: 'local', workspacePath },
+      permissions: {
+        readFileLineLimit: config.readFileLineLimit || 1000,
+      },
     };
 
     let totalIn = 0;
@@ -455,7 +499,7 @@ export function setupMetaAgentHandlers() {
       for (let iter = 1; iter <= MAX_REACT_ITERATIONS; iter++) {
 const result = await callLLMWithTools(
             settings, model, messages, tools, undefined,
-          config.maxResponseTokens || 4096,
+          config.maxResponseTokens || 128000,
         );
         const cost = calcCost(model, result.inputTokens, result.outputTokens);
         totalIn += result.inputTokens;

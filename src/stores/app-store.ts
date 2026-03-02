@@ -42,8 +42,14 @@ export interface MetaAgentMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
-  /** 标记: 此消息是否触发了需求创建 */
   triggeredWish?: boolean;
+  /** v19.0: 附件 (图片/文件) */
+  attachments?: Array<{
+    type: 'image' | 'file';
+    name: string;
+    data: string;
+    mimeType: string;
+  }>;
 }
 
 type AppState = NavigationSlice & LogSlice & AgentSlice & MetaAgentSlice;

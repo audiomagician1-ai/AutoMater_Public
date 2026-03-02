@@ -29,6 +29,8 @@ import {
 
 // 导入进程的 AbortController 映射（用于取消正在运行的导入）
 const importAbortControllers = new Map<string, AbortController>();
+/** v7.1: Track active probe LLM streams for proper stream-start/end lifecycle */
+const activeProbeStreams = new Set<string>();
 const log = createLogger('ipc:project');
 
 /** DB row types for typed queries */
@@ -219,7 +221,7 @@ function initDefaultTeam(db: { prepare(sql: string): { run(...args: unknown[]): 
   const existing = db.prepare('SELECT COUNT(*) as count FROM team_members WHERE project_id = ?').get(projectId) as { count: number };
   if (existing.count > 0) return { success: true, count: existing.count, message: 'already initialized' };
 
-  const stmt = db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 128000)`);
+  const stmt = db.prepare(`INSERT INTO team_members (id, project_id, role, name, model, capabilities, system_prompt, context_files, max_context_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 256000)`);
   for (const d of DEFAULT_TEAM) {
     const id = 'tm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     stmt.run(id, projectId, d.role, d.name, d.model, JSON.stringify(d.capabilities), d.system_prompt);
@@ -443,7 +445,7 @@ export function setupProjectHandlers() {
       JSON.stringify(member.capabilities || []),
       member.system_prompt || null,
       JSON.stringify(member.context_files || []),
-      member.max_context_tokens || 128000,
+      member.max_context_tokens || 256000,
     );
 
     // v9.0: 事件驱动热加入 — 通知所有窗口 + 主进程编排器
@@ -723,6 +725,27 @@ export function setupProjectHandlers() {
             (phase: number, step: string, progress: number) => {
               log.debug(`Import progress: phase=${phase}, step="${step}", progress=${progress.toFixed(2)}`);
               sendToUI(win, 'project:import-progress', { projectId, phase, step, progress });
+            },
+            // v7.1: Detailed log callback — probe thinking/content → agent:log
+            (entry: { type: string; agentId?: string; probeId?: string; content?: string; delta?: string }) => {
+              if (entry.type === 'stream') {
+                // LLM streaming: use agent:stream with stream lifecycle management
+                const streamKey = entry.agentId ?? 'probe';
+                if (!activeProbeStreams.has(streamKey)) {
+                  activeProbeStreams.add(streamKey);
+                  sendToUI(win, 'agent:stream-start', { projectId, agentId: streamKey, label: `${entry.probeId ?? streamKey} LLM 输出` });
+                }
+                sendToUI(win, 'agent:stream', { projectId, agentId: streamKey, chunk: entry.content || entry.delta || '' });
+              } else {
+                // info/thinking/error → agent:log
+                sendToUI(win, 'agent:log', { projectId, agentId: entry.agentId ?? 'probe', content: entry.content || '' });
+                // When a non-stream entry comes for an active stream, end the stream
+                const streamKey = entry.agentId ?? 'probe';
+                if (activeProbeStreams.has(streamKey) && (entry.type === 'info' || entry.type === 'error')) {
+                  sendToUI(win, 'agent:stream-end', { projectId, agentId: streamKey });
+                  activeProbeStreams.delete(streamKey);
+                }
+              }
             },
           );
           const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
@@ -1067,6 +1090,24 @@ export function setupProjectHandlers() {
               progress,
             });
           },
+          // v7.1: Detailed log callback
+          (entry: { type: string; agentId?: string; probeId?: string; content?: string; delta?: string }) => {
+            if (entry.type === 'stream') {
+              const streamKey = entry.agentId ?? 'probe';
+              if (!activeProbeStreams.has(streamKey)) {
+                activeProbeStreams.add(streamKey);
+                sendToUI(win, 'agent:stream-start', { projectId, agentId: streamKey, label: `${entry.probeId ?? streamKey} LLM 输出` });
+              }
+              sendToUI(win, 'agent:stream', { projectId, agentId: streamKey, chunk: entry.content || entry.delta || '' });
+            } else {
+              sendToUI(win, 'agent:log', { projectId, agentId: entry.agentId ?? 'probe', content: entry.content || '' });
+              const streamKey = entry.agentId ?? 'probe';
+              if (activeProbeStreams.has(streamKey) && (entry.type === 'info' || entry.type === 'error')) {
+                sendToUI(win, 'agent:stream-end', { projectId, agentId: streamKey });
+                activeProbeStreams.delete(streamKey);
+              }
+            }
+          },
         );
 
         // 分析完成 → 更新项目状态 + wish 描述
@@ -1196,7 +1237,7 @@ export function setupProjectHandlers() {
       return { success: false, error: 'Workspace not found' };
     }
     try {
-      const snapshot = collectBaselineContext(project.workspace_path, role, tokenBudget || 128000);
+      const snapshot = collectBaselineContext(project.workspace_path, role, tokenBudget || 256000);
       return { success: true, snapshot };
     } catch (err: unknown) {
       return { success: false, error: toErrorMessage(err) };

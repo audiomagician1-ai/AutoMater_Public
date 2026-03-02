@@ -202,8 +202,13 @@ contextBridge.exposeInMainWorld('automater', {
 
   // ── 元Agent对话 + 管理 (v5.4 → v7.0) ──
   metaAgent: {
-    chat: (projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) =>
-      ipcRenderer.invoke('meta-agent:chat', projectId, message, history),
+    chat: (
+      projectId: string | null,
+      message: string,
+      history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+      attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
+    ) =>
+      ipcRenderer.invoke('meta-agent:chat', projectId, message, history, attachments),
     // Config
     getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
     saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:config:save', config),

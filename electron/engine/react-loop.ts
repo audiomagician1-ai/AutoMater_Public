@@ -330,7 +330,7 @@ export async function reactDeveloperLoop(
     agentId: workerId,
     featureId: feature.id,
     iterations: [],
-    maxContextWindow: 128000,
+    maxContextWindow: 256000,
   };
 
   for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {

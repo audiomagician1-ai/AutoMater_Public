@@ -19,6 +19,7 @@ import type {
   MergedFindings,
   Finding,
   ProbeProgress,
+  ImportLogCallback,
 } from './probe-types';
 import type { CommunityInfo, HubFile } from './code-graph';
 import { EntryProbe, ModuleProbe, APIBoundaryProbe, DataModelProbe, ConfigInfraProbe, SmellProbe } from './probes';
@@ -275,6 +276,10 @@ export interface ExecuteProbesOptions {
   onProbeComplete?: (report: ProbeReport) => void;
   /** Called on probe status change */
   onProgress?: (probeId: string, status: string, progress: number) => void;
+  /** Detailed log callback for probe LLM output, file reads, etc. */
+  onLog?: ImportLogCallback;
+  /** Per-probe timeout in ms (default: 300000 = 5min) */
+  probeTimeoutMs?: number;
   /** Settings override */
   settings: AppSettings;
 }
@@ -293,6 +298,8 @@ export async function executeProbes(
     budgetUsd = 1.0,
     onProbeComplete,
     onProgress,
+    onLog,
+    probeTimeoutMs = 300_000,
     settings,
   } = options;
 
@@ -312,6 +319,8 @@ export async function executeProbes(
       settings,
       signal,
       onProgress: (status, progress) => onProgress?.(config.id, status, progress),
+      onLog,
+      timeoutMs: probeTimeoutMs,
     };
 
     const probe = createProbe(config.type, ctx);

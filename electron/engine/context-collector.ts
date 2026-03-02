@@ -861,7 +861,7 @@ export function collectLightContext(
 export function collectBaselineContext(
   workspacePath: string,
   role: string,
-  tokenBudget: number = 128000,
+  tokenBudget: number = 256000,
   agentId?: string,
 ): ContextSnapshot {
   const sectionList: ContextSection[] = [];

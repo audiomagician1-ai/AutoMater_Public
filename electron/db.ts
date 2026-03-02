@@ -104,7 +104,7 @@ const MIGRATIONS: Migration[] = [
           capabilities TEXT NOT NULL DEFAULT '[]',
           system_prompt TEXT,
           context_files TEXT NOT NULL DEFAULT '[]',
-          max_context_tokens INTEGER NOT NULL DEFAULT 128000,
+          max_context_tokens INTEGER NOT NULL DEFAULT 256000,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );

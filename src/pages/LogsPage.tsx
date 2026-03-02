@@ -69,6 +69,17 @@ const ROLE_PREFIXES: Record<string, string> = {
   'devops': 'devops',
 };
 
+/** 探针类型 → 中文名称 */
+const PROBE_TYPE_LABELS: Record<string, string> = {
+  'entry': '🔍 入口追踪',
+  'module': '🧩 模块纵深',
+  'api': '🌐 API边界',
+  'data': '📊 数据模型',
+  'config': '⚙️ 配置探测',
+  'smell': '🐛 异常检测',
+  'fuse': '🧩 综合分析',
+};
+
 /** 角色 → 默认中文名称 + Emoji */
 const ROLE_DEFAULTS: Record<string, string> = {
   'pm': '📋 产品经理',
@@ -86,6 +97,17 @@ const ROLE_DEFAULTS: Record<string, string> = {
 function resolveAgentName(agentId: string, nameMap: Record<string, string>): string {
   // 1. 内置名称 (system, meta-agent)
   if (nameMap[agentId]) return nameMap[agentId];
+
+  // 1.5 探针 Agent (probe:entry-1, probe:module-2, probe:fuse)
+  if (agentId.startsWith('probe:')) {
+    const probeId = agentId.slice(6); // e.g. 'entry-1', 'module-2', 'fuse'
+    const probePrefix = probeId.split('-')[0]; // 'entry', 'module', 'fuse'
+    const label = PROBE_TYPE_LABELS[probePrefix] || `🔬 ${probeId}`;
+    return label;
+  }
+
+  // 1.6 project-importer
+  if (agentId === 'project-importer') return '📥 项目分析';
 
   // 2. 从 agentId 前缀推断角色
   const prefix = agentId.split('-')[0];
@@ -106,6 +128,10 @@ function resolveAgentName(agentId: string, nameMap: Record<string, string>): str
 
 /** 角色 → 标签颜色 */
 function getAgentColor(agentId: string): string {
+  // Probe agents
+  if (agentId.startsWith('probe:')) return 'text-amber-400 bg-amber-500/10';
+  if (agentId === 'project-importer') return 'text-indigo-400 bg-indigo-500/10';
+
   const prefix = agentId.split('-')[0];
   switch (prefix) {
     case 'pm': return 'text-blue-400 bg-blue-500/10';

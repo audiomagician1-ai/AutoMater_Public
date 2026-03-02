@@ -445,15 +445,16 @@ export function OverviewPage() {
                 </span>
               </div>
               <span className="text-[10px] text-slate-500 font-mono">
-                Step {Math.min((importProgress?.phase ?? 0) + 1, 2)}/2
+                Phase {Math.min((importProgress?.phase ?? 0) + 1, 3)}/3
               </span>
             </div>
 
             {/* Phase 指示器 */}
-            <div className="grid grid-cols-2 gap-2 mb-4">
+            <div className="grid grid-cols-3 gap-2 mb-4">
               {[
-                { phase: 0, label: '收集快照', icon: '📸', desc: '目录树 / 配置 / 符号索引' },
-                { phase: 1, label: 'AI 分析', icon: '🤖', desc: '大模型理解项目 → 生成文档' },
+                { phase: 0, label: '骨架扫描', icon: '📸', desc: '目录树 / 依赖图 / 符号索引' },
+                { phase: 1, label: '探针分析', icon: '🔬', desc: '多探针并行深入分析代码' },
+                { phase: 2, label: '综合合成', icon: '🧩', desc: '拼图生成架构文档' },
               ].map((p) => {
                 const current = importProgress?.phase ?? -1;
                 const isDone = current > p.phase || (current === p.phase && importProgress?.done && !importProgress?.error);
@@ -490,9 +491,17 @@ export function OverviewPage() {
                   <span className={`text-xs ${importProgress.error ? 'text-red-400' : importProgress.done ? 'text-emerald-400' : 'text-cyan-400'}`}>
                     {importProgress.step}
                   </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {Math.round(importProgress.progress * 100)}%
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setProjectPage('logs')}
+                      className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors underline"
+                    >
+                      📜 查看详细日志
+                    </button>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {Math.round(importProgress.progress * 100)}%
+                    </span>
+                  </div>
                 </div>
                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                   <div

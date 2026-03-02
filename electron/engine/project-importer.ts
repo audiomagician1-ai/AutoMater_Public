@@ -38,7 +38,8 @@ import { checkProbeCache, updateProbeCache, detectIncrementalChanges } from './p
 import type {
   ScanResult, SeedFile, ProbeReport, FuseOutput,
   ModuleGraph, ImportStats, ImportProgressCallbackV7,
-  ImportProgressEvent, ProbeProgress,
+  ImportProgressEvent, ProbeProgress, MergedFindings,
+  ImportLogCallback,
 } from './probe-types';
 
 const log = createLogger('project-importer');
@@ -828,6 +829,7 @@ export async function importProject(
   projectId: string,
   signal?: AbortSignal,
   onProgress?: ImportProgressCallback,
+  onDetailedLog?: (entry: { type: string; agentId?: string; probeId?: string; content?: string; delta?: string }) => void,
 ): Promise<{
   skeleton: ProjectSkeleton;
   summaries: ModuleSummary[];
