@@ -26,3 +26,6 @@ release-test.log
 dist/
 dist-electron/
 .bak
+
+# Test coverage
+coverage/

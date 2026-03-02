@@ -11,6 +11,7 @@
 import { getDb } from '../db';
 import type { AppSettings, AnthropicContentBlock, OpenAIFunctionTool } from './types';
 import { NetworkError } from './types';
+import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TIMEOUT_MS } from './constants';
 import { createLogger } from './logger';
 
 const log = createLogger('llm-client');
@@ -204,10 +205,10 @@ export async function callLLM(
   settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
-  maxTokens: number = 16384,
+  maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
   retries: number = 2,
   onChunk?: StreamCallback,
-  timeoutMs: number = 180000,
+  timeoutMs: number = LLM_DEFAULT_TIMEOUT_MS,
 ): Promise<LLMResult> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -232,9 +233,9 @@ async function _callLLMOnce(
   settings: AppSettings, model: string,
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
-  maxTokens: number = 16384,
+  maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
   onChunk?: StreamCallback,
-  timeoutMs: number = 180000,
+  timeoutMs: number = LLM_DEFAULT_TIMEOUT_MS,
 ): Promise<LLMResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -409,12 +410,12 @@ export async function callLLMWithTools(
   messages: Array<{ role: string; content: unknown }>,
   tools: Array<Record<string, unknown>> | OpenAIFunctionTool[],
   signal?: AbortSignal,
-  maxTokens: number = 16384,
+  maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
 ): Promise<LLMWithToolsResult> {
   if (signal?.aborted) throw new Error('Aborted');
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), LLM_DEFAULT_TIMEOUT_MS);
   const combinedSignal = signal
     ? anySignal([signal, controller.signal])
     : controller.signal;

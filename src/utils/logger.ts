@@ -16,8 +16,9 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-/** 当前最低输出级别 — 生产模式可调为 'warn' 或 'error' */
-const MIN_LEVEL: LogLevel = import.meta.env.DEV ? 'debug' : 'warn';
+/** 当前最低输出级别 — 开发模式输出所有，生产模式只输出 warn+ */
+const isDev = typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : true;
+const MIN_LEVEL: LogLevel = isDev ? 'debug' : 'warn';
 
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[MIN_LEVEL];

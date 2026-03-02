@@ -84,7 +84,11 @@ export function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   if (err && typeof err === 'object' && 'message' in err) return String((err as { message: unknown }).message);
-  try { return JSON.stringify(err); } catch { return String(err); }
+  try {
+    const json = JSON.stringify(err);
+    if (json !== undefined) return json;
+  } catch { /* fall through */ }
+  return String(err);
 }
 
 /**

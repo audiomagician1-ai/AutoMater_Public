@@ -16,7 +16,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
     "node": ">=20.0.0"

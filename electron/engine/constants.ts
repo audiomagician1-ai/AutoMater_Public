@@ -85,3 +85,16 @@ export const DEFAULT_FEATURE_TOKEN_LIMIT = 500_000;
 
 /** 单个 Feature 最大执行时间 (分钟) */
 export const DEFAULT_FEATURE_TIME_LIMIT_MIN = 15;
+
+// ═══════════════════════════════════════
+// LLM Client Defaults
+// ═══════════════════════════════════════
+
+/** LLM 单次调用默认 max_tokens。16K 满足绝大多数代码生成场景。 */
+export const LLM_DEFAULT_MAX_TOKENS = 16384;
+
+/** LLM 单次调用默认超时 (毫秒)。3 分钟覆盖大模型的长输出场景。 */
+export const LLM_DEFAULT_TIMEOUT_MS = 180_000;
+
+/** Sub-Agent 默认最大迭代次数 */
+export const SUB_AGENT_MAX_ITERATIONS = 8;
