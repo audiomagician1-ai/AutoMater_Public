@@ -1147,6 +1147,132 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['issue_number'],
     },
   },
+  // ═══════════════════════════════════════════════════
+  // v14.0: Branch Management + Remote Sync + PR
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'git_create_branch',
+    description: '创建并切换到新的 Git 分支。可指定基础分支，默认从当前分支创建。',
+    parameters: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: '新分支名称（如 feature/login, fix/issue-42）' },
+        base_branch: { type: 'string', description: '基础分支（可选，默认从当前分支创建）' },
+      },
+      required: ['branch_name'],
+    },
+  },
+  {
+    name: 'git_switch_branch',
+    description: '切换到已存在的 Git 分支。',
+    parameters: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: '目标分支名称' },
+      },
+      required: ['branch_name'],
+    },
+  },
+  {
+    name: 'git_list_branches',
+    description: '列出本地所有 Git 分支及当前分支。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'git_delete_branch',
+    description: '删除本地 Git 分支。不能删除当前所在分支。',
+    parameters: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: '要删除的分支名称' },
+        force: { type: 'boolean', description: '是否强制删除（未合并的分支需要强制删除）', default: false },
+      },
+      required: ['branch_name'],
+    },
+  },
+  {
+    name: 'git_pull',
+    description: '从远程仓库拉取最新代码并合并到当前分支。',
+    parameters: {
+      type: 'object',
+      properties: {
+        remote: { type: 'string', description: '远程名称，默认 origin', default: 'origin' },
+        branch: { type: 'string', description: '远程分支名（可选，默认跟踪分支）' },
+      },
+    },
+  },
+  {
+    name: 'git_push',
+    description: '将本地提交推送到远程仓库。',
+    parameters: {
+      type: 'object',
+      properties: {
+        remote: { type: 'string', description: '远程名称，默认 origin', default: 'origin' },
+        branch: { type: 'string', description: '分支名（可选，默认 HEAD）' },
+        set_upstream: { type: 'boolean', description: '是否设置上游跟踪（新分支首次 push 时需要）', default: false },
+      },
+    },
+  },
+  {
+    name: 'git_fetch',
+    description: '从远程仓库获取最新引用（不合并）。用于检查远程是否有新分支/提交。',
+    parameters: {
+      type: 'object',
+      properties: {
+        remote: { type: 'string', description: '远程名称，默认 origin', default: 'origin' },
+      },
+    },
+  },
+  {
+    name: 'github_create_pr',
+    description: '创建 GitHub Pull Request。需要 GitHub 模式。创建前请确保已 push 分支到远程。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'PR 标题' },
+        body: { type: 'string', description: 'PR 描述 (支持 Markdown)' },
+        head_branch: { type: 'string', description: '源分支（要合并的分支）' },
+        base_branch: { type: 'string', description: '目标分支，默认 main', default: 'main' },
+        draft: { type: 'boolean', description: '是否创建为草稿 PR', default: false },
+      },
+      required: ['title', 'body', 'head_branch'],
+    },
+  },
+  {
+    name: 'github_list_prs',
+    description: '列出 GitHub Pull Requests。需要 GitHub 模式。',
+    parameters: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', enum: ['open', 'closed', 'all'], description: '状态过滤，默认 open', default: 'open' },
+      },
+    },
+  },
+  {
+    name: 'github_get_pr',
+    description: '获取单个 GitHub Pull Request 的详细信息。',
+    parameters: {
+      type: 'object',
+      properties: {
+        pr_number: { type: 'number', description: 'PR 编号' },
+      },
+      required: ['pr_number'],
+    },
+  },
+  {
+    name: 'github_merge_pr',
+    description: '合并 GitHub Pull Request。支持 merge/squash/rebase 三种方式。',
+    parameters: {
+      type: 'object',
+      properties: {
+        pr_number: { type: 'number', description: 'PR 编号' },
+        merge_method: { type: 'string', enum: ['merge', 'squash', 'rebase'], description: '合并方式，默认 squash', default: 'squash' },
+        commit_title: { type: 'string', description: '合并提交标题（可选）' },
+      },
+      required: ['pr_number'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -1185,6 +1311,10 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'run_command', 'run_test', 'run_lint',
     'git_commit', 'git_diff',
     'github_close_issue', 'github_add_comment', 'github_get_issue',  // v13.0
+    // v14.0: Branch + Remote Sync + PR
+    'git_create_branch', 'git_switch_branch', 'git_list_branches', 'git_delete_branch',
+    'git_pull', 'git_push', 'git_fetch',
+    'github_create_pr', 'github_list_prs', 'github_get_pr', 'github_merge_pr',
     'web_search', 'fetch_url', 'http_request',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'spawn_researcher',
@@ -1254,6 +1384,10 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'git_commit', 'git_diff', 'git_log',
     'github_create_issue', 'github_list_issues',
     'github_close_issue', 'github_add_comment', 'github_get_issue',
+    // v14.0: Branch + Remote Sync + PR
+    'git_create_branch', 'git_switch_branch', 'git_list_branches', 'git_delete_branch',
+    'git_pull', 'git_push', 'git_fetch',
+    'github_create_pr', 'github_list_prs', 'github_get_pr', 'github_merge_pr',
     // v9.0+: Deploy Tools
     'deploy_compose', 'deploy_compose_down', 'deploy_pm2', 'deploy_pm2_status',
     'generate_nginx_config', 'generate_dockerfile', 'health_check',
@@ -1312,8 +1446,14 @@ export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): Ope
   const allowed = new Set(ROLE_TOOLS[role] || ROLE_TOOLS.developer);
 
   if (gitMode !== 'github') {
-    allowed.delete('github_create_issue');
-    allowed.delete('github_list_issues');
+    // 非 GitHub 模式下移除所有 GitHub API 工具
+    for (const name of [...allowed]) {
+      if (name.startsWith('github_')) allowed.delete(name);
+    }
+    // 远程 sync 工具也需要 remote，移除
+    allowed.delete('git_pull');
+    allowed.delete('git_push');
+    allowed.delete('git_fetch');
   }
 
   // 1. 内置工具

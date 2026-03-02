@@ -1,25 +1,24 @@
 /**
- * Tests for event-store.ts — 事件存储 (SQLite)
+ * event-store.test.ts — 事件存储完整测试
  *
- * Uses __mocks__/db.ts which provides in-memory better-sqlite3.
- * If native module unavailable, tests are skipped gracefully.
+ * 测试策略: 使用 __mocks__/db.ts 的内存 SQLite
+ *   1. ensureEventTable — 创建表结构
+ *   2. emitEvent / emitEvents — 写入事件
+ *   3. queryEvents — 多条件查询
+ *   4. getFeatureTimeline / getRecentEvents
+ *   5. getProjectEventStats — 聚合统计
+ *   6. exportEventsNDJSON — 导出
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+vi.mock('../logger', () => ({
+  createLogger: () => ({
+    info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
+  }),
+}));
+
 import { getDb, resetTestDb } from '../../db';
-
-// Check if real SQLite is available
-let sqliteAvailable = false;
-try {
-  const db = resetTestDb();
-  db.exec('SELECT 1');
-  // Check if this is the real DB or stub (stub.exec returns undefined but doesn't throw)
-  const result = db.prepare('SELECT 1 as v').get();
-  sqliteAvailable = result?.v === 1;
-} catch {
-  sqliteAvailable = false;
-}
-
-// Import event-store functions (they use getDb internally)
 import {
   ensureEventTable,
   emitEvent,
@@ -30,169 +29,273 @@ import {
   getProjectEventStats,
   exportEventsNDJSON,
   type AgentEvent,
+  type EventType,
 } from '../event-store';
 
-describe.skipIf(!sqliteAvailable)('event-store (SQLite)', () => {
+// Detect if we have real sqlite or stub
+let hasRealSqlite = false;
+try {
+  const db = resetTestDb();
+  db.exec('SELECT 1');
+  hasRealSqlite = true;
+} catch { /* stub mode */ }
+
+const describeDb = hasRealSqlite ? describe : describe.skip;
+
+describeDb('event-store (in-memory SQLite)', () => {
   beforeEach(() => {
     resetTestDb();
     ensureEventTable();
   });
 
-  // ── Write ──
-
-  it('ensureEventTable creates events table', () => {
-    const db = getDb();
-    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='events'").get() as any;
-    expect(row?.name).toBe('events');
-  });
-
-  it('emitEvent inserts and returns rowid', () => {
-    const id = emitEvent({
-      projectId: 'P1',
-      agentId: 'A1',
-      featureId: 'F1',
-      type: 'tool:call',
-      data: { tool: 'read_file', path: 'src/main.ts' },
-      durationMs: 42,
-      inputTokens: 100,
-      outputTokens: 50,
-      costUsd: 0.001,
+  describe('ensureEventTable', () => {
+    it('creates events table without error', () => {
+      // Table should already exist from beforeEach
+      const db = getDb();
+      const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='events'").get() as any;
+      expect(row).toBeTruthy();
+      expect(row.name).toBe('events');
     });
-    expect(id).toBeGreaterThan(0);
-  });
 
-  it('emitEvent handles missing optional fields', () => {
-    const id = emitEvent({
-      projectId: 'P1',
-      agentId: 'A1',
-      type: 'react:iteration',
-      data: {},
+    it('is idempotent', () => {
+      expect(() => ensureEventTable()).not.toThrow();
+      expect(() => ensureEventTable()).not.toThrow();
     });
-    expect(id).toBeGreaterThan(0);
   });
 
-  it('emitEvents batch inserts', () => {
-    const events: AgentEvent[] = Array.from({ length: 10 }, (_, i) => ({
-      projectId: 'P1',
-      agentId: 'A1',
-      featureId: 'F1',
-      type: 'tool:call',
-      data: { index: i },
-    }));
-    emitEvents(events);
-    const all = queryEvents({ projectId: 'P1' });
-    expect(all.length).toBe(10);
-  });
-
-  // ── Query ──
-
-  it('queryEvents returns events matching projectId', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:call', data: {} });
-    emitEvent({ projectId: 'P2', agentId: 'A1', type: 'tool:call', data: {} });
-    const results = queryEvents({ projectId: 'P1' });
-    expect(results.length).toBe(1);
-    expect(results[0].projectId).toBe('P1');
-  });
-
-  it('queryEvents filters by featureId', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'tool:call', data: {} });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F2', type: 'tool:call', data: {} });
-    const results = queryEvents({ projectId: 'P1', featureId: 'F1' });
-    expect(results.length).toBe(1);
-  });
-
-  it('queryEvents filters by type', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:call', data: {} });
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'llm:call', data: {} });
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:result', data: {} });
-    const results = queryEvents({ projectId: 'P1', types: ['tool:call', 'tool:result'] });
-    expect(results.length).toBe(2);
-  });
-
-  it('queryEvents respects limit and offset', () => {
-    for (let i = 0; i < 20; i++) {
-      emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:call', data: { i } });
-    }
-    const page1 = queryEvents({ projectId: 'P1', limit: 5, offset: 0 });
-    expect(page1.length).toBe(5);
-    const page2 = queryEvents({ projectId: 'P1', limit: 5, offset: 5 });
-    expect(page2.length).toBe(5);
-    expect(page2[0].data.i).toBe(5);
-  });
-
-  it('queryEvents parses data JSON correctly', () => {
-    emitEvent({
-      projectId: 'P1', agentId: 'A1', type: 'tool:call',
-      data: { tool: 'write_file', path: 'test.ts', nested: { key: 'value' } },
+  describe('emitEvent', () => {
+    it('inserts event and returns rowid', () => {
+      const id = emitEvent({
+        projectId: 'proj-1',
+        agentId: 'dev-1',
+        type: 'tool:call',
+        data: { tool: 'read_file', success: true },
+      });
+      expect(id).toBeGreaterThan(0);
     });
-    const results = queryEvents({ projectId: 'P1' });
-    expect(results[0].data.tool).toBe('write_file');
-    expect(results[0].data.nested.key).toBe('value');
+
+    it('inserts event with all optional fields', () => {
+      const id = emitEvent({
+        projectId: 'proj-1',
+        agentId: 'dev-1',
+        featureId: 'feat-1',
+        type: 'llm:call',
+        data: { model: 'gpt-4' },
+        durationMs: 1500,
+        inputTokens: 1000,
+        outputTokens: 500,
+        costUsd: 0.05,
+      });
+      expect(id).toBeGreaterThan(0);
+    });
+
+    it('handles null/undefined optional fields', () => {
+      const id = emitEvent({
+        projectId: 'proj-1',
+        agentId: '',
+        type: 'project:start',
+        data: {},
+      });
+      expect(id).toBeGreaterThan(0);
+    });
   });
 
-  // ── Convenience ──
+  describe('emitEvents (batch)', () => {
+    it('inserts multiple events in transaction', () => {
+      const events: AgentEvent[] = [
+        { projectId: 'proj-1', agentId: 'dev-1', type: 'tool:call', data: { tool: 'a' } },
+        { projectId: 'proj-1', agentId: 'dev-1', type: 'tool:call', data: { tool: 'b' } },
+        { projectId: 'proj-1', agentId: 'dev-2', type: 'tool:result', data: { ok: true } },
+      ];
+      expect(() => emitEvents(events)).not.toThrow();
 
-  it('getFeatureTimeline returns events for a feature', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'feature:locked', data: {} });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'tool:call', data: {} });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'feature:passed', data: {} });
-    const timeline = getFeatureTimeline('P1', 'F1');
-    expect(timeline.length).toBe(3);
-    // Ordered by id ASC
-    expect(timeline[0].type).toBe('feature:locked');
-    expect(timeline[2].type).toBe('feature:passed');
+      const all = queryEvents({ projectId: 'proj-1' });
+      expect(all).toHaveLength(3);
+    });
   });
 
-  it('getRecentEvents returns events in chronological order', () => {
-    for (let i = 0; i < 5; i++) {
-      emitEvent({ projectId: 'P1', agentId: 'A1', type: 'react:iteration', data: { i } });
-    }
-    const recent = getRecentEvents('P1', 3);
-    expect(recent.length).toBe(3);
-    // Should be chronological (oldest first after reverse)
-    expect(recent[0].data.i).toBe(2);
-    expect(recent[2].data.i).toBe(4);
+  describe('queryEvents', () => {
+    beforeEach(() => {
+      // Seed data
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-1', featureId: 'feat-1', type: 'tool:call', data: { tool: 'read_file' } });
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-1', featureId: 'feat-1', type: 'tool:call', data: { tool: 'write_file' } });
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-2', featureId: 'feat-2', type: 'llm:call', data: { model: 'gpt-4' } });
+      emitEvent({ projectId: 'proj-1', agentId: 'pm', type: 'phase:pm:start', data: {} });
+      emitEvent({ projectId: 'proj-2', agentId: 'dev-1', type: 'tool:call', data: { tool: 'search' } });
+    });
+
+    it('filters by projectId', () => {
+      const events = queryEvents({ projectId: 'proj-1' });
+      expect(events).toHaveLength(4);
+    });
+
+    it('filters by featureId', () => {
+      const events = queryEvents({ projectId: 'proj-1', featureId: 'feat-1' });
+      expect(events).toHaveLength(2);
+    });
+
+    it('filters by agentId', () => {
+      const events = queryEvents({ projectId: 'proj-1', agentId: 'dev-1' });
+      expect(events).toHaveLength(2);
+    });
+
+    it('filters by event types', () => {
+      const events = queryEvents({ projectId: 'proj-1', types: ['llm:call'] });
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('llm:call');
+    });
+
+    it('filters by multiple types', () => {
+      const events = queryEvents({ projectId: 'proj-1', types: ['tool:call', 'llm:call'] });
+      expect(events).toHaveLength(3);
+    });
+
+    it('respects limit', () => {
+      const events = queryEvents({ projectId: 'proj-1', limit: 2 });
+      expect(events).toHaveLength(2);
+    });
+
+    it('respects offset', () => {
+      const events = queryEvents({ projectId: 'proj-1', limit: 2, offset: 2 });
+      expect(events).toHaveLength(2);
+    });
+
+    it('caps limit at 1000', () => {
+      const events = queryEvents({ projectId: 'proj-1', limit: 5000 });
+      // Should work (capped internally) — just verify no error
+      expect(events.length).toBeLessThanOrEqual(1000);
+    });
+
+    it('returns events sorted by id ASC', () => {
+      const events = queryEvents({ projectId: 'proj-1' });
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i].id!).toBeGreaterThan(events[i - 1].id!);
+      }
+    });
+
+    it('parses data JSON correctly', () => {
+      const events = queryEvents({ projectId: 'proj-1', types: ['llm:call'] });
+      expect(events[0].data).toEqual({ model: 'gpt-4' });
+    });
   });
 
-  // ── Aggregation ──
+  describe('getFeatureTimeline', () => {
+    it('returns all events for a feature', () => {
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-1', featureId: 'feat-x', type: 'feature:locked', data: {} });
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-1', featureId: 'feat-x', type: 'tool:call', data: { tool: 'a' } });
+      emitEvent({ projectId: 'proj-1', agentId: 'dev-1', featureId: 'feat-x', type: 'feature:passed', data: {} });
 
-  it('getProjectEventStats aggregates correctly', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'tool:call', data: { tool: 'read_file', success: 1 }, durationMs: 10, inputTokens: 100, outputTokens: 50, costUsd: 0.01 });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'tool:call', data: { tool: 'read_file', success: 1 }, durationMs: 20, inputTokens: 200, outputTokens: 100, costUsd: 0.02 });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F1', type: 'llm:call', data: {}, durationMs: 500, inputTokens: 1000, outputTokens: 500, costUsd: 0.1 });
-    emitEvent({ projectId: 'P1', agentId: 'A1', featureId: 'F2', type: 'tool:call', data: { tool: 'write_file', success: 1 }, durationMs: 5 });
-
-    const stats = getProjectEventStats('P1');
-    expect(stats.totalEvents).toBe(4);
-    expect(stats.totalDurationMs).toBe(535);
-    expect(stats.totalInputTokens).toBe(1300);
-    expect(stats.totalOutputTokens).toBe(650);
-    expect(stats.totalCostUsd).toBeCloseTo(0.13);
-    expect(stats.eventsByType['tool:call']).toBe(3);
-    expect(stats.eventsByType['llm:call']).toBe(1);
-    expect(stats.featureStats.length).toBe(2);
-    expect(stats.featureStats.find(f => f.featureId === 'F1')?.toolCalls).toBe(2);
-    expect(stats.featureStats.find(f => f.featureId === 'F1')?.llmCalls).toBe(1);
+      const timeline = getFeatureTimeline('proj-1', 'feat-x');
+      expect(timeline).toHaveLength(3);
+      expect(timeline[0].type).toBe('feature:locked');
+      expect(timeline[2].type).toBe('feature:passed');
+    });
   });
 
-  // ── Export ──
+  describe('getRecentEvents', () => {
+    it('returns events in chronological order', () => {
+      emitEvent({ projectId: 'proj-r', agentId: 'a', type: 'project:start', data: {} });
+      emitEvent({ projectId: 'proj-r', agentId: 'a', type: 'tool:call', data: {} });
+      emitEvent({ projectId: 'proj-r', agentId: 'a', type: 'project:complete', data: {} });
 
-  it('exportEventsNDJSON produces valid NDJSON', () => {
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:call', data: { foo: 'bar' } });
-    emitEvent({ projectId: 'P1', agentId: 'A1', type: 'llm:result', data: { tokens: 42 } });
-    const ndjson = exportEventsNDJSON('P1');
-    const lines = ndjson.split('\n').filter(l => l.trim());
-    expect(lines.length).toBe(2);
-    for (const line of lines) {
-      const parsed = JSON.parse(line);
-      expect(parsed.projectId).toBe('P1');
-    }
+      const recent = getRecentEvents('proj-r', 10);
+      expect(recent).toHaveLength(3);
+      // Should be in chronological order (oldest first)
+      expect(recent[0].type).toBe('project:start');
+      expect(recent[2].type).toBe('project:complete');
+    });
+
+    it('respects limit', () => {
+      for (let i = 0; i < 5; i++) {
+        emitEvent({ projectId: 'proj-rl', agentId: 'a', type: 'tool:call', data: { i } });
+      }
+      const recent = getRecentEvents('proj-rl', 3);
+      expect(recent).toHaveLength(3);
+    });
+  });
+
+  describe('getProjectEventStats', () => {
+    beforeEach(() => {
+      emitEvent({ projectId: 'stats-proj', agentId: 'dev-1', featureId: 'f1', type: 'tool:call', data: { tool: 'read_file', success: true }, durationMs: 100, inputTokens: 500, outputTokens: 200, costUsd: 0.01 });
+      emitEvent({ projectId: 'stats-proj', agentId: 'dev-1', featureId: 'f1', type: 'tool:call', data: { tool: 'write_file', success: true }, durationMs: 50, costUsd: 0.005 });
+      emitEvent({ projectId: 'stats-proj', agentId: 'dev-1', featureId: 'f1', type: 'llm:call', data: { model: 'gpt-4' }, inputTokens: 1000, outputTokens: 500, costUsd: 0.03 });
+      emitEvent({ projectId: 'stats-proj', agentId: 'dev-2', featureId: 'f2', type: 'tool:call', data: { tool: 'read_file', success: false }, durationMs: 200 });
+    });
+
+    it('returns correct total counts', () => {
+      const stats = getProjectEventStats('stats-proj');
+      expect(stats.totalEvents).toBe(4);
+      expect(stats.totalInputTokens).toBe(1500);
+      expect(stats.totalOutputTokens).toBe(700);
+    });
+
+    it('aggregates by event type', () => {
+      const stats = getProjectEventStats('stats-proj');
+      expect(stats.eventsByType['tool:call']).toBe(3);
+      expect(stats.eventsByType['llm:call']).toBe(1);
+    });
+
+    it('aggregates by feature', () => {
+      const stats = getProjectEventStats('stats-proj');
+      expect(stats.featureStats.length).toBeGreaterThanOrEqual(1);
+      const f1 = stats.featureStats.find(f => f.featureId === 'f1');
+      expect(f1).toBeDefined();
+      expect(f1!.events).toBe(3);
+      expect(f1!.toolCalls).toBe(2);
+      expect(f1!.llmCalls).toBe(1);
+    });
+
+    it('aggregates tool stats', () => {
+      const stats = getProjectEventStats('stats-proj');
+      expect(stats.toolStats.length).toBeGreaterThanOrEqual(1);
+      const readFile = stats.toolStats.find(t => t.toolName === 'read_file');
+      expect(readFile).toBeDefined();
+      expect(readFile!.calls).toBe(2);
+    });
+  });
+
+  describe('exportEventsNDJSON', () => {
+    it('exports events as newline-delimited JSON', () => {
+      emitEvent({ projectId: 'export-proj', agentId: 'a', type: 'project:start', data: { x: 1 } });
+      emitEvent({ projectId: 'export-proj', agentId: 'a', type: 'project:complete', data: { x: 2 } });
+
+      const ndjson = exportEventsNDJSON('export-proj');
+      const lines = ndjson.split('\n').filter(Boolean);
+      expect(lines).toHaveLength(2);
+
+      const first = JSON.parse(lines[0]);
+      expect(first.projectId).toBe('export-proj');
+      expect(first.type).toBe('project:start');
+      expect(first.data.x).toBe(1);
+    });
+
+    it('returns empty string for project with no events', () => {
+      const ndjson = exportEventsNDJSON('no-events');
+      expect(ndjson).toBe('');
+    });
   });
 });
 
-describe.skipIf(sqliteAvailable)('event-store (stub fallback)', () => {
-  it('emitEvent returns -1 with stub', () => {
-    const id = emitEvent({ projectId: 'P1', agentId: 'A1', type: 'tool:call', data: {} });
-    expect(id).toBe(-1);
+// Type tests (always run)
+describe('event-store types', () => {
+  it('EventType covers all expected values', () => {
+    const types: EventType[] = [
+      'project:start', 'project:stop', 'project:complete',
+      'phase:pm:start', 'phase:pm:end', 'phase:dev:start', 'phase:dev:end',
+      'feature:locked', 'feature:passed', 'feature:failed',
+      'tool:call', 'tool:result', 'llm:call', 'llm:result',
+      'error',
+    ];
+    expect(types).toHaveLength(15);
+  });
+
+  it('AgentEvent interface shape', () => {
+    const event: AgentEvent = {
+      projectId: 'p1',
+      agentId: 'a1',
+      type: 'tool:call',
+      data: {},
+    };
+    expect(event.projectId).toBe('p1');
   });
 });

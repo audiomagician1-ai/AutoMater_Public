@@ -99,6 +99,10 @@ export interface FeatureRow {
   pm_verdict: string | null;
   pm_verdict_score: number | null;
   pm_verdict_feedback: string | null;
+  /** v14.0: GitHub Issue 关联 */
+  github_issue_number: number | null;
+  github_pr_number: number | null;
+  github_branch: string | null;
 }
 
 export interface AgentRow {

@@ -15,7 +15,7 @@ import { execSync } from 'child_process';
 import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
-import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment } from './git-provider';
+import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment, getIssue, createBranch, switchBranch, deleteBranch, listBranches, getCurrentBranch, gitPull, gitPush, gitFetch, createPR, listPRs, getPR, mergePR } from './git-provider';
 import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
@@ -385,6 +385,14 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'git_commit':
       case 'git_diff':
       case 'git_log':
+      // v14.0: Branch management + remote sync → async
+      case 'git_create_branch':
+      case 'git_switch_branch':
+      case 'git_list_branches':
+      case 'git_delete_branch':
+      case 'git_pull':
+      case 'git_push':
+      case 'git_fetch':
         throw new Error(`${call.name} is now async-only; route through executeToolAsync`);
 
       case 'task_complete':
@@ -576,6 +584,11 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'github_close_issue':
       case 'github_add_comment':
       case 'github_get_issue':
+      // v14.0: GitHub PR tools
+      case 'github_create_pr':
+      case 'github_list_prs':
+      case 'github_get_pr':
+      case 'github_merge_pr':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
 
       // Sync-only tools
@@ -675,18 +688,6 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     return ok
       ? { success: true, output: `已在 Issue #${call.arguments.issue_number} 添加评论`, action: 'github' }
       : { success: false, output: `评论 Issue #${call.arguments.issue_number} 失败`, action: 'github' };
-  }
-
-  if (call.name === 'github_get_issue') {
-    // 复用 listIssues 的数据并过滤 — git-provider 暂无 getIssue，用 list + filter
-    const issues = await listIssues(ctx.gitConfig, 'all');
-    const issue = issues.find(i => i.number === call.arguments.issue_number);
-    if (!issue) return { success: false, output: `Issue #${call.arguments.issue_number} 未找到`, action: 'github' };
-    return {
-      success: true,
-      output: `#${issue.number} [${issue.state}] ${issue.title}\n标签: ${issue.labels.join(', ') || '无'}\nURL: ${issue.html_url}\n\n${issue.body || '(无描述)'}`,
-      action: 'github',
-    };
   }
 
   // ── Web ──
@@ -1142,6 +1143,93 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
   if (call.name === 'git_log') {
     const logs = await gitLog(ctx.workspacePath, call.arguments.count ?? 10);
     return { success: true, output: logs.join('\n') || '无提交记录', action: 'git' };
+  }
+
+  // ── v14.0: Branch Management ──
+  if (call.name === 'git_create_branch') {
+    const result = await createBranch(ctx.gitConfig, call.arguments.branch_name, call.arguments.base_branch);
+    return result.success
+      ? { success: true, output: `已创建并切换到分支: ${call.arguments.branch_name}${call.arguments.base_branch ? ` (基于 ${call.arguments.base_branch})` : ''}`, action: 'git' }
+      : { success: false, output: `创建分支失败: ${result.error}`, action: 'git' };
+  }
+  if (call.name === 'git_switch_branch') {
+    const result = await switchBranch(ctx.gitConfig, call.arguments.branch_name);
+    return result.success
+      ? { success: true, output: `已切换到分支: ${call.arguments.branch_name}`, action: 'git' }
+      : { success: false, output: `切换分支失败: ${result.error}`, action: 'git' };
+  }
+  if (call.name === 'git_list_branches') {
+    const branches = await listBranches(ctx.workspacePath);
+    if (branches.length === 0) return { success: true, output: '无分支信息', action: 'git' };
+    const current = await getCurrentBranch(ctx.workspacePath);
+    const lines = branches.map(b => `${b.current ? '* ' : '  '}${b.name}`);
+    return { success: true, output: `当前分支: ${current}\n${lines.join('\n')}`, action: 'git' };
+  }
+  if (call.name === 'git_delete_branch') {
+    const result = await deleteBranch(ctx.gitConfig, call.arguments.branch_name, call.arguments.force || false);
+    return result.success
+      ? { success: true, output: `已删除分支: ${call.arguments.branch_name}`, action: 'git' }
+      : { success: false, output: `删除分支失败: ${result.error}`, action: 'git' };
+  }
+
+  // ── v14.0: Remote Sync ──
+  if (call.name === 'git_pull') {
+    const result = await gitPull(ctx.gitConfig, call.arguments.remote || 'origin', call.arguments.branch);
+    return result.success
+      ? { success: true, output: `Pull 成功:\n${result.output}`, action: 'git' }
+      : { success: false, output: `Pull 失败: ${result.error}`, action: 'git' };
+  }
+  if (call.name === 'git_push') {
+    const result = await gitPush(ctx.gitConfig, call.arguments.remote || 'origin', call.arguments.branch, call.arguments.set_upstream || false);
+    return result.success
+      ? { success: true, output: `Push 成功:\n${result.output}`, action: 'git' }
+      : { success: false, output: `Push 失败: ${result.error}`, action: 'git' };
+  }
+  if (call.name === 'git_fetch') {
+    const result = await gitFetch(ctx.gitConfig, call.arguments.remote || 'origin');
+    return result.success
+      ? { success: true, output: `Fetch 成功:\n${result.output}`, action: 'git' }
+      : { success: false, output: `Fetch 失败: ${result.error}`, action: 'git' };
+  }
+
+  // ── v14.0: GitHub PR ──
+  if (call.name === 'github_create_pr') {
+    const pr = await createPR(ctx.gitConfig, call.arguments.title, call.arguments.body, call.arguments.head_branch, call.arguments.base_branch || 'main', call.arguments.draft || false);
+    return pr
+      ? { success: true, output: `PR #${pr.number} 已创建: ${pr.html_url}\n${pr.draft ? '(草稿)' : ''}\n${pr.head_branch} → ${pr.base_branch}`, action: 'github' }
+      : { success: false, output: 'PR 创建失败 (可能未配置 GitHub 模式或分支不存在)', action: 'github' };
+  }
+  if (call.name === 'github_list_prs') {
+    const prs = await listPRs(ctx.gitConfig, call.arguments.state || 'open');
+    if (prs.length === 0) return { success: true, output: '无 Pull Requests', action: 'github' };
+    const list = prs.map(p => `#${p.number} [${p.state}${p.draft ? '/draft' : ''}] ${p.title} (${p.head_branch} → ${p.base_branch})${p.merged ? ' ✅merged' : ''}`).join('\n');
+    return { success: true, output: `Pull Requests (${prs.length}):\n${list}`, action: 'github' };
+  }
+  if (call.name === 'github_get_pr') {
+    const pr = await getPR(ctx.gitConfig, call.arguments.pr_number);
+    if (!pr) return { success: false, output: `PR #${call.arguments.pr_number} 未找到`, action: 'github' };
+    return {
+      success: true,
+      output: `#${pr.number} [${pr.state}${pr.draft ? '/draft' : ''}] ${pr.title}\n${pr.head_branch} → ${pr.base_branch}\nMerged: ${pr.merged}\nMergeable: ${pr.mergeable}\nURL: ${pr.html_url}\n\n${pr.body || '(无描述)'}`,
+      action: 'github',
+    };
+  }
+  if (call.name === 'github_merge_pr') {
+    const result = await mergePR(ctx.gitConfig, call.arguments.pr_number, call.arguments.merge_method || 'squash', call.arguments.commit_title);
+    return result.success
+      ? { success: true, output: `PR #${call.arguments.pr_number} 已合并 (${call.arguments.merge_method || 'squash'}) SHA: ${result.sha}`, action: 'github' }
+      : { success: false, output: `合并 PR #${call.arguments.pr_number} 失败: ${result.error}`, action: 'github' };
+  }
+
+  // ── v14.0: GitHub get single issue (proper API call, replaces list+filter hack) ──
+  if (call.name === 'github_get_issue') {
+    const issue = await getIssue(ctx.gitConfig, call.arguments.issue_number);
+    if (!issue) return { success: false, output: `Issue #${call.arguments.issue_number} 未找到`, action: 'github' };
+    return {
+      success: true,
+      output: `#${issue.number} [${issue.state}] ${issue.title}\n标签: ${issue.labels.join(', ') || '无'}\nURL: ${issue.html_url}\n\n${issue.body || '(无描述)'}`,
+      action: 'github',
+    };
   }
 
   // ── Skill 外部工具 ──

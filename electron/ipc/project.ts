@@ -1049,6 +1049,50 @@ export function setupProjectHandlers() {
       return { success: false, error: toErrorMessage(err) };
     }
   });
+
+  // ═══════════════════════════════════════
+  // v14.0: Issue Watcher (GitHub → Feature)
+  // ═══════════════════════════════════════
+
+  ipcMain.handle('issues:sync', async (_event, projectId: string) => {
+    try {
+      const { syncIssuesToFeatures } = await import('../engine/issue-watcher');
+      const result = await syncIssuesToFeatures(projectId);
+      return { success: true, ...result };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('issues:list-features', (_event, projectId: string) => {
+    try {
+      const { getIssueFeatures } = require('../engine/issue-watcher') as typeof import('../engine/issue-watcher');
+      const features = getIssueFeatures(projectId);
+      return { success: true, features };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('issues:start-polling', async (_event, projectId: string, intervalMinutes: number) => {
+    try {
+      const { startIssuePolling } = await import('../engine/issue-watcher');
+      startIssuePolling(projectId, intervalMinutes || 10);
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('issues:stop-polling', async (_event, projectId: string) => {
+    try {
+      const { stopIssuePolling } = await import('../engine/issue-watcher');
+      stopIssuePolling(projectId);
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
 }
 
 

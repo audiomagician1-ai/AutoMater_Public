@@ -22,6 +22,9 @@ import {
   resolveMemberModel,
   type AppSettings, type CountResult, type EnrichedFeature, type FeatureRow, type GitProviderConfig,
 } from './shared';
+import {
+  createBranch, switchBranch, gitPush, createPR, addIssueComment, closeIssue, getCurrentBranch,
+} from '../git-provider';
 
 const log = createLogger('phase:worker');
 
@@ -89,6 +92,33 @@ export async function workerLoop(
 
     let passed = false;
     let qaFeedback = '';
+
+    // v14.0: Issue-driven branch — create/switch before dev starts
+    const featureRow = db.prepare('SELECT github_branch, github_issue_number FROM features WHERE id = ? AND project_id = ?').get(feature.id, projectId) as { github_branch: string | null; github_issue_number: number | null } | undefined;
+    const issueBranch = featureRow?.github_branch;
+    const issueNumber = featureRow?.github_issue_number;
+    if (issueBranch && workspacePath && gitConfig.mode === 'github') {
+      try {
+        const currentBr = await getCurrentBranch(workspacePath);
+        if (currentBr !== issueBranch) {
+          const brResult = await createBranch(gitConfig, issueBranch);
+          if (brResult.success) {
+            sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🌿 已创建分支: ${issueBranch}` });
+          } else {
+            // Branch may already exist, try switching
+            const swResult = await switchBranch(gitConfig, issueBranch);
+            if (swResult.success) {
+              sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🌿 已切换到分支: ${issueBranch}` });
+            } else {
+              sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ 分支操作失败: ${brResult.error || swResult.error}（将在当前分支继续）` });
+            }
+          }
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ 分支创建失败 (非致命): ${errMsg}` });
+      }
+    }
 
     // TDD mode — QA generates test skeleton first
     const localQaId = `qa-${workerId}-${Date.now().toString(36)}`;
@@ -214,6 +244,67 @@ export async function workerLoop(
     const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('qa_passed','passed','failed')").get(projectId) as CountResult).c;
     if (completedCount % 3 === 0) createCheckpoint(projectId, `${completedCount} Features 已处理`);
     if (passed && workspacePath) await commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
+
+    // v14.0: Post-completion GitHub automation (push → PR → Issue comment/close)
+    if (passed && issueBranch && gitConfig.mode === 'github') {
+      try {
+        // 1. Push the feature branch
+        const pushResult = await gitPush(gitConfig, 'origin', issueBranch, true);
+        if (pushResult.success) {
+          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `📤 已推送分支: ${issueBranch}` });
+        } else {
+          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ Push 失败: ${pushResult.error}` });
+        }
+
+        // 2. Create PR
+        if (pushResult.success) {
+          const prTitle = `[AutoMater] ${feature.title || feature.id}`;
+          const prBody = [
+            `## 自动提交 by AutoMater`,
+            '',
+            `**Feature**: ${feature.id}`,
+            issueNumber ? `**Issue**: Closes #${issueNumber}` : '',
+            '',
+            `### 描述`,
+            feature.description || feature.title || '(无描述)',
+            '',
+            `> 🤖 此 PR 由 AutoMater 自动创建`,
+          ].filter(Boolean).join('\n');
+
+          const pr = await createPR(gitConfig, prTitle, prBody, issueBranch, 'main', false);
+          if (pr) {
+            sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔀 PR #${pr.number} 已创建: ${pr.html_url}` });
+            // 记录 PR 号
+            db.prepare('UPDATE features SET github_pr_number = ? WHERE id = ? AND project_id = ?').run(pr.number, feature.id, projectId);
+          } else {
+            sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ PR 创建失败` });
+          }
+
+          // 3. Comment + close Issue
+          if (issueNumber) {
+            const commentBody = pr
+              ? `🤖 **AutoMater** 已完成此 Issue 的开发！\n\n✅ QA 通过\n🔀 PR: #${pr.number}\n🌿 分支: \`${issueBranch}\`\n\n请审查 PR 后合并。`
+              : `🤖 **AutoMater** 已完成此 Issue 的开发！\n\n✅ QA 通过\n🌿 分支: \`${issueBranch}\` 已推送\n\n请手动创建 PR 审查。`;
+            await addIssueComment(gitConfig, issueNumber, commentBody);
+            // 不自动关闭 Issue — 让 PR 合并时通过 "Closes #N" 自动关闭
+          }
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ GitHub 自动化失败 (非致命): ${errMsg}` });
+        addLog(projectId, workerId, 'warn', `GitHub automation failed for ${feature.id}: ${errMsg}`);
+      }
+    }
+
+    // v14.0: Switch back to main branch after feature completion
+    if (issueBranch && workspacePath && gitConfig.mode === 'github') {
+      try {
+        await switchBranch(gitConfig, 'main');
+      } catch {
+        // Non-fatal: might not have a main branch
+      }
+    }
+
     await sleep(500);
   }
 }

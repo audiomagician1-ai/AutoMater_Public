@@ -1,15 +1,15 @@
 # 测试架构文档
 
-> AutoMater 引擎测试分层策略 v2.0 (2026-03-02)
+> AutoMater 引擎测试分层策略 v3.0 (2026-03-02)
 
 ## 总览
 
 | 指标 | 当前值 | 短期目标 | 长期目标 |
 |------|--------|----------|----------|
-| 测试文件 | 20 | 25+ | 35+ |
-| 测试用例 | 383 | 450+ | 600+ |
-| 语句覆盖率 | 18.0% | 25% | 50% |
-| 已测模块 | 20/55+ | 25/55 | 40/55 |
+| 测试文件 | 35 | 40+ | 50+ |
+| 测试用例 | 705 (687 pass, 50 skip) | 800+ | 1000+ |
+| 语句覆盖率 | 27.0% | 35% | 50% |
+| 已测模块 | 30/60+ | 40/60 | 50/60 |
 
 ## 分层测试策略
 
@@ -41,48 +41,62 @@
 | `file-lock.ts` | 152 | ✅ 已测 | 100% |
 | `extended-tools.ts` | 141 | ✅ 已测 | 93% |
 | `memory-system.ts` | 287 | ✅ 已测 | 86% |
-| `code-graph.ts` | 470 | ✅ 已测 | 84% |
+| `code-graph.ts` | 470 | ✅ 已测 | 60% |
 | `repo-map.ts` | 226 | ✅ 已测 | 89% |
 | `memory-layers.ts` | 210 | ✅ 已测 | **100%** |
-| `doc-manager.ts` | 408 | ⬜ 待测 | - |
-| `git-provider.ts` | 279 | ⬜ 待测 | - |
+| `doc-manager.ts` | 408 | ✅ 已测 | 65% |
 
 ### Layer 3: DB 依赖模块
 
 **特征**: 需要 `better-sqlite3`，通过 `__mocks__/db.ts` 提供 `:memory:` DB
 
-| 模块 | 行数 | 状态 | 备注 |
-|------|------|------|------|
-| `event-store.ts` | 378 | ⚠️ stub 测试 | native 不可用时 skip (15%) |
-| `agent-manager.ts` | 301 | ⬜ 待测 | |
-| `context-collector.ts` | 749 | ⬜ 待测 | |
-| `conversation-backup.ts` | 712 | ⬜ 待测 | 需 Electron app mock |
+| 模块 | 行数 | 状态 | 覆盖率 | 备注 |
+|------|------|------|--------|------|
+| `event-store.ts` | 378 | ✅ 已测 | 3% (DB skip) | 27 tests, 25 skip when native unavailable |
+| `conversation-backup.ts` | 727 | ✅ 已测 | 0.6% (DB skip) | 29 tests, 25 skip when native unavailable |
+| `agent-manager.ts` | 301 | ✅ 已测 | 56% | Registry ops + budget check |
+| `context-collector.ts` | 749 | ✅ 已测 | 29% | Pure helpers tested |
 | `mission.ts` | 328 | ⬜ 待测 | |
 
-### Layer 4: LLM + DB 模块
+### Layer 4: LLM + 复杂依赖模块
 
-| 模块 | 行数 | 状态 |
-|------|------|------|
-| `llm-client.ts` | 575 | ✅ 部分测 (8%) |
-| `react-loop.ts` | 967 | ⬜ 待测 |
-| `qa-loop.ts` | 372 | ⬜ 待测 |
-| `orchestrator.ts` | 631 | ⬜ 待测 |
+| 模块 | 行数 | 状态 | 覆盖率 |
+|------|------|------|--------|
+| `llm-client.ts` | 575 | ✅ 已测 | 58% |
+| `react-loop.ts` | 1029 | ✅ 已测 | 1.3% | Type exports + caches tested |
+| `tool-executor.ts` | 1435 | ✅ 已测 | **46%** | 106 tests, all sync+async dispatch |
+| `qa-loop.ts` | 372 | ⬜ 待测 | |
+| `orchestrator.ts` | 640 | ⬜ 待测 | |
 
-### Layer 5: 复杂外部依赖 (MCP/Playwright/Docker)
+### Layer 5: 探针/外部工具模块
 
-| 模块 | 行数 | 状态 |
-|------|------|------|
-| `mcp-client.ts` | 566 | ⬜ 待测 |
-| `browser-tools.ts` | 494 | ⬜ 待测 |
-| `docker-sandbox.ts` | 396 | ⬜ 待测 |
-| `tool-executor.ts` | 1180 | ⬜ 待测 |
-| `skill-evolution.ts` | 866 | ⬜ 待测 |
+| 模块 | 行数 | 状态 | 覆盖率 |
+|------|------|------|--------|
+| `probes/base-probe.ts` | 446 | ✅ 已测 | **48%** | Pure file utilities tested |
+| `probes/*.ts` (子探针) | ~500 | ⬜ 待测 | 需 mock LLM |
+| `probe-types.ts` | 265 | ✅ 类型验证 | (type-only) |
+| `skill-evolution.ts` | 866 | ✅ 已测 | 57% |
+| `search-provider.ts` | 596 | ✅ 已测 | 12% |
+| `mcp-client.ts` | 566 | ⬜ 待测 | |
+| `browser-tools.ts` | 494 | ⬜ 待测 | |
+| `docker-sandbox.ts` | 421 | ⬜ 待测 | |
+
+### 其他支持模块
+
+| 模块 | 行数 | 状态 | 覆盖率 |
+|------|------|------|--------|
+| `ui-bridge.ts` | 63 | ✅ 已测 | 90% |
+| `web-tools.ts` | 200 | ✅ 已测 | 100% |
+| `workspace-git.ts` | 100 | ✅ 已测 | 100% |
+| `cross-project.ts` | 260 | ✅ 已测 | 84% |
+| `sub-agent-framework.ts` | 586 | ✅ 部分测 | 9% |
+| `git-provider.ts` | 564 | ⬜ 待测 | |
 
 ## Mock 架构
 
 ```
 __mocks__/
-├── electron.ts       # Electron API stub (app, ipcMain, BrowserWindow, dialog)
+├── electron.ts       # Electron API stub (app, ipcMain, BrowserWindow, dialog, shell)
 └── db.ts             # better-sqlite3 :memory: mock (惰性初始化 + 优雅降级)
 ```
 
@@ -94,21 +108,15 @@ alias: {
 }
 ```
 
-### FS mock 策略
-- **方式 A** (Layer 2 大多数): 使用真实文件系统 + `os.tmpdir()` 临时目录
-- **方式 B** (memory-layers 等): 使用 `vi.mock('fs')` 模块级 mock + 闭包状态
+### Mock 策略分类
 
-```ts
-// 方式 A
-beforeEach(() => { tmpDir = fs.mkdtempSync(...); });
-afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
-
-// 方式 B (memory-layers.test.ts 范例)
-const mockFiles: Record<string, string> = {};
-vi.mock('fs', () => ({
-  default: { existsSync: (p) => p in mockFiles, ... }
-}));
-```
+| 策略 | 使用场景 | 示例 |
+|------|----------|------|
+| **真实 FS + tmpDir** | Layer 2 文件操作 | file-writer, decision-log |
+| **vi.mock('fs')** | 需要精确控制 FS 行为 | memory-layers |
+| **vi.mock 模块** | 重量级依赖隔离 | tool-executor (mock 20+ 依赖) |
+| **__mocks__/db.ts** | DB 操作 (in-memory SQLite) | event-store, conversation-backup |
+| **describe.skip** | native 模块不可用时 | better-sqlite3 版本不匹配 |
 
 ## 命令
 
@@ -122,8 +130,9 @@ vi.mock('fs', () => ({
 
 ## 质量门禁
 
-- **Coverage thresholds** (vitest.config.ts): statements ≥ 17%, branches ≥ 16%, functions ≥ 19%, lines ≥ 17%
-- 随测试覆盖增加逐步提高至 25% → 50%
+- **Coverage thresholds** (vitest.config.ts):
+  - statements ≥ 26%, branches ≥ 25%, functions ≥ 31%, lines ≥ 26%
+- 随测试覆盖增加逐步提高至 35% → 50%
 - HTML 覆盖率报告: `./coverage/index.html`
 - JSON 摘要: `./coverage/coverage-summary.json`
 - **Pre-commit hook**: 自动运行 tsc + vitest (`scripts/install-hooks.js`)
@@ -137,4 +146,5 @@ vi.mock('fs', () => ({
 5. 边界值和异常路径必须测试
 6. 涉及 FS 的测试使用 temp dir + cleanup 或 vi.mock
 7. 涉及 DB 的测试从 `'../db'` import (自动走 mock)
-8. 需要 SQLite 的测试使用 `describe.skipIf(!sqliteAvailable)` 模式优雅降级
+8. 需要 SQLite 的测试使用 `describeDb = hasRealSqlite ? describe : describe.skip` 模式优雅降级
+9. 重量级模块测试: 先 `vi.mock` 所有依赖, 再 import 被测模块 (参考 tool-executor.test.ts)

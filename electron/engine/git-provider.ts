@@ -279,3 +279,298 @@ export async function testGitHubConnection(repo: string, token: string): Promise
     return { success: false, message: (err instanceof Error ? err.message : String(err)) };
   }
 }
+
+// ═══════════════════════════════════════
+// v14.0: Branch Management
+// ═══════════════════════════════════════
+
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+}
+
+export async function getCurrentBranch(workspacePath: string): Promise<string> {
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) return '';
+  try {
+    const { stdout } = await execAsync('git branch --show-current', { cwd: workspacePath, encoding: 'utf-8' });
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
+export async function listBranches(workspacePath: string): Promise<BranchInfo[]> {
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) return [];
+  try {
+    const { stdout } = await execAsync('git branch --no-color', { cwd: workspacePath, encoding: 'utf-8' });
+    return stdout.trim().split('\n').filter(Boolean).map(line => ({
+      name: line.replace(/^\*?\s+/, '').trim(),
+      current: line.startsWith('*'),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createBranch(
+  config: GitProviderConfig,
+  branchName: string,
+  baseBranch?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit()) || !fs.existsSync(path.join(workspacePath, '.git'))) {
+    return { success: false, error: 'Git 未初始化' };
+  }
+  try {
+    // Ensure clean working tree or stash
+    const base = baseBranch || '';
+    const cmd = base
+      ? `git checkout -b "${branchName}" "${base}"`
+      : `git checkout -b "${branchName}"`;
+    await execAsync(cmd, { cwd: workspacePath });
+    log.info(`Branch created: ${branchName}`, { baseBranch: base || '(current)' });
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error('Branch create failed', { branchName, error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+export async function switchBranch(
+  config: GitProviderConfig,
+  branchName: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit())) return { success: false, error: 'Git 不可用' };
+  try {
+    await execAsync(`git checkout "${branchName}"`, { cwd: workspacePath });
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+export async function deleteBranch(
+  config: GitProviderConfig,
+  branchName: string,
+  force: boolean = false,
+): Promise<{ success: boolean; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit())) return { success: false, error: 'Git 不可用' };
+  try {
+    const flag = force ? '-D' : '-d';
+    await execAsync(`git branch ${flag} "${branchName}"`, { cwd: workspacePath });
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+// ═══════════════════════════════════════
+// v14.0: Remote Sync (Pull / Push / Fetch)
+// ═══════════════════════════════════════
+
+export async function gitPull(
+  config: GitProviderConfig,
+  remote: string = 'origin',
+  branch?: string,
+): Promise<{ success: boolean; output: string; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit())) return { success: false, output: '', error: 'Git 不可用' };
+  try {
+    const branchArg = branch || '';
+    const cmd = branchArg ? `git pull ${remote} ${branchArg}` : `git pull ${remote}`;
+    const { stdout, stderr } = await execAsync(cmd, { cwd: workspacePath, encoding: 'utf-8', timeout: 60000 });
+    return { success: true, output: (stdout + '\n' + stderr).trim() };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: '', error: msg };
+  }
+}
+
+export async function gitPush(
+  config: GitProviderConfig,
+  remote: string = 'origin',
+  branch?: string,
+  setUpstream: boolean = false,
+): Promise<{ success: boolean; output: string; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit())) return { success: false, output: '', error: 'Git 不可用' };
+  try {
+    const branchArg = branch || 'HEAD';
+    const upstreamFlag = setUpstream ? '-u' : '';
+    const cmd = `git push ${upstreamFlag} ${remote} ${branchArg}`.replace(/\s+/g, ' ').trim();
+    const { stdout, stderr } = await execAsync(cmd, { cwd: workspacePath, encoding: 'utf-8', timeout: 60000 });
+    return { success: true, output: (stdout + '\n' + stderr).trim() };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: '', error: msg };
+  }
+}
+
+export async function gitFetch(
+  config: GitProviderConfig,
+  remote: string = 'origin',
+): Promise<{ success: boolean; output: string; error?: string }> {
+  const { workspacePath } = config;
+  if (!(await hasGit())) return { success: false, output: '', error: 'Git 不可用' };
+  try {
+    const { stdout, stderr } = await execAsync(`git fetch ${remote} --prune`, { cwd: workspacePath, encoding: 'utf-8', timeout: 60000 });
+    return { success: true, output: (stdout + '\n' + stderr).trim() };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: '', error: msg };
+  }
+}
+
+// ═══════════════════════════════════════
+// v14.0: GitHub Issue (single fetch)
+// ═══════════════════════════════════════
+
+export async function getIssue(
+  config: GitProviderConfig,
+  issueNumber: number,
+): Promise<GitHubIssue | null> {
+  if (config.mode !== 'github' || !config.githubRepo || !config.githubToken) return null;
+  try {
+    const data = await githubApi(
+      `/repos/${config.githubRepo}/issues/${issueNumber}`,
+      config.githubToken,
+    );
+    const d = data as Record<string, unknown>;
+    return {
+      number: d.number as number,
+      title: d.title as string,
+      state: d.state as string,
+      body: d.body as string,
+      labels: ((d.labels || []) as GitHubApiLabel[]).map(l => l.name),
+      html_url: d.html_url as string,
+    };
+  } catch (err) {
+    log.warn('GitHub get issue failed', { issueNumber });
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// v14.0: GitHub Pull Request API
+// ═══════════════════════════════════════
+
+export interface GitHubPR {
+  number: number;
+  title: string;
+  state: string;
+  body?: string;
+  head_branch: string;
+  base_branch: string;
+  html_url: string;
+  merged: boolean;
+  mergeable: boolean | null;
+  draft: boolean;
+}
+
+export async function createPR(
+  config: GitProviderConfig,
+  title: string,
+  body: string,
+  headBranch: string,
+  baseBranch: string = 'main',
+  draft: boolean = false,
+): Promise<GitHubPR | null> {
+  if (config.mode !== 'github' || !config.githubRepo || !config.githubToken) return null;
+  try {
+    const data = await githubApi(
+      `/repos/${config.githubRepo}/pulls`,
+      config.githubToken,
+      'POST',
+      { title, body, head: headBranch, base: baseBranch, draft },
+    );
+    return parsePR(data);
+  } catch (err) {
+    log.error('GitHub create PR failed', err);
+    return null;
+  }
+}
+
+export async function listPRs(
+  config: GitProviderConfig,
+  state: 'open' | 'closed' | 'all' = 'open',
+): Promise<GitHubPR[]> {
+  if (config.mode !== 'github' || !config.githubRepo || !config.githubToken) return [];
+  try {
+    const data = await githubApi(
+      `/repos/${config.githubRepo}/pulls?state=${state}&per_page=50`,
+      config.githubToken,
+    );
+    return ((data || []) as Record<string, unknown>[]).map(parsePR);
+  } catch (err) {
+    log.warn('GitHub list PRs failed');
+    return [];
+  }
+}
+
+export async function getPR(
+  config: GitProviderConfig,
+  prNumber: number,
+): Promise<GitHubPR | null> {
+  if (config.mode !== 'github' || !config.githubRepo || !config.githubToken) return null;
+  try {
+    const data = await githubApi(
+      `/repos/${config.githubRepo}/pulls/${prNumber}`,
+      config.githubToken,
+    );
+    return parsePR(data);
+  } catch (err) {
+    log.warn('GitHub get PR failed', { prNumber });
+    return null;
+  }
+}
+
+export async function mergePR(
+  config: GitProviderConfig,
+  prNumber: number,
+  mergeMethod: 'merge' | 'squash' | 'rebase' = 'squash',
+  commitTitle?: string,
+): Promise<{ success: boolean; sha?: string; error?: string }> {
+  if (config.mode !== 'github' || !config.githubRepo || !config.githubToken) {
+    return { success: false, error: '未配置 GitHub 模式' };
+  }
+  try {
+    const body: Record<string, unknown> = { merge_method: mergeMethod };
+    if (commitTitle) body.commit_title = commitTitle;
+    const data = await githubApi(
+      `/repos/${config.githubRepo}/pulls/${prNumber}/merge`,
+      config.githubToken,
+      'PUT',
+      body,
+    );
+    const d = data as Record<string, unknown>;
+    return { success: d.merged === true, sha: d.sha as string };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error('GitHub merge PR failed', { prNumber, error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+/** Helper: parse GitHub PR API response into our GitHubPR type */
+function parsePR(data: unknown): GitHubPR {
+  const d = data as Record<string, unknown>;
+  const head = d.head as Record<string, unknown> | undefined;
+  const base = d.base as Record<string, unknown> | undefined;
+  return {
+    number: d.number as number,
+    title: d.title as string,
+    state: d.state as string,
+    body: d.body as string | undefined,
+    head_branch: (head?.ref as string) || '',
+    base_branch: (base?.ref as string) || '',
+    html_url: d.html_url as string,
+    merged: (d.merged as boolean) || false,
+    mergeable: d.mergeable as boolean | null,
+    draft: (d.draft as boolean) || false,
+  };
+}

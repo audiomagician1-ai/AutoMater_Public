@@ -169,6 +169,18 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('secrets:delete', projectId, key),
   },
 
+  // ── v14.0: Issue Watcher (GitHub → Feature) ──
+  issues: {
+    sync: (projectId: string) =>
+      ipcRenderer.invoke('issues:sync', projectId),
+    listFeatures: (projectId: string) =>
+      ipcRenderer.invoke('issues:list-features', projectId),
+    startPolling: (projectId: string, intervalMinutes?: number) =>
+      ipcRenderer.invoke('issues:start-polling', projectId, intervalMinutes || 10),
+    stopPolling: (projectId: string) =>
+      ipcRenderer.invoke('issues:stop-polling', projectId),
+  },
+
   // ── 元Agent对话 + 管理 (v5.4 → v7.0) ──
   metaAgent: {
     chat: (projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) =>

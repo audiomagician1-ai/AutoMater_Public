@@ -194,8 +194,8 @@ export function ProjectsPage() {
             <div className="bg-slate-900 border border-cyan-800/30 rounded-xl p-6 space-y-4 mb-4">
               <h3 className="text-sm font-semibold text-slate-200">📥 导入已有项目</h3>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                将已有代码项目导入 AutoMater。系统会自动执行静态扫描 → 模块摘要 → 架构合成 → 文档填充，
-                生成完整的项目文档框架，让 Agent 团队理解你的项目。
+                将已有代码项目导入 AutoMater。系统会自动执行三阶段深度分析：骨架扫描 → 多探针并行探测 → 拼图合成，
+                生成完整的架构文档和结构化模块图，让 Agent 团队深度理解你的项目。
               </p>
 
               {/* 项目路径 */}
@@ -249,13 +249,16 @@ export function ProjectsPage() {
 
               {/* 导入流程说明 */}
               <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
-                <p className="text-[10px] text-slate-500 font-medium">导入分析流程 (v6.0 快速理解)：</p>
-                <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <p className="text-[10px] text-slate-500 font-medium">导入分析流程 (v7.0 三阶段深度分析)：</p>
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
                   <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 0 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    📸 收集快照<br />目录 / 配置 / 符号
+                    📸 骨架扫描<br />目录 / 依赖图 / 种子
                   </div>
                   <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 1 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
-                    🤖 AI 分析<br />大模型理解 → 文档
+                    🔍 并行探测<br />多探针 AI 分析
+                  </div>
+                  <div className={`text-center p-1.5 rounded ${importProgress && importProgress.phase >= 2 ? 'bg-cyan-900/30 text-cyan-400' : 'text-slate-600'}`}>
+                    🧩 拼图合成<br />架构文档 / 模块图
                   </div>
                 </div>
                 {importProgress && (
