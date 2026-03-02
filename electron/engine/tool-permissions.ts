@@ -11,6 +11,7 @@ export type AgentRole = 'pm' | 'architect' | 'developer' | 'qa' | 'devops' | 're
 const ROLE_TOOLS: Record<AgentRole, string[]> = {
   pm: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'scratchpad_write', 'scratchpad_read',  // v19.0: 持久化工作记忆
     'read_file', 'list_files', 'search_files', 'glob_files',
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0: 高级搜索
     // v5.5: PM 需要读文件能力 (分析用户提到的本地工程)
@@ -24,6 +25,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   architect: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'scratchpad_write', 'scratchpad_read',  // v19.0: 持久化工作记忆
     'read_file', 'list_files', 'search_files', 'glob_files',
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'write_file',
@@ -37,6 +39,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   developer: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'scratchpad_write', 'scratchpad_read',  // v19.0: 持久化工作记忆
     'read_file', 'write_file', 'edit_file', 'batch_edit',
     'list_files', 'glob_files', 'search_files',
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
@@ -87,6 +90,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   qa: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'scratchpad_write', 'scratchpad_read',  // v19.0: 持久化工作记忆
     'read_file', 'list_files', 'search_files', 'glob_files',
     'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',  // v17.0
     'run_command', 'run_test', 'run_lint',
@@ -114,6 +118,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',
+    'scratchpad_write', 'scratchpad_read',  // v19.0: 持久化工作记忆
     // v13.0: 文件操作 (完整读写)
     'read_file', 'write_file', 'edit_file', 'batch_edit',
     'list_files', 'glob_files', 'search_files',

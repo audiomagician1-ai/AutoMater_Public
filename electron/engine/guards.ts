@@ -431,7 +431,7 @@ export function hasToolSideEffect(toolNames: string[]): boolean {
   const readOnlyTools = new Set([
     'think', 'read_file', 'read_many_files', 'list_files', 'glob_files',
     'search_files', 'code_search', 'code_graph_query',
-    'todo_read', 'memory_read', 'git_diff', 'git_log',
+    'todo_read', 'scratchpad_read', 'memory_read', 'git_diff', 'git_log',
     'browser_snapshot', 'browser_network',
   ]);
   // task_complete / report_blocked / write / edit 等均算副作用

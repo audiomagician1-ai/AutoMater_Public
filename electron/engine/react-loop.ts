@@ -36,6 +36,10 @@ import {
   getBackoffDelayMs, checkContextBudget, compressToolOutputs,
   buildRecoveryHint,
 } from './react-resilience';
+import {
+  recordFileChange, recordToolError, recordErrorResolved,
+  buildScratchpadAnchor, maskOldToolOutputs,
+} from './scratchpad';
 import { summarizeToolResult } from './tool-result-summarizer';
 import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
@@ -409,7 +413,7 @@ export async function reactDeveloperLoop(
       });
 
       for (const tc of msg.tool_calls) {
-        let toolArgs: Record<string, any>;
+        let toolArgs: Record<string, any>; // accepted: JSON.parse result fed to tool executor
         try {
           toolArgs = typeof tc.function.arguments === 'string'
             ? JSON.parse(tc.function.arguments)
@@ -448,7 +452,7 @@ export async function reactDeveloperLoop(
           guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
         }
 
-        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read') {
+        if (tc.function.name === 'todo_write' || tc.function.name === 'todo_read' || tc.function.name === 'scratchpad_write' || tc.function.name === 'scratchpad_read') {
           toolArgs._agentId = workerId;
         }
 
@@ -588,6 +592,19 @@ export async function reactDeveloperLoop(
               type: tc.function.name === 'write_file' ? 'file_created' : 'other',
               description: `${tc.function.name} ${toolArgs.path}`,
             });
+            // v19.0: Harness 自动收集文件变更到 scratchpad
+            recordFileChange(workspacePath, workerId, toolArgs.path, tc.function.name === 'write_file' ? 'created' : 'modified');
+          }
+        }
+
+        // v19.0: Harness 自动收集工具错误/恢复到 scratchpad
+        if (!toolResult.success && workspacePath) {
+          recordToolError(workspacePath, workerId, tc.function.name, toolResult.output.slice(0, 300));
+        }
+        if (toolResult.success && workspacePath && learningState.recentFailures.length > 0) {
+          const lastFail = learningState.recentFailures[learningState.recentFailures.length - 1];
+          if (lastFail && lastFail.toolName === tc.function.name) {
+            recordErrorResolved(workspacePath, workerId, tc.function.name, `重试后成功`);
           }
         }
 
@@ -664,22 +681,36 @@ export async function reactDeveloperLoop(
         break;
       }
 
-      // ── v8.0 消息窗口智能压缩 ──
+      // ── v19.0 消息窗口智能压缩 (Observation Masking + Scratchpad Anchor) ──
       // 基于 token 预算检查 (优先于简单的消息数量检查)
       const budget = checkContextBudget(contextTokens, model);
-      if (budget.status === 'overflow') {
-        log.warn(`Context overflow: ${contextTokens}/${budget.limit} (${Math.round(budget.ratio * 100)}%)`);
-        compressToolOutputs(messages, 'overflow');
-        await compressMessageHistorySmart(messages, settings, signal);
-      } else if (budget.status === 'critical') {
-        compressToolOutputs(messages, 'critical');
-        if (messages.length > 20) {
+      const needsCompression = budget.status === 'overflow' || budget.status === 'critical'
+        || (budget.status === 'warning' && messages.length > 30) || messages.length > 30;
+
+      if (needsCompression) {
+        // Step 1: Observation Masking — 将旧 tool 输出替换为结构化摘要
+        const maskResult = maskOldToolOutputs(messages, 10);
+        if (maskResult.maskedCount > 0) {
+          log.info(`Observation masking: ${maskResult.maskedCount} outputs masked, ~${maskResult.estimatedTokensSaved} tokens saved`);
+        }
+
+        // Step 2: 传统压缩 (如果 mask 后仍然超预算)
+        if (budget.status === 'overflow' || budget.status === 'critical') {
+          compressToolOutputs(messages, budget.status);
+          await compressMessageHistorySmart(messages, settings, signal);
+        } else if (messages.length > 20) {
+          compressToolOutputs(messages, 'warning');
           await compressMessageHistorySmart(messages, settings, signal);
         }
-      } else if (budget.status === 'warning' || messages.length > 30) {
-        compressToolOutputs(messages, 'warning');
-        if (messages.length > 30) {
-          await compressMessageHistorySmart(messages, settings, signal);
+
+        // Step 3: 注入 Scratchpad 锚点 — 确保关键信息存活于压缩
+        if (workspacePath) {
+          const anchor = buildScratchpadAnchor(workspacePath, workerId);
+          if (anchor) {
+            // 插在 system prompt 之后, 压缩摘要之后
+            const insertIdx = Math.min(2, messages.length);
+            messages.splice(insertIdx, 0, anchor);
+          }
         }
       }
 
@@ -1026,7 +1057,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         const batchResults = await Promise.all(batch.map(async (tcInfo) => {
           // 找到原始 tool_call (保留 id)
           const tc = msg.tool_calls!.find((t: LLMToolCall) => t.id === tcInfo.id)!;
-          const toolArgs = tcInfo.arguments as Record<string, any>;
+          const toolArgs = tcInfo.arguments as Record<string, any>; // accepted: ToolCall.arguments type
           const toolCall: ToolCall = { name: tcInfo.name, arguments: toolArgs };
 
           // guard 检查
@@ -1040,7 +1071,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
           guardState.recentCallSignatures.push(toolCallSignature(tcInfo.name, toolArgs));
           if (guardState.recentCallSignatures.length > 10) guardState.recentCallSignatures = guardState.recentCallSignatures.slice(-10);
 
-          if (tcInfo.name === 'todo_write' || tcInfo.name === 'todo_read') toolArgs._agentId = agentId;
+          if (tcInfo.name === 'todo_write' || tcInfo.name === 'todo_read' || tcInfo.name === 'scratchpad_write' || tcInfo.name === 'scratchpad_read') toolArgs._agentId = agentId;
 
           // 特殊处理: task_complete / report_blocked
           if (tcInfo.name === 'task_complete') {

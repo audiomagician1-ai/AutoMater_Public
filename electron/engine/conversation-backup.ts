@@ -76,7 +76,7 @@ export interface ConversationBackup {
   /** 完整消息历史 */
   messages: ConversationMessage[];
   /** 补充元信息 */
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SessionInfo {
@@ -369,7 +369,7 @@ export function backupConversation(opts: {
   totalCost: number;
   model?: string;
   completed: boolean;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): string | null {
   try {
     const db = getDb();

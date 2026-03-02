@@ -75,7 +75,7 @@ export interface AgentEvent {
   featureId?: string;
   type: EventType;
   /** 结构化 payload (JSON) */
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   /** 事件耗时 ms (可选, 用于性能追踪) */
   durationMs?: number;
   /** LLM token 消耗 */

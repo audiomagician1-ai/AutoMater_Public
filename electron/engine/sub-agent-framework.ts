@@ -401,7 +401,7 @@ export async function spawnSubAgent(
         for (const tc of msg.tool_calls) {
           if (signal.aborted) break;
 
-          let toolArgs: Record<string, any>;
+          let toolArgs: Record<string, any>; // accepted: JSON.parse result fed to tool executor
           try {
             toolArgs = typeof tc.function.arguments === 'string'
               ? JSON.parse(tc.function.arguments)
@@ -575,7 +575,7 @@ function isWriteTool(name: string): boolean {
 }
 
 /** 缩写工具参数 (用于日志) */
-function summarizeArgs(args: Record<string, any>): string {
+function summarizeArgs(args: Record<string, any>): string { // accepted: ToolCall.arguments type
   const parts: string[] = [];
   if (args.path) parts.push(args.path);
   if (args.pattern) parts.push(`"${args.pattern}"`);

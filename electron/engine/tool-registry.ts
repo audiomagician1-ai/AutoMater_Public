@@ -20,12 +20,12 @@ export { type AgentRole, ROLE_TOOLS } from './tool-permissions';
 export interface ToolDefinition {
   name: string;
   description: string;
-  parameters: Record<string, any>; // JSON Schema
+  parameters: Record<string, any>; // JSON Schema — accepted: arbitrary JSON Schema
 }
 
 export interface ToolCall {
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, any>; // accepted: LLM-parsed JSON args
 }
 
 export interface ToolResult {

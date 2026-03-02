@@ -892,7 +892,7 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-context-snapshots', (_event, projectId: string) => {
     assertProjectId('project:get-context-snapshots', projectId);
     const snapshots = getContextSnapshots(projectId);
-    const result: Record<string, any> = {};
+    const result: Record<string, ContextSnapshot> = {};
     for (const [agentId, snap] of snapshots) {
       result[agentId] = snap;
     }
@@ -903,7 +903,7 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:get-react-states', (_event, projectId: string) => {
     assertProjectId('project:get-react-states', projectId);
     const states = getAgentReactStates(projectId);
-    const result: Record<string, any> = {};
+    const result: Record<string, AgentReactState> = {};
     for (const [agentId, state] of states) {
       result[agentId] = state;
     }

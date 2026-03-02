@@ -535,7 +535,7 @@ const result = await callLLMWithTools(
         });
 
         for (const tc of msg.tool_calls) {
-          let toolArgs: Record<string, any>;
+          let toolArgs: Record<string, any>; // accepted: JSON.parse result fed to tool executor
           try {
             toolArgs = typeof tc.function.arguments === 'string'
               ? JSON.parse(tc.function.arguments)

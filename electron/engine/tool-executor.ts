@@ -27,6 +27,7 @@ import { getDb } from '../db';
 import { webSearch, fetchUrl, httpRequest } from './web-tools';
 import { webSearchBoost } from './web-tools';
 import { think, todoWrite, todoRead, batchEdit, type TodoItem, type EditOperation } from './extended-tools';
+import { agentScratchpadWrite, agentScratchpadRead, todoWritePersist, todoReadPersist, type TodoItemPersist } from './scratchpad';
 import { takeScreenshot, mouseMove, mouseClick, keyboardType, keyboardHotkey } from './computer-use';
 import {
   launchBrowser, closeBrowser, navigate as browserNavigateFn,
@@ -412,14 +413,45 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'todo_write': {
-        const todos: TodoItem[] = call.arguments.todos || [];
+        const todos: TodoItemPersist[] = call.arguments.todos || [];
         const agentId = (call.arguments._agentId as string) || 'default';
-        return { success: true, output: todoWrite(agentId, todos), action: 'plan' };
+        // v19.0: 优先持久化到磁盘 scratchpad, fallback 到内存
+        if (ctx.workspacePath) {
+          return { success: true, output: todoWritePersist(ctx.workspacePath, agentId, todos), action: 'plan' };
+        }
+        return { success: true, output: todoWrite(agentId, todos as any), action: 'plan' };
       }
 
       case 'todo_read': {
         const agentId = (call.arguments._agentId as string) || 'default';
+        // v19.0: 优先从磁盘 scratchpad 读, fallback 到内存
+        if (ctx.workspacePath) {
+          return { success: true, output: todoReadPersist(ctx.workspacePath, agentId), action: 'plan' };
+        }
         return { success: true, output: todoRead(agentId), action: 'plan' };
+      }
+
+      case 'scratchpad_write': {
+        const agentId = (call.arguments._agentId as string) || 'default';
+        const category = (call.arguments.category as string) || 'key_fact';
+        const content = (call.arguments.content as string) || '';
+        if (!ctx.workspacePath) {
+          return { success: false, output: '无工作区路径，scratchpad 不可用', action: 'think' };
+        }
+        if (!content) {
+          return { success: false, output: '内容不能为空', action: 'think' };
+        }
+        const result = agentScratchpadWrite(ctx.workspacePath, agentId, category as any, content);
+        return { success: true, output: result, action: 'think' };
+      }
+
+      case 'scratchpad_read': {
+        const agentId = (call.arguments._agentId as string) || 'default';
+        if (!ctx.workspacePath) {
+          return { success: false, output: '无工作区路径，scratchpad 不可用', action: 'think' };
+        }
+        const result = agentScratchpadRead(ctx.workspacePath, agentId);
+        return { success: true, output: result, action: 'read' };
       }
 
       case 'batch_edit': {

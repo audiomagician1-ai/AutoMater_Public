@@ -404,6 +404,32 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
     parameters: { type: 'object', properties: {} },
   },
 
+  // ── Scratchpad 持久化工作记忆 (v19.0) ──
+  {
+    name: 'scratchpad_write',
+    description: '将关键信息写入持久化工作记忆（不会因上下文压缩而丢失）。当你做出重要决策、发现关键事实、或完成阶段性进度时，务必调用此工具记录。',
+    parameters: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['decision', 'progress', 'key_fact'],
+          description: '记录分类: decision=关键决策(如选择了某框架/改变了某方案), progress=阶段进度(如完成了某模块), key_fact=重要发现(如某API有限制/某文件结构特殊)',
+        },
+        content: {
+          type: 'string',
+          description: '要记录的内容。应简洁但完整，包含足够的上下文信息让未来的自己能理解。',
+        },
+      },
+      required: ['category', 'content'],
+    },
+  },
+  {
+    name: 'scratchpad_read',
+    description: '读取你的持久化工作记忆。包含之前记录的关键决策、进度、文件变更、错误记录等。在上下文被压缩后会自动注入，但你也可以主动读取。',
+    parameters: { type: 'object', properties: {} },
+  },
+
   // ── Web (v2.1) ──
   {
     name: 'web_search',

@@ -81,7 +81,7 @@ export interface SkillExecution {
 export interface SkillFileEntry {
   name: string;
   description: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
   execution: SkillExecution;
   /** 允许使用的角色 (空=全部) */
   allowedRoles?: string[];
