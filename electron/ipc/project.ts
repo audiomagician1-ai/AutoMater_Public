@@ -17,6 +17,13 @@ import { importProject } from '../engine/project-importer';
 import { collectBaselineContext } from '../engine/context-collector';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getSettings } from '../engine/llm-client';
+import {
+  setSecret as setSecretFn,
+  getSecret as getSecretFn,
+  listSecrets as listSecretsFn,
+  deleteSecret as deleteSecretFn,
+  type SecretProvider,
+} from '../engine/secret-manager';
 
 // 导入进程的 AbortController 映射（用于取消正在运行的导入）
 const importAbortControllers = new Map<string, AbortController>();
@@ -998,6 +1005,46 @@ export function setupProjectHandlers() {
     try {
       const snapshot = collectBaselineContext(project.workspace_path, role, tokenBudget || 128000);
       return { success: true, snapshot };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  // ═══════════════════════════════════════
+  // v13.0: 密钥管理 (Secret Manager)
+  // ═══════════════════════════════════════
+
+  ipcMain.handle('secrets:set', (_event, projectId: string, key: string, value: string, provider: string) => {
+    try {
+      setSecretFn(projectId, key, value, provider as SecretProvider);
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('secrets:get', (_event, projectId: string, key: string) => {
+    try {
+      const value = getSecretFn(projectId, key);
+      return { success: true, value };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('secrets:list', (_event, projectId: string, provider?: string) => {
+    try {
+      const secrets = listSecretsFn(projectId, provider as SecretProvider | undefined);
+      return { success: true, secrets };
+    } catch (err: unknown) {
+      return { success: false, error: toErrorMessage(err) };
+    }
+  });
+
+  ipcMain.handle('secrets:delete', (_event, projectId: string, key: string) => {
+    try {
+      const deleted = deleteSecretFn(projectId, key);
+      return { success: true, deleted };
     } catch (err: unknown) {
       return { success: false, error: toErrorMessage(err) };
     }

@@ -10,9 +10,9 @@ import dagre from 'dagre';
 
 export interface Feature {
   id: string; title: string; description: string; priority: number;
-  category: string; status: string; depends_on: string; locked_by: string | null;
-  group_name?: string; sub_group?: string;
-  pm_verdict?: string;
+  category: string; status: string; depends_on: string | null; locked_by: string | null;
+  group_name?: string | null; sub_group?: string | null;
+  pm_verdict?: string | null;
   requirement_doc_ver?: number;
   test_spec_doc_ver?: number;
 }

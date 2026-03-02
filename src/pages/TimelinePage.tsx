@@ -44,7 +44,7 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 export default function TimelinePage() {
-  const { currentProjectId } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
   const [tab, setTab] = useState<TabId>('timeline');
   const [events, setEvents] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);

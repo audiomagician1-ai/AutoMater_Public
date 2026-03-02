@@ -1112,6 +1112,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['urls'],
     },
   },
+
+  // ═══════════════════════════════════════════════════
+  // v13.0: GitHub Extended + Deploy Tools
+  // ═══════════════════════════════════════════════════
+
+  {
+    name: 'github_close_issue',
+    description: '关闭 GitHub Issue（仅 GitHub 模式下可用）。',
+    parameters: {
+      type: 'object',
+      properties: { issue_number: { type: 'number', description: 'Issue 编号' } },
+      required: ['issue_number'],
+    },
+  },
+  {
+    name: 'github_add_comment',
+    description: '在 GitHub Issue 上添加评论（仅 GitHub 模式下可用）。支持 Markdown。',
+    parameters: {
+      type: 'object',
+      properties: {
+        issue_number: { type: 'number', description: 'Issue 编号' },
+        body: { type: 'string', description: '评论内容 (支持 Markdown)' },
+      },
+      required: ['issue_number', 'body'],
+    },
+  },
+  {
+    name: 'github_get_issue',
+    description: '获取单个 GitHub Issue 的详细信息（仅 GitHub 模式下可用）。',
+    parameters: {
+      type: 'object',
+      properties: { issue_number: { type: 'number', description: 'Issue 编号' } },
+      required: ['issue_number'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════
@@ -1149,6 +1184,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'list_files', 'glob_files', 'search_files',
     'run_command', 'run_test', 'run_lint',
     'git_commit', 'git_diff',
+    'github_close_issue', 'github_add_comment', 'github_get_issue',  // v13.0
     'web_search', 'fetch_url', 'http_request',
     'web_search_boost', 'deep_research', 'configure_search',  // v8.0
     'spawn_researcher',
@@ -1207,15 +1243,26 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   devops: [
     'think', 'task_complete', 'todo_write', 'todo_read',
-    'run_command', 'check_process', 'http_request',
+    // v13.0: 文件操作 (完整读写)
+    'read_file', 'write_file', 'edit_file', 'batch_edit',
+    'list_files', 'glob_files', 'search_files',
+    // 命令执行
+    'run_command', 'check_process', 'run_test', 'run_lint',
+    // HTTP
+    'http_request', 'fetch_url',
+    // Git + GitHub
     'git_commit', 'git_diff', 'git_log',
     'github_create_issue', 'github_list_issues',
-    'memory_read', 'memory_append',
-    // v9.0: Deployment Tools (devops 核心能力)
+    'github_close_issue', 'github_add_comment', 'github_get_issue',
+    // v9.0+: Deploy Tools
     'deploy_compose', 'deploy_compose_down', 'deploy_pm2', 'deploy_pm2_status',
     'generate_nginx_config', 'generate_dockerfile', 'health_check',
-    // v9.0: Docker Sandbox (devops needs sandbox for infra testing)
+    // Docker Sandbox
     'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
+    // 搜索
+    'web_search', 'web_search_boost',
+    // 记忆
+    'memory_read', 'memory_append',
   ],
   researcher: [
     'think',
@@ -1355,6 +1402,7 @@ export function isAsyncTool(toolName: string): boolean {
     || toolName.startsWith('browser_')
     || toolName.startsWith('sandbox_')
     || toolName.startsWith('git_')
+    || toolName.startsWith('deploy_')
     || ['web_search', 'fetch_url', 'http_request',
         'web_search_boost', 'deep_research', 'run_blackbox_tests',
         'analyze_image', 'compare_screenshots', 'visual_assert',

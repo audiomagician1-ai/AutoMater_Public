@@ -388,7 +388,7 @@ function WorkflowEditor({ preset, availableStages, onSave, onClose }: {
 // ═══════════════════════════════════════
 
 export function WorkflowPage() {
-  const { currentProjectId } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
 
   // Workflow presets state
   const [presets, setPresets] = useState<WorkflowPresetInfo[]>([]);

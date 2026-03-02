@@ -140,7 +140,7 @@ function countFiles(nodes: FileNode[]): { files: number; dirs: number } {
 }
 
 export function OutputPage() {
-  const { currentProjectId } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
   const [tree, setTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>('');

@@ -148,7 +148,7 @@ function parseHeaderLines(text: string): Record<string, string> {
 // ═══════════════════════════════════════
 
 export function SettingsPage() {
-  const { setSettingsConfigured } = useAppStore();
+  const setSettingsConfigured = useAppStore(s => s.setSettingsConfigured);
 
   // ── LLM Settings ──
   const [settings, setSettings] = useState<AppSettings>({

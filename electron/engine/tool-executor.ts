@@ -15,7 +15,7 @@ import { execSync } from 'child_process';
 import { acquireFileLock } from './file-lock';
 import { createLogger } from './logger';
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
-import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues } from './git-provider';
+import { commit as gitCommit, getDiff, getLog as gitLog, createIssue, listIssues, closeIssue, addIssueComment } from './git-provider';
 import { execInSandbox, execInSandboxAsync, isAsyncHandle, registerProcess, getActiveProcess, runTest as sandboxRunTest, runLint as sandboxRunLint, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
@@ -569,13 +569,13 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       case 'sandbox_destroy':
       case 'generate_image':
       case 'edit_image':
-      case 'deploy_compose':
+      case 'deploy_compose_up':
       case 'deploy_compose_down':
-      case 'deploy_pm2':
-      case 'deploy_pm2_status':
-      case 'generate_nginx_config':
-      case 'generate_dockerfile':
-      case 'health_check':
+      case 'deploy_health_check':
+      case 'deploy_dockerfile':
+      case 'github_close_issue':
+      case 'github_add_comment':
+      case 'github_get_issue':
         return { success: true, output: `[async] ${call.name}...`, action: 'computer' };
 
       // Sync-only tools
@@ -1031,8 +1031,8 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     };
   }
 
-  // ── v9.0: Deployment Tools ──
-  if (call.name === 'deploy_compose') {
+  // ── v13.0: Deployment Tools (renamed from v9.0) ──
+  if (call.name === 'deploy_compose_up') {
     const services: ServiceConfig[] = (call.arguments.services || []).map((s: Record<string, unknown>) => ({
       name: s.name as string,
       image: s.image as string | undefined,
@@ -1062,45 +1062,7 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     return { success: result.success, output: result.success ? result.output : `停止失败: ${result.error}`, action: 'shell' };
   }
 
-  if (call.name === 'deploy_pm2') {
-    const apps = (call.arguments.apps || []).map((a: Record<string, unknown>) => ({
-      name: a.name as string,
-      script: a.script as string,
-      cwd: a.cwd as string | undefined,
-      args: a.args as string | undefined,
-      instances: a.instances as number | undefined,
-      env: a.env as Record<string, string> | undefined,
-      maxMemoryRestart: a.max_memory_restart as string | undefined,
-      watch: a.watch as boolean | undefined,
-    }));
-    const result = await pm2Start(apps, ctx.workspacePath);
-    return { success: result.success, output: result.success ? result.output : `PM2 启动失败: ${result.error}`, action: 'shell' };
-  }
-
-  if (call.name === 'deploy_pm2_status') {
-    const result = await pm2Status();
-    return { success: result.success, output: result.output, action: 'shell' };
-  }
-
-  if (call.name === 'generate_nginx_config') {
-    const siteConfig: NginxSiteConfig = {
-      serverName: call.arguments.server_name,
-      listenPort: call.arguments.listen_port,
-      upstream: call.arguments.upstream,
-      staticRoot: call.arguments.static_root,
-      spaMode: call.arguments.spa_mode,
-      ssl: call.arguments.ssl_cert ? { certPath: call.arguments.ssl_cert, keyPath: call.arguments.ssl_key } : undefined,
-    };
-    const outputDir = path.join(ctx.workspacePath, 'nginx');
-    const result = await writeNginxConfig(siteConfig, outputDir);
-    return {
-      success: result.success,
-      output: result.success ? `Nginx 配置已生成: ${result.filePath}` : `生成失败: ${result.error}`,
-      action: 'write',
-    };
-  }
-
-  if (call.name === 'generate_dockerfile') {
+  if (call.name === 'deploy_dockerfile') {
     const dockerConfig: DockerfileConfig = {
       baseImage: call.arguments.base_image,
       installCmd: call.arguments.install_cmd,
@@ -1117,7 +1079,7 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     };
   }
 
-  if (call.name === 'health_check') {
+  if (call.name === 'deploy_health_check') {
     const targets = (call.arguments.urls || []).map((u: Record<string, unknown>) => ({
       name: u.name as string,
       url: u.url as string,

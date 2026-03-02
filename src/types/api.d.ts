@@ -122,6 +122,103 @@ interface AgentReactState {
   maxContextWindow: number;
 }
 
+/** 项目行 (DB row) */
+interface ProjectRow {
+  id: string;
+  name: string;
+  wish: string | null;
+  status: string;
+  workspace_path: string | null;
+  git_mode: string;
+  github_repo: string | null;
+  github_token: string | null;
+  workflow_preset_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Feature 行 (DB row) */
+interface FeatureRow {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: number;
+  depends_on: string | null;
+  acceptance_criteria: string | null;
+  affected_files: string | null;
+  complexity_score: number;
+  assigned_agent: string | null;
+  created_at: string;
+  updated_at: string;
+  /** v9+ 扩展字段 */
+  category: string;
+  locked_by: string | null;
+  pm_verdict?: string | null;
+  group_name?: string | null;
+  notes?: string | null;
+  completed_at?: string | null;
+}
+
+/** 日志行 */
+interface LogRow {
+  id: number;
+  project_id: string;
+  agent_id: string;
+  type: string;
+  content: string;
+  created_at: string;
+}
+
+/** 事件行 (event-store) */
+interface EventRow {
+  id: string;
+  project_id: string;
+  feature_id: string | null;
+  type: string;
+  agent_id: string | null;
+  data: string;
+  timestamp: string;
+}
+
+/** Mission 记录 */
+interface MissionRecord {
+  id: string;
+  project_id: string;
+  type: string;
+  status: string;
+  conclusion: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Mission 任务记录 */
+interface MissionTaskRecord {
+  id: string;
+  mission_id: string;
+  title: string;
+  status: string;
+  input: string;
+  output: string | null;
+  created_at: string;
+}
+
+/** Backup 内容 */
+interface BackupContent {
+  messages?: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: Array<{ function?: { name: string; arguments: string } }> }>;
+  metadata?: Record<string, unknown>;
+}
+
+/** 知识记录 */
+interface KnowledgeRecord {
+  id: string;
+  tags: string[];
+  summary: string;
+  content: string;
+  useCount: number;
+}
+
 interface AutoMaterAPI {
   settings: {
     get(): Promise<AppSettings>;
@@ -129,7 +226,7 @@ interface AutoMaterAPI {
   };
   llm: {
     testConnection(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; message: string }>;
-    chat(request: { model: string; messages: Array<{ role: string; content: string }> }): Promise<any>;
+    chat(request: { model: string; messages: Array<{ role: string; content: string }> }): Promise<{ content: string }>;
     listModels(provider: { type: string; baseUrl: string; apiKey: string }): Promise<{ success: boolean; models: string[] }>;
   };
   project: {
@@ -204,20 +301,20 @@ interface AutoMaterAPI {
     getPath(projectId: string): Promise<string | null>;
   };
   events: {
-    query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<any[]>;
-    getStats(projectId: string): Promise<any>;
-    getTimeline(projectId: string, featureId: string): Promise<any[]>;
+    query(projectId: string, options?: { featureId?: string; types?: string[]; limit?: number }): Promise<EventRow[]>;
+    getStats(projectId: string): Promise<Record<string, unknown>>;
+    getTimeline(projectId: string, featureId: string): Promise<EventRow[]>;
     exportNDJSON(projectId: string): Promise<string>;
   };
   mission: {
-    getStatus(projectId: string): Promise<any>;
-    getCheckpoints(projectId: string): Promise<any[]>;
+    getStatus(projectId: string): Promise<MissionRecord | null>;
+    getCheckpoints(projectId: string): Promise<Array<{ id: string; label: string; timestamp: string }>>;
     getProgressReport(projectId: string): Promise<string>;
-    detectResumable(): Promise<any[]>;
+    detectResumable(): Promise<MissionRecord[]>;
   };
   knowledge: {
-    getStats(): Promise<any>;
-    query(tags: string[]): Promise<any[]>;
+    getStats(): Promise<Record<string, unknown>>;
+    query(tags: string[]): Promise<KnowledgeRecord[]>;
   };
   on(channel: string, callback: (...args: any[]) => void): () => void;
 
@@ -328,7 +425,7 @@ interface AutoMaterAPI {
     getActive(projectId: string | null, agentId: string): Promise<SessionInfo | null>;
     list(projectId: string | null, agentId?: string): Promise<SessionInfo[]>;
     listAll(limit?: number): Promise<SessionInfo[]>;
-    readBackup(sessionId: string): Promise<any>;
+    readBackup(sessionId: string): Promise<BackupContent | null>;
     backupStats(): Promise<{ totalSessions: number; totalBackupFiles: number; totalBackupSizeBytes: number; oldestBackup: string | null; newestBackup: string | null }>;
     cleanup(keepDays?: number): Promise<{ success: boolean; deletedFolders: number }>;
     /** v8.1: 获取某个 Feature 关联的所有 Sessions */

@@ -462,7 +462,7 @@ function MemberEditModal({ member, onClose, onSave, onChange }: {
 // TeamPage — 主页面 (v3.1: 手动编辑团队)
 // ═══════════════════════════════════════
 export function TeamPage() {
-  const { currentProjectId } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
   const [agents, setAgents] = useState<any[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<any>(null);

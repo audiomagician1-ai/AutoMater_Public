@@ -308,7 +308,7 @@ function ChangelogEntry({ entry }: { entry: DocChangeEntry }) {
 // ═══════════════════════════════════════
 
 export function DocsPage() {
-  const { currentProjectId } = useAppStore();
+  const currentProjectId = useAppStore(s => s.currentProjectId);
   const [docList, setDocList] = useState<DocListResult | null>(null);
   const [changelog, setChangelog] = useState<DocChangeEntry[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);

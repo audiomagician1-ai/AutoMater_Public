@@ -107,16 +107,17 @@ Stanford 的 Lost-in-the-Middle 研究和 Chroma 的 18 模型实验均证明：
 | **时间膨胀** | 🟡 | 从 30s 变为 2-5 min。但可以渐进式呈现中间结果，用户体验不一定变差 |
 | **并行一致性** | 🟡 | 多 agent 并行探索可能对同一模块给出矛盾描述。需要冲突检测+仲裁机制 |
 | **探针冗余** | 🟡 | 多探针可能重复探索同一区域。需要全局协调器避免浪费 |
-| **收益边际递减** | 🟡 | 对于简单/规范项目，v6.0 已足够。复杂方案可能 over-engineer |
+| **规范项目冗余探索** | 🟡 | 目录结构清晰的项目，部分探针可能发现不到额外信息。通过早停机制缓解 |
 | **GraphDB 依赖** | 🟢 | LocAgent 使用 Neo4j，但我们可以用内存图避免外部依赖 |
 
-### 3.2 ⚠️ 反面论证：v6.0 可能已够用的情形
+### 3.2 设计前提：导入 = 大型复杂项目
 
-- **< 50 文件的小项目**: 单次 LLM 快照已能覆盖全貌
-- **规范良好的项目**: 目录结构自解释，README 完善
-- **已有 ARCHITECTURE.md 的项目**: 无需 agent 重新发现
+用户能直接塞进主流模型上下文的小项目，根本不需要导入功能。
+凡是需要用到 AutoMater 项目导入的，**必然是超出单次上下文窗口的大型项目**。
+因此 v7.0 **不设复杂度门槛**，不保留 v6.0 快速通道分支——导入即深度分析。
 
-**策略**: v7.0 应是**渐进增强**，而非替代。保留 v6.0 快速通道，仅对大型/复杂项目启用深度探索。
+v6.0 的 `collectProjectSnapshot()` 仍然作为 Phase 0 的静态信息收集基础保留，
+但不再作为独立的"够用"路径存在。它是 Phase 1 探针调度的输入，不是终点。
 
 ---
 
@@ -156,7 +157,7 @@ Stanford 的 Lost-in-the-Middle 研究和 Chroma 的 18 模型实验均证明：
 现有 v6.0 的 `collectProjectSnapshot()` 保持不变，增加：
 
 1. **CodeGraph 构建** — 调用现有 `buildCodeGraph()` (已有, 仅需在导入阶段启用)
-2. **复杂度评估** — 基于 fileCount, edgeCount, cyclomatic 指标判断是否需要深度探索
+2. **项目特征画像** — 基于 fileCount, edgeCount, 语言分布等生成特征向量，用于**调整探针数量和策略** (不是判断是否探索)
 3. **种子文件推断** — 利用 `inferSeedFiles()` + Hub 文件检测确定探针入口
 
 ```typescript
@@ -164,7 +165,7 @@ interface ScanResult {
   snapshot: ProjectSnapshot;       // v6.0 现有
   graph: CodeGraph;                // 新增: 文件级 import 图
   repoMap: string;                 // 现有
-  complexityScore: number;         // 新增: 0-100, >40 触发深度探索
+  projectProfile: ProjectProfile;   // 新增: 项目特征画像 (驱动探针策略)
   seedFiles: SeedFile[];           // 新增: 探针入口候选
   estimatedProbeCount: number;     // 新增: 预估需要多少探针
 }
@@ -178,18 +179,23 @@ interface SeedFile {
 }
 ```
 
-**复杂度评分规则**:
-```
-complexityScore = 
-    fileCount > 200 ? 30 : fileCount / 10
-  + edgeCount / fileCount > 3 ? 20 : edgeCount / fileCount * 5
-  + (hasDeepNesting ? 15 : 0)
-  + (lowReadmeQuality ? 15 : 0)
-  + (multiLanguage ? 10 : 0)
-  + (hasCircularDeps ? 10 : 0)
+**项目特征画像** (驱动探针数量 / 并行度 / token 预算分配):
+```typescript
+interface ProjectProfile {
+  scale: 'medium' | 'large' | 'massive';   // <500 / 500-2000 / >2000 files
+  graphDensity: number;                     // edgeCount / fileCount
+  languageCount: number;                    // 多语言项目需要更多探针
+  hasCircularDeps: boolean;                 // 循环依赖需要特殊处理
+  nestingDepth: number;                     // 目录嵌套深度
+  readmeQuality: 'good' | 'poor' | 'none'; // 影响 Fuse 阶段可信度
+  estimatedProbeCount: number;              // 根据 scale+density 自动计算
+}
 ```
 
-**决策门**: `complexityScore < 40` → 直接走 v6.0 单次 LLM 快速通道
+**探针数量映射** (不是门槛，是调节旋钮):
+- `medium` (200-500 files): ~8-12 探针
+- `large` (500-2000 files): ~15-25 探针
+- `massive` (>2000 files): ~25-40 探针，启用分批探索
 
 ### 4.3 Phase 1: Multi-Probe Exploration (核心创新)
 
@@ -422,22 +428,23 @@ interface FuseOutput {
 | Phase 1 探针 | **fast 模型** (GPT-4o-mini / Claude Haiku / Gemini Flash) | 单文件/少量文件理解，不需要顶级推理 |
 | Phase 2 融合 | **strong 模型** (Claude Sonnet / GPT-4o) | 综合推理、交叉验证、文档生成 |
 
-### 5.2 预估成本对比 (1000 文件 TypeScript 项目)
+### 5.2 预估成本 (典型大型项目)
 
-| 维度 | v6.0 (现状) | v7.0 (提案) | 变化 |
-|------|------------|------------|------|
-| 时间 | ~20s | ~2-4 min | +6-12x |
-| LLM 调用 | 1 次 | 15-25 次 | +15-25x |
-| Token (输入) | ~12K | ~80-150K | +8-12x |
-| Token (输出) | ~4K | ~30-50K | +8-12x |
-| 预估费用 | ~$0.02 | ~$0.15-0.40 | +8-20x |
-| 代码覆盖率 | ~5-10% | ~60-80% | +8-15x |
-| 架构理解深度 | 表层 | 深层+交叉验证 | **质变** |
+导入功能的使用场景本身就是大型复杂项目，v6.0 的 15K token 快照对这类项目约等于盲猜。
+成本对比无意义——问题不是"贵不贵"，而是"v6.0 对大型项目根本不 work"。
+
+| 项目规模 | 探针数 | 时间 | Token (输入) | Token (输出) | 预估费用 | 覆盖率 |
+|---------|--------|------|-------------|-------------|---------|--------|
+| 500 文件 | ~10 | ~1-2 min | ~60K | ~25K | ~$0.10-0.20 | ~60% |
+| 1000 文件 | ~20 | ~2-4 min | ~120K | ~40K | ~$0.20-0.40 | ~65% |
+| 3000+ 文件 | ~35 | ~4-8 min | ~250K | ~80K | ~$0.50-1.00 | ~50-60% |
+
+对比参考：一个资深开发者手动阅读 1000 文件项目建立架构认知，需要 1-3 天。
+$0.30 + 3 分钟获得 65% 覆盖率的结构化文档，ROI 极高。
 
 ### 5.3 成本控制机制
 
-1. **简单项目快速通道**: `complexityScore < 40` 直接用 v6.0
-2. **预算上限**: 用户可设置导入预算 (默认 $0.50)，达到上限自动停止探针、直接进入 Phase 2
+1. **预算上限**: 用户可设置导入预算 (默认 $1.00)，达到上限自动停止探针、直接进入 Phase 2
 3. **探针缓存**: Probe Report 持久化到 `.automater/probe-reports/`，二次导入可跳过已探索区域
 4. **分层模型**: 探针用 fast 模型 (约 strong 模型 1/10 价格)
 
@@ -450,7 +457,7 @@ interface FuseOutput {
 - [ ] **A1**: 提取 `probe-orchestrator.ts` 模块 — ProbeOrchestrator 接口 + 调度逻辑
 - [ ] **A2**: 提取 `probe-types.ts` — 所有探针相关类型定义
 - [ ] **A3**: 增强 `code-graph.ts` — 添加社区检测算法 (`detectCommunities()`)
-- [ ] **A4**: 增加复杂度评估函数 (`assessComplexity()`) 到 project-importer.ts
+- [ ] **A4**: 增加项目特征画像函数 (`buildProjectProfile()`) 到 project-importer.ts — 驱动探针策略选择
 
 ### Phase B: 探针实现 (2-3 天)
 
@@ -469,14 +476,14 @@ interface FuseOutput {
 
 ### Phase D: 集成与 UI (1-2 天)
 
-- [ ] **D1**: 修改 `importProject()` 主入口 — 条件分流 (simple → v6.0, complex → v7.0)
+- [ ] **D1**: 重写 `importProject()` 主入口 — 统一走 Phase 0 → 1 → 2 流水线
 - [ ] **D2**: IPC 层增加渐进式进度事件 (`project:import-probe-progress`)
 - [ ] **D3**: 前端导入 UI 展示探针实时进度 (可选: 探索可视化)
 - [ ] **D4**: 集成测试 — 用 AgentForge 自身作为测试项目
 
 ### Phase E: 优化迭代 (持续)
 
-- [ ] **E1**: A/B 测试 — 对比 v6.0 vs v7.0 在真实项目上的后续开发效率
+- [ ] **E1**: 效果评估 — 在 3+ 真实项目上测量导入质量 + 后续 agent 开发效率
 - [ ] **E2**: 探针缓存 + 增量更新 — 文件变更时只重新探测受影响区域
 - [ ] **E3**: 用户反馈闭环 — 导入后用户可标注"理解错误"，反馈到探针策略
 
@@ -488,7 +495,7 @@ interface FuseOutput {
 
 | 现有模块 | 变化 | 说明 |
 |---------|------|------|
-| `project-importer.ts` | **增强** | 新增 Phase 0 复杂度评估 + Phase 1/2 分支，保留 v6.0 快速路径 |
+| `project-importer.ts` | **重写** | v6.0 快照收集降级为 Phase 0 子步骤，新增 Phase 1 多探针 + Phase 2 融合 |
 | `code-graph.ts` | **增强** | 新增 `detectCommunities()`, `getHubFiles()` |
 | `repo-map.ts` | **不变** | Phase 0 继续使用 |
 | `context-collector.ts` | **增强** | 利用 v7.0 产出的 MODULE-MAP.md 替代简单的 warm-memory |
@@ -543,8 +550,8 @@ enriched skeleton   → orchestrator 调度优化
 | **架构准确度** | 人工评估 >80% 模块描述正确 | 抽样审查 |
 | **后续开发效率** | Developer agent 首次成功率提升 >20% | A/B 对照 |
 | **理解深度** | MODULE-MAP 包含 publicAPI + keyTypes (非空) | 自动检查 |
-| **成本可控** | 单次导入 <$0.50 (默认预算) | API 费用追踪 |
-| **时间可控** | 含深度探索 <5min | 端到端计时 |
+| **成本可控** | 单次导入 <$1.00 (默认预算) | API 费用追踪 |
+| **时间可控** | 含深度探索 <8min | 端到端计时 |
 
 ---
 

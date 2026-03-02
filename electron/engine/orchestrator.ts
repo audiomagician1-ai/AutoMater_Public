@@ -41,6 +41,7 @@ import {
   workerLoop,
   phaseDevOpsBuild,
   phaseFinalize,
+  phaseEnvironmentBootstrap,
 } from './phases';
 
 // ═══════════════════════════════════════
@@ -255,6 +256,14 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (workspacePath) ensureProjectMemory(workspacePath);
   if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
   cleanExpiredLocks(); // v6.1 (构想A): 清理僵尸文件锁
+
+  // ═══════════════════════════════════════
+  // Phase 0: 环境初始化 (v13.0)
+  // ═══════════════════════════════════════
+  if (workspacePath && !signal.aborted) {
+    await phaseEnvironmentBootstrap(projectId, settings, win, signal, workspacePath);
+    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+  }
 
   // v11.0: 成员级模型解析器 — 按角色返回该成员实际使用的 LLM 模型名
   const memberModel = (role: string, agentIndex: number = 0): string => {

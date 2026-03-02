@@ -30,7 +30,7 @@ interface FeatureSummary {
   id: string;
   title: string;
   status: string;
-  pm_verdict: string | null;
+  pm_verdict?: string | null;
   category: string;
   priority: number;
 }

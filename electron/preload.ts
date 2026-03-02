@@ -157,6 +157,18 @@ contextBridge.exposeInMainWorld('automater', {
     openDirectory: (title?: string) => ipcRenderer.invoke('dialog:open-directory', title),
   },
 
+  // ── 密钥管理 (v13.0) ──
+  secrets: {
+    set: (projectId: string, key: string, value: string, provider: string) =>
+      ipcRenderer.invoke('secrets:set', projectId, key, value, provider),
+    get: (projectId: string, key: string) =>
+      ipcRenderer.invoke('secrets:get', projectId, key),
+    list: (projectId: string, provider?: string) =>
+      ipcRenderer.invoke('secrets:list', projectId, provider),
+    delete: (projectId: string, key: string) =>
+      ipcRenderer.invoke('secrets:delete', projectId, key),
+  },
+
   // ── 元Agent对话 + 管理 (v5.4 → v7.0) ──
   metaAgent: {
     chat: (projectId: string | null, message: string, history?: Array<{ role: string; content: string }>) =>
