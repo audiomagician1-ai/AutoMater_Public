@@ -11,7 +11,7 @@
  *   - 批量获取项目所有 Feature 的 Session 摘要
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import { assertProjectId, assertNonEmptyString, assertOptionalString, assertOptionalNumber } from './ipc-validator';
 import {
   createSession, switchSession, listSessions, listAllSessions,
@@ -64,6 +64,25 @@ export function setupSessionHandlers() {
   });
 
   // ── 统计与清理 ──
+
+  /** 打开 Session 备份文件夹 (资源管理器) */
+  ipcMain.handle('session:open-backup-folder', async (_event, sessionId: string) => {
+    assertNonEmptyString('session:open-backup-folder', 'sessionId', sessionId);
+    const backup = readSessionBackup(sessionId);
+    // 尝试从 DB 获取 backup_path
+    try {
+      const { getDb } = await import('../db');
+      const db = getDb();
+      const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as { backup_path: string | null } | undefined;
+      if (row?.backup_path) {
+        const path = await import('path');
+        const dir = path.default.dirname(row.backup_path);
+        await shell.openPath(dir);
+        return { success: true };
+      }
+    } catch { /* fallthrough */ }
+    return { success: false, error: 'No backup path found' };
+  });
 
   /** 获取备份统计 */
   ipcMain.handle('session:backup-stats', () => {

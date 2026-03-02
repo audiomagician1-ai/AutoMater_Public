@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('automater', {
       limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
     }) => ipcRenderer.invoke('project:get-logs', projectId, options),
     getStats: (projectId: string) => ipcRenderer.invoke('project:get-stats', projectId),
+    getLogAgentIds: (projectId: string) => ipcRenderer.invoke('project:get-log-agent-ids', projectId),
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
     delete: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
@@ -278,6 +279,8 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('session:list-all', limit),
     readBackup: (sessionId: string) =>
       ipcRenderer.invoke('session:read-backup', sessionId),
+    openBackupFolder: (sessionId: string) =>
+      ipcRenderer.invoke('session:open-backup-folder', sessionId),
     backupStats: () =>
       ipcRenderer.invoke('session:backup-stats'),
     cleanup: (keepDays?: number) =>

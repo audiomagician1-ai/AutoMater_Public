@@ -311,6 +311,8 @@ interface AutoMaterAPI {
       limit?: number; offset?: number; agentId?: string; type?: string; keyword?: string;
     }): Promise<{ rows: Array<LogRow>; total: number }>;
     getStats(projectId: string): Promise<{ features: Record<string, number>; agents: Record<string, number> }>;
+    /** 获取项目日志中出现过的所有 agent_id (不受筛选影响) */
+    getLogAgentIds(projectId: string): Promise<string[]>;
     stop(projectId: string): Promise<{ success: boolean }>;
     delete(projectId: string): Promise<{ success: boolean }>;
     openWorkspace(projectId: string): Promise<{ success: boolean; error?: string }>;
@@ -540,6 +542,7 @@ interface AutoMaterAPI {
     list(projectId: string | null, agentId?: string): Promise<SessionInfo[]>;
     listAll(limit?: number): Promise<SessionInfo[]>;
     readBackup(sessionId: string): Promise<BackupContent | null>;
+    openBackupFolder(sessionId: string): Promise<{ success: boolean; error?: string }>;
     backupStats(): Promise<{ totalSessions: number; totalBackupFiles: number; totalBackupSizeBytes: number; oldestBackup: string | null; newestBackup: string | null }>;
     cleanup(keepDays?: number): Promise<{ success: boolean; deletedFolders: number }>;
     /** v8.1: 获取某个 Feature 关联的所有 Sessions */
