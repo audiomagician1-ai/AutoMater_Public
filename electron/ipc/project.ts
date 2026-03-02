@@ -687,17 +687,31 @@ export function setupProjectHandlers() {
     const proj = db.prepare('SELECT status, workspace_path, config, wish FROM projects WHERE id = ?').get(projectId) as { status: string; workspace_path: string; config: string; wish: string } | undefined;
 
     // 判断是否为导入项目: status=analyzing 或 config 中标记了 importExisting
+    // v7.2: 增加 importCompleted 标记 — 已完成导入分析的项目走正常 orchestrator
     let isImportProject = proj?.status === 'analyzing';
     if (!isImportProject && proj?.config) {
       try {
         const cfg = JSON.parse(proj.config);
-        // 导入项目 + wish 为空或以 [导入项目] 开头 + 没有已有 features → 走导入流程
-        if (cfg.importExisting) {
-          const featureCount = (db.prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?').get(projectId) as { c: number }).c;
-          if (featureCount === 0 || !proj.wish?.trim() || proj.wish.startsWith('[导入项目]')) {
-            isImportProject = true;
+        if (cfg.importExisting && !cfg.importCompleted) {
+          // 检查磁盘上是否已有分析产物 (ARCHITECTURE.md + module-graph.json)
+          const wsPath = proj.workspace_path;
+          const hasArchDoc = wsPath && fs.existsSync(path.join(wsPath, '.automater/docs/ARCHITECTURE.md'));
+          const hasModuleGraph = wsPath && fs.existsSync(path.join(wsPath, '.automater/analysis/module-graph.json'));
+          if (hasArchDoc && hasModuleGraph) {
+            // 分析产物存在但 config 未标记 — 补标记，走正常流程
+            log.info(`Project ${projectId}: import artifacts found on disk, marking importCompleted`);
+            cfg.importCompleted = true;
+            db.prepare('UPDATE projects SET config = ? WHERE id = ?').run(JSON.stringify(cfg), projectId);
+            isImportProject = false;
+          } else {
+            // 真正未完成的导入 — 走导入流程
+            const featureCount = (db.prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?').get(projectId) as { c: number }).c;
+            if (featureCount === 0) {
+              isImportProject = true;
+            }
           }
         }
+        // importCompleted=true → 不走导入，走正常 orchestrator
       } catch { /* non-critical: JSON parse fallback */ }
     }
 
@@ -750,8 +764,15 @@ export function setupProjectHandlers() {
             },
           );
           const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
-          db.prepare("UPDATE projects SET status = 'paused', wish = ?, updated_at = datetime('now') WHERE id = ?")
-            .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, projectId);
+          // v7.2: 标记导入完成 — 后续 project:start 不会再重复走导入流程
+          let updatedConfig = '{}';
+          try {
+            const existingCfg = JSON.parse(proj?.config || '{}');
+            existingCfg.importCompleted = true;
+            updatedConfig = JSON.stringify(existingCfg);
+          } catch { updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true }); }
+          db.prepare("UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, updatedConfig, projectId);
           sendToUI(win, 'project:import-progress', { projectId, phase: 2, step: `✅ 分析完成! ${summary}`, progress: 1.0, done: true });
           sendToUI(win, 'project:status', { projectId, status: 'paused' });
           addLog(projectId, 'project-importer', 'info', `📥 ${summary}`);
@@ -1111,10 +1132,17 @@ export function setupProjectHandlers() {
           },
         );
 
-        // 分析完成 → 更新项目状态 + wish 描述
+        // 分析完成 → 更新项目状态 + wish 描述 + importCompleted 标记
         const summary = `已分析: ${result.skeleton.fileCount} 文件, ${result.skeleton.modules.length} 模块, ${result.docsGenerated} 文档已生成`;
-        db.prepare("UPDATE projects SET status = 'paused', wish = ?, updated_at = datetime('now') WHERE id = ?")
-          .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, projectId);
+        // v7.2: 标记导入完成 — 后续 project:start 不会再重复走导入流程
+        let updatedConfig = '{}';
+        try {
+          const existingCfg = JSON.parse(project.config || '{}');
+          existingCfg.importCompleted = true;
+          updatedConfig = JSON.stringify(existingCfg);
+        } catch { updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true }); }
+        db.prepare("UPDATE projects SET status = 'paused', wish = ?, config = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(`[导入项目] ${result.skeleton.techStack.join(', ')} | ${result.skeleton.totalLOC} LOC`, updatedConfig, projectId);
 
         sendToUI(win, 'project:import-progress', {
           projectId,

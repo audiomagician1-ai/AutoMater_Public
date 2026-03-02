@@ -662,22 +662,45 @@ async function phase2Fuse(
 
   onProgress?.({ phase: 'fuse', step: '解析综合分析结果...', progress: 0.8 });
 
-  // Parse output
-  const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/);
-  const moduleGraphMatch = result.content.match(/```module-graph\n([\s\S]*?)```/) || result.content.match(/```json\n([\s\S]*?)```/);
-  const issuesMatch = result.content.match(/```known-issues\n([\s\S]*?)```/);
+  // Parse output — v7.2: more robust regex patterns + retry JSON extraction
+  const archMatch = result.content.match(/```architecture\n([\s\S]*?)```/)
+    || result.content.match(/```markdown\n([\s\S]*?)```/);
+  const moduleGraphMatch = result.content.match(/```module-graph\n([\s\S]*?)```/)
+    || result.content.match(/```json\n([\s\S]*?\"edges\"[\s\S]*?)```/)
+    || result.content.match(/```json\n([\s\S]*?)```/);
+  const issuesMatch = result.content.match(/```known-issues\n([\s\S]*?)```/)
+    || result.content.match(/```known.issues\n([\s\S]*?)```/);
 
   const architectureMd = archMatch?.[1]?.trim() || result.content;
   const knownIssuesMd = issuesMatch?.[1]?.trim() || '';
 
-  // Parse module graph JSON
+  // Parse module graph JSON — with repair attempts for common LLM JSON issues
   let moduleGraph: ModuleGraph = { nodes: [], edges: [] };
   if (moduleGraphMatch?.[1]) {
+    const rawJson = moduleGraphMatch[1].trim();
     try {
-      moduleGraph = JSON.parse(moduleGraphMatch[1].trim());
-    } catch { /* silent: moduleGraph JSON解析失败 */
-      log.warn('Failed to parse module-graph JSON from LLM output');
+      moduleGraph = JSON.parse(rawJson);
+    } catch (parseErr) {
+      log.warn('module-graph JSON parse failed, attempting repair...', { error: String(parseErr) });
+      // Attempt repair: remove trailing commas, fix unquoted keys
+      try {
+        const repaired = rawJson
+          .replace(/,\s*([}\]])/g, '$1')     // trailing commas
+          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');  // unquoted keys
+        moduleGraph = JSON.parse(repaired);
+        log.info('module-graph JSON repair successful');
+      } catch {
+        log.error('module-graph JSON repair also failed, writing raw to disk for debugging');
+        // Save raw output for debugging
+        try {
+          const debugPath = path.join(scan.workspacePath, ANALYSIS_DIR, 'fuse-raw-output.txt');
+          fs.writeFileSync(debugPath, result.content, 'utf-8');
+        } catch { /* best effort */ }
+      }
     }
+    // Validate structure
+    if (!Array.isArray(moduleGraph.nodes)) moduleGraph.nodes = [];
+    if (!Array.isArray(moduleGraph.edges)) moduleGraph.edges = [];
   }
 
   // Build enriched skeleton
@@ -859,6 +882,33 @@ export async function importProject(
   const t0 = Date.now();
   const projectName = path.basename(workspacePath);
   log.info(`=== Import Start (v7.0) ===`, { workspacePath, projectId });
+
+  // v7.2: Check if Phase 2 outputs already exist — avoid re-running the entire pipeline
+  const existingArchDoc = path.join(workspacePath, '.automater/docs/ARCHITECTURE.md');
+  const existingModuleGraph = path.join(workspacePath, MODULE_GRAPH_FILE);
+  const existingSkeleton = path.join(workspacePath, SKELETON_FILE);
+  if (fs.existsSync(existingArchDoc) && fs.existsSync(existingModuleGraph) && fs.existsSync(existingSkeleton)) {
+    log.info('Import artifacts already exist — returning cached results without re-running pipeline');
+    onProgress?.(2, '✅ 分析结果已存在，跳过重复分析', 1.0);
+    try {
+      const skeleton: ProjectSkeleton = JSON.parse(fs.readFileSync(existingSkeleton, 'utf-8'));
+      const moduleGraph: ModuleGraph = JSON.parse(fs.readFileSync(existingModuleGraph, 'utf-8'));
+      const architectureMd = fs.readFileSync(existingArchDoc, 'utf-8');
+      const summaries: ModuleSummary[] = moduleGraph.nodes.map(node => ({
+        moduleId: node.id,
+        rootPath: node.path,
+        responsibility: node.responsibility,
+        publicAPI: node.publicAPI,
+        keyTypes: node.keyTypes,
+        dependencies: '',
+        fullText: node.responsibility,
+        tokensUsed: 0,
+      }));
+      return { skeleton, summaries, architectureMd, docsGenerated: 2 };
+    } catch (err) {
+      log.warn('Failed to load existing import artifacts, proceeding with fresh import', { error: String(err) });
+    }
+  }
 
   // Wrap legacy callback into v7.0 format
   const emitProgress = (event: ImportProgressEvent) => {
