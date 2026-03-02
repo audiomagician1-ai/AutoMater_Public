@@ -324,23 +324,21 @@ describe('callLLMWithTools', () => {
   });
 
   it('returns tool call result from OpenAI', async () => {
-    const mockResponse = {
-      ok: true,
-      json: async () => ({
-        choices: [{
-          message: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [{
-              id: 'call_1',
-              type: 'function',
-              function: { name: 'read_file', arguments: '{"path":"test.ts"}' },
-            }],
-          },
-        }],
-        usage: { prompt_tokens: 20, completion_tokens: 15 },
-      }),
-    };
+    // Build SSE stream chunks matching the streaming parser
+    const sseChunks = [
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '' } }] } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":"test.ts"}' } }] } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {} }], usage: { prompt_tokens: 20, completion_tokens: 15 } })}\n\n`,
+      `data: [DONE]\n\n`,
+    ];
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of sseChunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+    const mockResponse = { ok: true, body: stream };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
     const tools = [{

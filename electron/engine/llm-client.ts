@@ -455,6 +455,8 @@ async function _callOpenAIWithTools(
     tools,
     temperature: 0.2,
     max_tokens: maxTokens,
+    stream: true,
+    stream_options: { include_usage: true },
   };
 
   const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
@@ -465,12 +467,83 @@ async function _callOpenAIWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
-  const data = await res.json() as OpenAIChatResponse;
-  const choice = data.choices[0];
+  // ── 流式解析 SSE (tool_calls + content) ──
+  let content = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (!trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        const delta = json.choices?.[0]?.delta;
+        if (delta) {
+          if (delta.content) content += delta.content;
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index as number;
+              if (!toolCallMap.has(idx)) {
+                toolCallMap.set(idx, {
+                  id: tc.id ?? '',
+                  name: tc.function?.name ?? '',
+                  arguments: tc.function?.arguments ?? '',
+                });
+              } else {
+                const existing = toolCallMap.get(idx)!;
+                if (tc.id) existing.id = tc.id;
+                if (tc.function?.name) existing.name += tc.function.name;
+                if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+              }
+            }
+          }
+        }
+        if (json.usage) {
+          inputTokens = json.usage.prompt_tokens ?? inputTokens;
+          outputTokens = json.usage.completion_tokens ?? outputTokens;
+        }
+      } catch { /* skip malformed SSE JSON chunk */ }
+    }
+  }
+
+  if (outputTokens === 0) {
+    outputTokens = Math.ceil(content.length / 3.5);
+  }
+
+  // 组装 tool_calls 数组
+  const toolCalls = toolCallMap.size > 0
+    ? Array.from(toolCallMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, tc]) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        }))
+    : undefined;
+
   return {
-    message: choice.message as ToolCallMessage,
-    inputTokens: data.usage?.prompt_tokens ?? 0,
-    outputTokens: data.usage?.completion_tokens ?? 0,
+    message: {
+      role: 'assistant',
+      content: content || '',
+      tool_calls: toolCalls,
+    } as ToolCallMessage,
+    inputTokens,
+    outputTokens,
   };
 }
 

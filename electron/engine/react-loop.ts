@@ -1221,7 +1221,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       // v20.0: 有 tool_calls 时重置纯文本计数
       guardState.consecutivePlainTextCount = 0;
 
-      messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
+      messages.push({ role: 'assistant', content: msg.content || '', tool_calls: msg.tool_calls });
 
       // v18.0: 并行工具执行分析
       const toolCallInfos: ToolCallInfo[] = msg.tool_calls.map((tc: LLMToolCall) => {

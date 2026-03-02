@@ -350,7 +350,7 @@ export function OverviewPage() {
             <h3 className="text-sm font-medium text-slate-400">📡 实时监控 & 活动趋势</h3>
             <span className="text-[9px] text-slate-600">系统 2s · 活动 10s</span>
           </div>
-          <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
+          <div className="grid grid-cols-4 lg:grid-cols-8 gap-2 overflow-hidden">
             <SystemMonitor inline />
             {currentProjectId && <ActivityCharts projectId={currentProjectId} inline />}
           </div>

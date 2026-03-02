@@ -18,24 +18,23 @@ const MAX_POINTS = 60; // 2 分钟 @ 2s interval
 const POLL_INTERVAL = 2000;
 
 /** 迷你面积图 — SVG 实现, 无外部依赖 */
+const VB_W = 160;
+const VB_H = 48;
+
 function MiniAreaChart({
   data,
   color,
-  height = 48,
-  width = 160,
   maxValue = 100,
 }: {
   data: number[];
   color: string;
-  height?: number;
-  width?: number;
   maxValue?: number;
 }) {
   if (data.length < 2) {
     return (
-      <svg width={width} height={height} className="opacity-30">
-        <rect width={width} height={height} rx={4} fill="#0f172a" />
-        <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#334155" fontSize={10}>待采样...</text>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" className="w-full h-auto opacity-30 rounded">
+        <rect width={VB_W} height={VB_H} rx={4} fill="#0f172a" />
+        <text x={VB_W / 2} y={VB_H / 2 + 4} textAnchor="middle" fill="#334155" fontSize={10}>待采样...</text>
       </svg>
     );
   }
@@ -44,28 +43,28 @@ function MiniAreaChart({
     ? [...new Array(MAX_POINTS - data.length).fill(0), ...data]
     : data.slice(-MAX_POINTS);
 
-  const step = width / (padded.length - 1);
+  const step = VB_W / (padded.length - 1);
   const points = padded.map((v, i) => ({
     x: i * step,
-    y: height - (Math.min(v, maxValue) / maxValue) * (height - 4) - 2,
+    y: VB_H - (Math.min(v, maxValue) / maxValue) * (VB_H - 4) - 2,
   }));
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x} ${height} L ${points[0].x} ${height} Z`;
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${VB_H} L ${points[0].x} ${VB_H} Z`;
 
   return (
-    <svg width={width} height={height} className="rounded">
+    <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" className="w-full h-auto rounded">
       <defs>
         <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity={0.4} />
           <stop offset="100%" stopColor={color} stopOpacity={0.05} />
         </linearGradient>
       </defs>
-      <rect width={width} height={height} rx={4} fill="#0f172a" />
+      <rect width={VB_W} height={VB_H} rx={4} fill="#0f172a" />
       {/* Grid lines */}
       {[25, 50, 75].map(pct => (
-        <line key={pct} x1={0} y1={height - (pct / 100) * (height - 4) - 2}
-          x2={width} y2={height - (pct / 100) * (height - 4) - 2}
+        <line key={pct} x1={0} y1={VB_H - (pct / 100) * (VB_H - 4) - 2}
+          x2={VB_W} y2={VB_H - (pct / 100) * (VB_H - 4) - 2}
           stroke="#1e293b" strokeWidth={0.5} />
       ))}
       <path d={areaPath} fill={`url(#grad-${color.replace('#', '')})`} />
@@ -113,7 +112,7 @@ export function SystemMonitor({ inline }: { inline?: boolean }) {
   const cards = (
     <>
       {/* CPU */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">CPU</span>
           <span className="text-sm font-bold text-cyan-400">{m?.cpu.usage ?? 0}%</span>
@@ -125,7 +124,7 @@ export function SystemMonitor({ inline }: { inline?: boolean }) {
       </div>
 
       {/* Memory */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">内存</span>
           <span className="text-sm font-bold text-violet-400">{m?.memory.percent ?? 0}%</span>
@@ -137,7 +136,7 @@ export function SystemMonitor({ inline }: { inline?: boolean }) {
       </div>
 
       {/* GPU */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">GPU</span>
           <span className="text-sm font-bold text-emerald-400">
@@ -155,7 +154,7 @@ export function SystemMonitor({ inline }: { inline?: boolean }) {
       </div>
 
       {/* Process Memory */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">进程内存</span>
           <span className="text-sm font-bold text-amber-400">{m?.process.memoryMB ?? 0} MB</span>

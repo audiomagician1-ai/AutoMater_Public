@@ -18,6 +18,8 @@ import { callLLMWithTools, calcCost, getSettings } from '../engine/llm-client';
 import { sendToUI, addLog } from '../engine/ui-bridge';
 import { getDb } from '../db';
 import { runOrchestrator } from '../engine/orchestrator';
+import { updateAgentStats } from '../engine/agent-manager';
+import { emitEvent } from '../engine/event-store';
 import { assertNonEmptyString, assertObject, assertOptionalString, assertOptionalNumber } from './ipc-validator';
 import {
   getDaemonConfig, saveDaemonConfig, getDaemonStatus,
@@ -201,34 +203,36 @@ function buildSystemPrompt(config: MetaAgentConfig, memories: MetaAgentMemory[])
 
   let prompt = `你是"${config.name}"，一个AI软件开发平台的智能管家。性格: ${personality}。${userName}。
 
-你的职责：
+你的核心职责是**指挥和协调**，而不是亲自执行开发/分析任务。
 
-1. **需求接收**: 当用户表达产品需求/功能想法时，提取核心需求，回复确认并告知已转交团队处理。
-2. **项目查询**: 当用户询问项目状态、设计文档、技术架构时，**主动使用工具**读取相关文件和搜索项目代码来获取准确信息。
-3. **工作流管理**: 当用户想调整团队配置、暂停/恢复项目时，给出操作建议。
-4. **通用对话**: 其他问题友好回答。
+## 职责
 
-**你拥有以下工具能力**:
-- read_file: 读取项目文件内容（代码、文档、配置等）
-- list_files: 查看项目目录结构
-- search_files: 搜索项目中的代码/文本
-- glob_files: 按模式匹配查找文件
-- web_search: 搜索互联网获取最新信息
-- fetch_url: 获取网页内容
+1. **需求派发**: 当用户表达产品需求、功能想法、审查请求、改进方案时，使用 \`create_wish\` 工具将任务派发给项目开发团队。团队有 PM、架构师、开发、QA 等角色，会自动执行完整流水线。
+2. **快速查询**: 当用户只是简单询问项目状态、某个文件内容、架构概况时，可以使用读取/搜索工具快速回答。
+3. **对话交流**: 其他问题友好回答。
+
+## 工具能力
+
+### 任务派发 (最重要)
+- \`create_wish\`: **将需求/任务派发给开发团队**。任何涉及代码编写、深度审查、架构重构、功能开发的请求都应通过此工具派发。
+
+### 信息查询 (辅助)
+- read_file / list_files / search_files / glob_files: 快速查看项目文件
+- web_search / fetch_url: 搜索互联网信息
 - git_log: 查看 Git 提交历史
-- think: 在回复前组织思路（不可见给用户）
+- think: 组织思路
 
-**重要规则**:
-- 当用户问到项目中的具体代码、文件、架构等问题时，**必须先用工具去读取/搜索**，不要凭空猜测。
-- 你的最终回复必须是 JSON 格式: {"intent": "wish|query|workflow|general", "reply": "你的回复文本", "wishContent": "仅当intent=wish时，提取的需求文本", "memoryNotes": "可选,值得记住的新信息"}
-- intent=wish: 用户在表达新功能需求、产品想法、要做什么系统/功能
-- intent=query: 用户在问项目状态、进度、文档内容、技术细节
-- intent=workflow: 用户想暂停/启动/调整工作流、团队配置
-- intent=general: 闲聊或其他
-- wishContent: 精炼后的需求描述（保留用户原意），仅 wish 意图时填写
-- memoryNotes: 从对话中提取值得长期记住的信息(用户偏好/重要决策)，可选字段
-- 回复要简洁友好，中文。确认需求时要复述核心要点让用户确认。
-- 使用工具收集信息后，在最终回复中整合工具的结果给用户。`;
+## 重要规则
+
+1. **不要自己做深度代码分析/审查**: 当用户要求"分析项目"、"审查代码质量"、"提出改进方案"等任务时，你应该用 \`create_wish\` 把任务描述清楚后派发给团队，而不是自己花几十轮去读文件分析。
+2. **可以做轻量查询**: 如果用户只是问"某个文件在哪"、"项目用了什么框架"这类简单问题，你可以用工具快速查看后回答。
+3. **wish 内容要精炼**: create_wish 的内容应该是清晰的任务描述（建议500字以内），不要把你的全部分析过程塞进去。团队成员会自行深入分析。
+4. **回复格式**: 最终回复使用 JSON: {"intent": "wish|query|workflow|general", "reply": "回复文本", "wishContent": "", "memoryNotes": "可选"}
+   - intent=wish: 已通过 create_wish 工具派发了任务
+   - intent=query: 信息查询
+   - intent=workflow: 工作流调整
+   - intent=general: 闲聊
+5. **回复要简洁友好**，中文。`;
 
   // Inject memory context
   const memoryBlock = formatMemoriesForContext(memories);
@@ -489,6 +493,7 @@ export function setupMetaAgentHandlers() {
     let totalOut = 0;
     let totalCost = 0;
     let finalReply = '';
+    let wishCreatedViaTool = false;
 
     sendToUI(win, 'agent:log', {
       projectId: projectId || 'system', agentId,
@@ -561,6 +566,47 @@ const result = await callLLMWithTools(
             continue;
           }
 
+          // create_wish — 派发任务给团队
+          if (tc.function.name === 'create_wish') {
+            const wishText = (toolArgs.wish_content || '').trim();
+            if (!wishText) {
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: '错误: wish_content 不能为空' });
+              continue;
+            }
+            if (!projectId) {
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: '错误: 当前没有选中项目，无法创建需求。请让用户先选择一个项目。' });
+              continue;
+            }
+            try {
+              const db = getDb();
+              const wishId = `wish-${Date.now().toString(36)}`;
+              // 截断过长的 wish 内容 (PM 不需要管家的完整分析报告)
+              const trimmedWish = wishText.length > 2000 ? wishText.slice(0, 2000) + '\n\n[...内容已截断，团队将自行深入分析]' : wishText;
+              db.prepare('INSERT INTO wishes (id, project_id, content, status) VALUES (?, ?, ?, ?)')
+                .run(wishId, projectId, trimmedWish, 'pending');
+              db.prepare("UPDATE projects SET wish = ?, updated_at = datetime('now') WHERE id = ?")
+                .run(trimmedWish, projectId);
+
+              addLog(projectId, agentId, 'info', `📋 ${config.name} 创建需求: ${trimmedWish.slice(0, 80)}...`);
+              sendToUI(win, 'agent:log', { projectId, agentId, content: `📋 需求已创建，启动开发流水线...` });
+
+              // 启动 orchestrator
+              const proj = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
+              if (proj && !['developing', 'initializing', 'reviewing'].includes(proj.status)) {
+                runOrchestrator(projectId, win).catch(err => {
+                  log.error('MetaAgent create_wish→Orchestrator error', err);
+                  sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `❌ 流水线启动失败: ${err.message}` });
+                });
+              }
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: `✅ 需求已创建 (ID: ${wishId})，开发流水线已启动。团队将自动进行 PM分析→架构设计→开发→QA→构建。` });
+              wishCreatedViaTool = true;
+            } catch (err: unknown) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: `创建需求失败: ${errMsg}` });
+            }
+            continue;
+          }
+
           // Guard check
           const guard = guardToolCall(tc.function.name, toolArgs, !!workspacePath);
           if (!guard.allowed) {
@@ -606,6 +652,15 @@ const result = await callLLMWithTools(
     } catch (err: unknown) {
       log.error('MetaAgent ReAct error', err);
       finalReply = `抱歉，我在处理你的消息时遇到了错误。错误: ${toErrorMessage(err).slice(0, 100)}`;
+      // 即使出错也要记录已消耗的 token/cost 到项目统计
+      if (projectId && (totalIn + totalOut) > 0) {
+        try {
+          const db = getDb();
+          db.prepare('INSERT OR IGNORE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(agentId, projectId, 'meta-agent', 'idle');
+          updateAgentStats(agentId, projectId, totalIn, totalOut, totalCost);
+          emitEvent({ projectId, agentId, type: 'llm:call', data: { model, error: true }, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost });
+        } catch (statsErr) { log.error('MetaAgent stats write failed (error path)', statsErr); }
+      }
       return {
         reply: finalReply,
         intent: 'general',
@@ -639,6 +694,27 @@ const result = await callLLMWithTools(
       autoExtractMemory(memoryNotes);
     }
 
+    // ── 将 meta-agent 的 token/cost 计入当前项目统计 ──
+    if (projectId && (totalIn + totalOut) > 0) {
+      try {
+        const db = getDb();
+        // 确保 agents 表中有 meta-agent 记录 (首次对话时自动创建)
+        db.prepare('INSERT OR IGNORE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(agentId, projectId, 'meta-agent', 'idle');
+        updateAgentStats(agentId, projectId, totalIn, totalOut, totalCost);
+        emitEvent({
+          projectId,
+          agentId,
+          type: 'llm:call',
+          data: { model, iterations: messages.length, intent: 'meta-agent-chat' },
+          inputTokens: totalIn,
+          outputTokens: totalOut,
+          costUsd: totalCost,
+        });
+      } catch (statsErr) {
+        log.error('MetaAgent stats write failed', statsErr);
+      }
+    }
+
     // v8.0: 备份元 Agent 对话
     backupConversation({
       projectId,
@@ -653,9 +729,9 @@ const result = await callLLMWithTools(
       metadata: { intent, wishCreated: false },
     });
 
-    // ── Intent: wish → Create wish + start pipeline ──
-    let wishCreated = false;
-    if (intent === 'wish' && projectId && wishContent.trim()) {
+    // ── Intent: wish → Create wish + start pipeline (仅当未通过 create_wish 工具创建时) ──
+    let wishCreated = wishCreatedViaTool;
+    if (!wishCreatedViaTool && intent === 'wish' && projectId && wishContent.trim()) {
       const db = getDb();
       try {
         const wishId = `wish-${Date.now().toString(36)}`;

@@ -163,7 +163,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search_boost', 'deep_research',  // v8.0
     'download_file', 'search_images',  // v19.0
   ],
-  // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询
+  // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询 + 需求派发
   'meta-agent': [
     'think', 'task_complete',
     'read_file', 'list_files', 'search_files', 'glob_files',
@@ -173,6 +173,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'download_file', 'search_images',  // v19.0
     'memory_read', 'memory_append',
     'git_log',
+    'create_wish',  // v21.0: 派发任务给团队
   ],
 };
 

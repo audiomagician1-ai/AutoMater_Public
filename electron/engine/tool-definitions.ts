@@ -366,6 +366,20 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
     },
   },
   {
+    name: 'create_wish',
+    description: '将一项需求/任务派发给项目开发团队执行。管家自身不应亲自编码或深度审查，而应把具体工作交给团队。调用后会自动创建需求并启动开发流水线（PM分析→架构设计→开发→QA→构建）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        wish_content: {
+          type: 'string',
+          description: '需求描述 — 清晰、具体、可执行的任务说明。应包含：做什么、为什么、验收标准。不要过长（建议500字以内），团队会自行深入分析。',
+        },
+      },
+      required: ['wish_content'],
+    },
+  },
+  {
     name: 'think',
     description: '用于深度思考和推理的工具。写下你的分析、假设、计划，不会产生任何副作用。在面对复杂问题时，先用 think 理清思路再行动。',
     parameters: {

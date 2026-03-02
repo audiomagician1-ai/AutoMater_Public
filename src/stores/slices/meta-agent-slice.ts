@@ -40,12 +40,9 @@ export interface MetaAgentSlice {
   metaSessionList: MetaSessionItem[];
   /** 是否正在加载 session 列表 */
   metaSessionsLoading: boolean;
-  /** 是否显示 session 侧栏 */
-  metaSessionSidebarOpen: boolean;
   setCurrentMetaSessionId: (id: string | null) => void;
   setMetaSessionList: (list: MetaSessionItem[]) => void;
   setMetaSessionsLoading: (loading: boolean) => void;
-  toggleMetaSessionSidebar: () => void;
 
   // ── 消息管理 ──
   metaAgentMessages: Map<string, MetaAgentMessage[]>;
@@ -66,11 +63,9 @@ export const createMetaAgentSlice: StateCreator<MetaAgentSlice, [], [], MetaAgen
   currentMetaSessionId: null,
   metaSessionList: [],
   metaSessionsLoading: false,
-  metaSessionSidebarOpen: true,
   setCurrentMetaSessionId: (id) => set({ currentMetaSessionId: id }),
   setMetaSessionList: (list) => set({ metaSessionList: list }),
   setMetaSessionsLoading: (loading) => set({ metaSessionsLoading: loading }),
-  toggleMetaSessionSidebar: () => set((s) => ({ metaSessionSidebarOpen: !s.metaSessionSidebarOpen })),
 
   // ── 消息管理 ──
   metaAgentMessages: new Map(),

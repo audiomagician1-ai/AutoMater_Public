@@ -20,22 +20,21 @@ const CHART_MINUTES = 30;
 const MAX_POINTS = 30; // 30 分钟内每分钟一个点
 
 /** 紧凑迷你面积图 — 与 SystemMonitor 的 MiniAreaChart 视觉对齐 */
+const VB_W = 160;
+const VB_H = 48;
+
 function MiniTimeseriesChart({
   data,
   color,
-  height = 48,
-  width = 160,
 }: {
   data: number[];
   color: string;
-  height?: number;
-  width?: number;
 }) {
   if (data.length < 2) {
     return (
-      <svg width={width} height={height} className="opacity-30">
-        <rect width={width} height={height} rx={4} fill="#0f172a" />
-        <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#334155" fontSize={10}>待采集...</text>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" className="w-full h-auto opacity-30 rounded">
+        <rect width={VB_W} height={VB_H} rx={4} fill="#0f172a" />
+        <text x={VB_W / 2} y={VB_H / 2 + 4} textAnchor="middle" fill="#334155" fontSize={10}>待采集...</text>
       </svg>
     );
   }
@@ -45,29 +44,29 @@ function MiniTimeseriesChart({
     : data.slice(-MAX_POINTS);
 
   const maxVal = Math.max(1, ...padded);
-  const step = width / (padded.length - 1);
+  const step = VB_W / (padded.length - 1);
   const points = padded.map((v, i) => ({
     x: i * step,
-    y: height - (Math.min(v, maxVal) / maxVal) * (height - 4) - 2,
+    y: VB_H - (Math.min(v, maxVal) / maxVal) * (VB_H - 4) - 2,
   }));
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${height} L ${points[0].x.toFixed(1)} ${height} Z`;
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${VB_H} L ${points[0].x.toFixed(1)} ${VB_H} Z`;
 
   return (
-    <svg width={width} height={height} className="rounded">
+    <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" className="w-full h-auto rounded">
       <defs>
         <linearGradient id={`act-grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity={0.4} />
           <stop offset="100%" stopColor={color} stopOpacity={0.05} />
         </linearGradient>
       </defs>
-      <rect width={width} height={height} rx={4} fill="#0f172a" />
+      <rect width={VB_W} height={VB_H} rx={4} fill="#0f172a" />
       {/* Grid lines */}
       {[25, 50, 75].map(pct => (
         <line key={pct}
-          x1={0} y1={height - (pct / 100) * (height - 4) - 2}
-          x2={width} y2={height - (pct / 100) * (height - 4) - 2}
+          x1={0} y1={VB_H - (pct / 100) * (VB_H - 4) - 2}
+          x2={VB_W} y2={VB_H - (pct / 100) * (VB_H - 4) - 2}
           stroke="#1e293b" strokeWidth={0.5}
         />
       ))}
@@ -116,7 +115,7 @@ export function ActivityCharts({ projectId, inline }: { projectId: string; inlin
   const cards = (
     <>
       {/* Token 消耗 */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">Tokens</span>
           <span className="text-sm font-bold text-blue-400">{fmtToken(currentToken)}</span>
@@ -128,7 +127,7 @@ export function ActivityCharts({ projectId, inline }: { projectId: string; inlin
       </div>
 
       {/* 金额 */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">费用</span>
           <span className="text-sm font-bold text-amber-400">{fmtCost(currentCost)}</span>
@@ -140,7 +139,7 @@ export function ActivityCharts({ projectId, inline }: { projectId: string; inlin
       </div>
 
       {/* 代码行 */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">代码行</span>
           <span className="text-sm font-bold text-emerald-400">{Math.round(currentLines)}</span>
@@ -152,7 +151,7 @@ export function ActivityCharts({ projectId, inline }: { projectId: string; inlin
       </div>
 
       {/* API 调用 */}
-      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all">
+      <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700/80 transition-all min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">API 调用</span>
           <span className="text-sm font-bold text-violet-400">{Math.round(currentCalls)}</span>

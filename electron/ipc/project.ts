@@ -611,6 +611,16 @@ export function setupProjectHandlers() {
     return db.prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
   });
 
+  // ── 获取项目日志中出现过的所有 agent_id (用于筛选下拉, 不受当前筛选影响) ──
+  ipcMain.handle('project:get-log-agent-ids', (_event, projectId: string) => {
+    assertProjectId('project:get-log-agent-ids', projectId);
+    const db = getDb();
+    const rows = db.prepare(
+      'SELECT DISTINCT agent_id FROM agent_logs WHERE project_id = ? ORDER BY agent_id ASC'
+    ).all(projectId) as Array<{ agent_id: string }>;
+    return rows.map(r => r.agent_id);
+  });
+
   // ── 获取项目日志 (v4.0: 分页 + 过滤 + 搜索) ──
   ipcMain.handle('project:get-logs', (_event, projectId: string, options?: {
     limit?: number;

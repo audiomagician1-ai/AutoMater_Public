@@ -78,7 +78,7 @@ function SessionListPanel() {
     setLoading(true);
     try {
       const list = await window.automater.metaAgent.listChatSessions(currentProjectId);
-      setSessionList((list || []).map((s: MetaSessionItem & { title?: string | null }) => ({ ...s, title: s.title || undefined })));
+      setSessionList((list || []).map((s) => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
     } catch { /* silent */ }
     setLoading(false);
   }, [currentProjectId, setSessionList]);
@@ -101,7 +101,7 @@ function SessionListPanel() {
           content: r.content,
           timestamp: new Date(r.createdAt).getTime(),
           triggeredWish: r.triggeredWish || undefined,
-          attachments: r.attachments || undefined,
+          attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
         })));
       }
     } catch { /* silent */ }
@@ -314,13 +314,21 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
   // 切换项目时恢复最近活跃会话
   useEffect(() => {
-    setCurrentSessionId(null);
+    // 不再无条件清除 sessionId — 仅当项目变化时才重置
+    const prevProjectId = useAppStore.getState().currentMetaSessionId
+      ? undefined  // 有活跃 session 时不轻易清除
+      : null;
+
     (async () => {
       try {
         const sessions = await window.automater.metaAgent.listChatSessions(currentProjectId, 1);
         if (sessions?.length) {
           const latest = sessions[0];
           if (latest.status === 'active') {
+            // 如果已经是当前 session 且 zustand 中有消息，跳过重新加载
+            if (currentSessionId === latest.id && messagesMap.has(latest.id) && (messagesMap.get(latest.id)?.length || 0) > 0) {
+              return;
+            }
             const rows = await window.automater.metaAgent.loadMessages(latest.id);
             if (rows?.length) {
               useAppStore.getState().setMetaAgentMessages(latest.id, rows.map(r => ({
@@ -329,15 +337,20 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                 content: r.content,
                 timestamp: new Date(r.createdAt).getTime(),
                 triggeredWish: r.triggeredWish || undefined,
-                attachments: r.attachments || undefined,
+                attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
               })));
               setCurrentSessionId(latest.id);
+              return;
             }
           }
         }
-      } catch { /* silent */ }
+        // 没有活跃 session 时才清除
+        if (currentSessionId) setCurrentSessionId(null);
+      } catch {
+        // DB 查询失败时保持现状
+      }
     })();
-  }, [currentProjectId, setCurrentSessionId]);
+  }, [currentProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for daemon messages
   useEffect(() => {

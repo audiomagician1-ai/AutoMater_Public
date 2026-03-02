@@ -273,20 +273,35 @@ export function LogsPage() {
   // ── 团队成员名称映射 (agentId → display name) ──
   const [agentNameMap, setAgentNameMap] = useState<Record<string, string>>({});
 
+  // ── 所有 agent ID (独立于筛选结果, 防止选择后选项消失) ──
+  const [allAgentIds, setAllAgentIds] = useState<string[]>([]);
+
   useEffect(() => {
     if (!currentProjectId) return;
-    window.automater.team.list(currentProjectId).then((members: TeamMember[]) => {
+
+    // 并行加载: 团队成员名称 + DB 中所有出现过的 agent_id
+    Promise.all([
+      window.automater.team.list(currentProjectId).catch(() => [] as TeamMember[]),
+      window.automater.project.getLogAgentIds(currentProjectId).catch(() => [] as string[]),
+    ]).then(([members, dbAgentIds]) => {
+      // 构建名称映射
       const map: Record<string, string> = {};
-      // 内置名称
       map['system'] = '🖥️ 系统';
       map['meta-agent'] = '🤵 管家';
       for (const m of members) {
-        // team_members 的 role 会对应 orchestrator 生成的 agentId 前缀
-        // 例如 role='pm' → agentId='pm-xxx', role='developer' → agentId='dev-1'
         map[`role:${m.role}`] = m.name;
       }
       setAgentNameMap(map);
-    }).catch(() => {});
+
+      // 合并所有可能的 agent ID (去重)
+      const idSet = new Set<string>(dbAgentIds);
+      // 确保团队角色对应的常见前缀也出现 (即便尚无日志)
+      // 不加 — 这里只保留实际出现过的 agent_id
+      // 但确保 system / meta-agent 始终可选
+      idSet.add('system');
+      idSet.add('meta-agent');
+      setAllAgentIds([...idSet].sort());
+    });
   }, [currentProjectId]);
 
   /** 从 DB 加载日志 */
@@ -371,12 +386,18 @@ export function LogsPage() {
     return all;
   }, [dbLogs, realtimeLogs, currentProjectId]);
 
-  // 提取 Agent 列表用于过滤
-  const agentIds = useMemo(() => {
-    const set = new Set<string>();
-    mergedLogs.forEach(l => set.add(l.agentId));
-    return [...set].sort();
-  }, [mergedLogs]);
+  // 当有新的实时日志来自未知 agent 时, 动态补充到列表
+  useEffect(() => {
+    const newIds = new Set(allAgentIds);
+    let changed = false;
+    for (const l of realtimeLogs) {
+      if (l.projectId === currentProjectId && !newIds.has(l.agentId)) {
+        newIds.add(l.agentId);
+        changed = true;
+      }
+    }
+    if (changed) setAllAgentIds([...newIds].sort());
+  }, [realtimeLogs, currentProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const streams = Array.from(activeStreams.values());
   const hasMore = dbLogs.length < totalCount;
@@ -426,7 +447,7 @@ export function LogsPage() {
           className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-forge-500"
         >
           <option value="">全部 Agent</option>
-          {agentIds.map(id => <option key={id} value={id}>{resolveAgentName(id, agentNameMap)}</option>)}
+          {allAgentIds.map(id => <option key={id} value={id}>{resolveAgentName(id, agentNameMap)}</option>)}
         </select>
       </div>
 

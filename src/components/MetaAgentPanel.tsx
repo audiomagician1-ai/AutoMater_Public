@@ -93,7 +93,7 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
   // 加载 session 列表
   useEffect(() => {
     window.automater.metaAgent.listChatSessions(currentProjectId).then(list => {
-      setSessionList((list || []).map((s: MetaSessionItem & { title?: string | null }) => ({ ...s, title: s.title || undefined })));
+      setSessionList((list || []).map((s) => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
     }).catch(() => {});
   }, [currentProjectId, setSessionList]);
 
@@ -103,13 +103,13 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
       try {
         const rows = await window.automater.metaAgent.loadMessages(sessId);
         if (rows?.length) {
-          setMessages(sessId, rows.map(r => ({
+           setMessages(sessId, rows.map(r => ({
             id: r.id,
             role: r.role as 'user' | 'assistant',
             content: r.content,
             timestamp: new Date(r.createdAt).getTime(),
             triggeredWish: r.triggeredWish || undefined,
-            attachments: r.attachments || undefined,
+            attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
           })));
         }
       } catch { /* silent */ }
@@ -255,15 +255,18 @@ export function MetaAgentPanel() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, metaAgentWorkMsgs.length]);
 
-  // 切换项目时重置 session + 恢复最近活跃会话
+  // 切换项目时恢复最近活跃会话
   useEffect(() => {
-    setCurrentSessionId(null);
     (async () => {
       try {
         const sessions = await window.automater.metaAgent.listChatSessions(currentProjectId, 1);
         if (sessions?.length) {
           const latest = sessions[0];
           if (latest.status === 'active') {
+            // 已经是当前 session 且有缓存消息 → 跳过
+            if (currentSessionId === latest.id && messagesMap.has(latest.id) && (messagesMap.get(latest.id)?.length || 0) > 0) {
+              return;
+            }
             const rows = await window.automater.metaAgent.loadMessages(latest.id);
             if (rows?.length) {
               useAppStore.getState().setMetaAgentMessages(latest.id, rows.map(r => ({
@@ -272,15 +275,18 @@ export function MetaAgentPanel() {
                 content: r.content,
                 timestamp: new Date(r.createdAt).getTime(),
                 triggeredWish: r.triggeredWish || undefined,
-                attachments: r.attachments || undefined,
+                attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
               })));
               setCurrentSessionId(latest.id);
+              return;
             }
           }
         }
+        // 没有活跃 session 才清除
+        if (currentSessionId) setCurrentSessionId(null);
       } catch { /* silent */ }
     })();
-  }, [currentProjectId, setCurrentSessionId]);
+  }, [currentProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag-to-resize
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
