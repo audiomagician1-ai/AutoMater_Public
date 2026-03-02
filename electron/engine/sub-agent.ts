@@ -13,7 +13,10 @@
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
 import { execInSandbox, type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole } from './memory-system';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import type { ToolContext } from './tool-system';
 import type { FileTreeNode, OpenAIFunctionTool, LLMMessage, LLMToolCall } from './types';
 
@@ -35,7 +38,7 @@ export interface ResearchResult {
 /** 子 agent 可用的只读工具 */
 interface MiniTool {
   name: string;
-  execute: (args: Record<string, string | number | undefined>, ctx: ToolContext) => string;
+  execute: (args: Record<string, string | number | undefined>, ctx: ToolContext) => string | Promise<string>;
 }
 
 // ═══════════════════════════════════════
@@ -73,13 +76,14 @@ const MINI_TOOLS: MiniTool[] = [
   },
   {
     name: 'search_files',
-    execute(args, ctx) {
+    async execute(args, ctx) {
       try {
         const pattern = String(args.pattern || '').replace(/'/g, "''");
         const cmd = process.platform === 'win32'
           ? `powershell -NoProfile -Command "Get-ChildItem -Recurse -File | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist' } | Select-String -Pattern '${pattern}' -Context 1,1 | Select-Object -First 15 | Out-String -Width 200"`
           : `grep -rn --include="*" -C 1 "${pattern.replace(/"/g, '\\"')}" . 2>/dev/null | head -40`;
-        return execSync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 }).trim().slice(0, 3000) || '无匹配';
+        const { stdout } = await execAsync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 });
+        return stdout.trim().slice(0, 3000) || '无匹配';
       } catch { return '无匹配'; }
     },
   },
@@ -249,7 +253,7 @@ export async function runResearcher(
         let output = '未知工具';
         if (tool) {
           try {
-            output = tool.execute(toolArgs as Record<string, string | number | undefined>, ctx);
+            output = await Promise.resolve(tool.execute(toolArgs as Record<string, string | number | undefined>, ctx));
             if (tc.function.name === 'read_file' && toolArgs.path) {
               filesRead.push(String(toolArgs.path));
             }
