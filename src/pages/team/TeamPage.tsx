@@ -17,7 +17,9 @@ export function TeamPage() {
   const currentProjectId = useAppStore(s => s.currentProjectId);
   const [agents, setAgents] = useState<(TeamMember & { status?: string; current_task?: string })[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<(TeamMember & { status?: string; current_task?: string }) | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<(TeamMember & { status?: string; current_task?: string }) | null>(
+    null,
+  );
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [tab, setTab] = useState<'runtime' | 'config'>('runtime');
@@ -42,40 +44,56 @@ export function TeamPage() {
     setMembers(data || []);
   };
 
-  useEffect(() => { loadAgents(); loadMembers(); }, [currentProjectId]);
   useEffect(() => {
-    const timer = setInterval(() => { loadAgents(); }, 3000);
+    loadAgents();
+    loadMembers();
+  }, [currentProjectId]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadAgents();
+    }, 3000);
     return () => clearInterval(timer);
   }, [currentProjectId]);
 
   // v9.0: 监听 team:member-added 事件
   useEffect(() => {
-    const unsub = window.automater.on('team:member-added', (data: {
-      projectId: string; memberId: string; role: string; name: string;
-    }) => {
-      if (data.projectId === currentProjectId) {
-        loadMembers();
-        loadAgents();
-      }
-    });
+    const unsub = window.automater.on(
+      'team:member-added',
+      (data: { projectId: string; memberId: string; role: string; name: string }) => {
+        if (data.projectId === currentProjectId) {
+          loadMembers();
+          loadAgents();
+        }
+      },
+    );
     return unsub;
   }, [currentProjectId]);
 
   // 首次加载时拉取缓存的 react states
   useEffect(() => {
     if (!currentProjectId) return;
-    window.automater.project.getReactStates(currentProjectId).then(data => {
-      const store = useAppStore.getState();
-      for (const [, state] of Object.entries(data)) {
-        store.updateAgentReactState(state as Parameters<typeof store.updateAgentReactState>[0]);
-      }
-    }).catch(() => { /* silent: optional cache */ });
-    window.automater.project.getContextSnapshots(currentProjectId).then(data => {
-      const store = useAppStore.getState();
-      for (const [, snap] of Object.entries(data)) {
-        store.updateContextSnapshot(snap as ContextSnapshot);
-      }
-    }).catch(() => { /* silent: optional cache */ });
+    window.automater.project
+      .getReactStates(currentProjectId)
+      .then(data => {
+        const store = useAppStore.getState();
+        for (const [, state] of Object.entries(data)) {
+          store.updateAgentReactState(currentProjectId!, state as Parameters<typeof store.updateAgentReactState>[1]);
+        }
+      })
+      .catch(() => {
+        /* silent: optional cache */
+      });
+    window.automater.project
+      .getContextSnapshots(currentProjectId)
+      .then(data => {
+        const store = useAppStore.getState();
+        for (const [, snap] of Object.entries(data)) {
+          store.updateContextSnapshot(currentProjectId!, snap as ContextSnapshot);
+        }
+      })
+      .catch(() => {
+        /* silent: optional cache */
+      });
   }, [currentProjectId]);
 
   /** 初始化默认团队 */
@@ -88,7 +106,10 @@ export function TeamPage() {
   /** 添加成员 */
   const handleAddMember = async () => {
     if (!currentProjectId || !newName.trim()) return;
-    const caps = newCaps.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    const caps = newCaps
+      .split(/[,，]/)
+      .map(s => s.trim())
+      .filter(Boolean);
     await window.automater.team.add(currentProjectId, {
       role: newRole,
       name: newName.trim(),
@@ -98,7 +119,12 @@ export function TeamPage() {
       max_context_tokens: parseInt(newMaxTokens) || 128000,
     });
     setShowAddForm(false);
-    setNewName(''); setNewRole('developer'); setNewModel(''); setNewPrompt(''); setNewCaps(''); setNewMaxTokens('128000');
+    setNewName('');
+    setNewRole('developer');
+    setNewModel('');
+    setNewPrompt('');
+    setNewCaps('');
+    setNewMaxTokens('128000');
     loadMembers();
   };
 
@@ -119,10 +145,19 @@ export function TeamPage() {
   /** 保存编辑 — v11.0: 支持 llm_config / mcp_servers / skills */
   const handleSaveEdit = async () => {
     if (!editingMember) return;
-    const caps = typeof editingMember.capabilities === 'string'
-      ? editingMember.capabilities : JSON.stringify(editingMember.capabilities);
+    const caps =
+      typeof editingMember.capabilities === 'string'
+        ? editingMember.capabilities
+        : JSON.stringify(editingMember.capabilities);
     let capsArr: string[];
-    try { capsArr = JSON.parse(caps); } catch { capsArr = caps.split(/[,，]/).map(s => s.trim()).filter(Boolean); }
+    try {
+      capsArr = JSON.parse(caps);
+    } catch {
+      capsArr = caps
+        .split(/[,，]/)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
     await window.automater.team.update(editingMember.id, {
       ...editingMember,
       capabilities: JSON.stringify(capsArr),
@@ -135,7 +170,11 @@ export function TeamPage() {
   };
 
   if (!currentProjectId) {
-    return <div className="h-full flex items-center justify-center text-slate-500"><p>加载中...</p></div>;
+    return (
+      <div className="h-full flex items-center justify-center text-slate-500">
+        <p>加载中...</p>
+      </div>
+    );
   }
 
   return (
@@ -144,12 +183,16 @@ export function TeamPage() {
         <h2 className="text-xl font-bold">虚拟团队</h2>
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-800 rounded-lg p-0.5">
-            <button onClick={() => setTab('config')}
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'config' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+            <button
+              onClick={() => setTab('config')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'config' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
               ⚙ 团队配置
             </button>
-            <button onClick={() => setTab('runtime')}
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'runtime' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+            <button
+              onClick={() => setTab('runtime')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${tab === 'runtime' ? 'bg-forge-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
               📊 运行状态
             </button>
           </div>
@@ -165,12 +208,16 @@ export function TeamPage() {
               <div className="text-lg text-slate-400 mb-2">尚未配置团队</div>
               <div className="text-sm mb-6">可以使用默认配置快速初始化，或手动添加成员</div>
               <div className="flex gap-3 justify-center">
-                <button onClick={handleInitDefaults}
-                  className="px-5 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all">
+                <button
+                  onClick={handleInitDefaults}
+                  className="px-5 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all"
+                >
                   ⚡ 初始化默认团队
                 </button>
-                <button onClick={() => setShowAddForm(true)}
-                  className="px-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-all">
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="px-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-all"
+                >
                   + 手动添加
                 </button>
               </div>
@@ -179,8 +226,10 @@ export function TeamPage() {
             <>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-500">{members.length} 位成员</span>
-                <button onClick={() => setShowAddForm(true)}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors">
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors"
+                >
                   + 添加成员
                 </button>
               </div>
@@ -189,45 +238,83 @@ export function TeamPage() {
                 {members.map(m => {
                   const info = ROLE_INFO[m.role] || { icon: '🤖', title: m.role };
                   let caps: string[] = [];
-                  try { caps = JSON.parse(m.capabilities || '[]'); } catch { caps = []; }
+                  try {
+                    caps = JSON.parse(m.capabilities || '[]');
+                  } catch {
+                    caps = [];
+                  }
 
-                    return (
-                    <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col min-h-[220px]">
+                  return (
+                    <div
+                      key={m.id}
+                      className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col min-h-[220px]"
+                    >
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">{info.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-slate-200">{m.name}</div>
-                          <div className="text-xs text-slate-500">{info.title} · {(() => {
-                            try {
-                              const cfg = m.llm_config ? JSON.parse(m.llm_config) : null;
-                              if (cfg?.model) return cfg.model;
-                            } catch { /* silent: parse fallback */ }
-                            return m.model || '默认模型';
-                          })()}</div>
+                          <div className="text-xs text-slate-500">
+                            {info.title} ·{' '}
+                            {(() => {
+                              try {
+                                const cfg = m.llm_config ? JSON.parse(m.llm_config) : null;
+                                if (cfg?.model) return cfg.model;
+                              } catch {
+                                /* silent: parse fallback */
+                              }
+                              return m.model || '默认模型';
+                            })()}
+                          </div>
                         </div>
                         <div className="flex gap-1">
-                          <button onClick={() => setEditingMember({ ...m })}
-                            className="text-xs px-2 py-1 text-slate-500 hover:text-forge-400 transition-colors">✏️</button>
-                          <button onClick={() => handleDeleteMember(m.id)}
-                            className="text-xs px-2 py-1 text-slate-500 hover:text-red-400 transition-colors">🗑</button>
+                          <button
+                            onClick={() => setEditingMember({ ...m })}
+                            className="text-xs px-2 py-1 text-slate-500 hover:text-forge-400 transition-colors"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMember(m.id)}
+                            className="text-xs px-2 py-1 text-slate-500 hover:text-red-400 transition-colors"
+                          >
+                            🗑
+                          </button>
                         </div>
                       </div>
                       {/* Capabilities */}
                       <div className="flex flex-wrap gap-1">
                         {caps.map((c, i) => (
-                          <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{c}</span>
+                          <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                            {c}
+                          </span>
                         ))}
                       </div>
                       {/* v11.0: MCP / Skill 标签 */}
                       {(() => {
                         let mcpCount = 0;
                         let skillCount = 0;
-                        try { mcpCount = m.mcp_servers ? JSON.parse(m.mcp_servers).length : 0; } catch { /* silent */ }
-                        try { skillCount = m.skills ? JSON.parse(m.skills).length : 0; } catch { /* silent */ }
-                        return (mcpCount > 0 || skillCount > 0) ? (
+                        try {
+                          mcpCount = m.mcp_servers ? JSON.parse(m.mcp_servers).length : 0;
+                        } catch {
+                          /* silent */
+                        }
+                        try {
+                          skillCount = m.skills ? JSON.parse(m.skills).length : 0;
+                        } catch {
+                          /* silent */
+                        }
+                        return mcpCount > 0 || skillCount > 0 ? (
                           <div className="flex gap-2">
-                            {mcpCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/30 text-emerald-400">🔌 MCP ×{mcpCount}</span>}
-                            {skillCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-violet-900/30 text-violet-400">🧩 Skill ×{skillCount}</span>}
+                            {mcpCount > 0 && (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/30 text-emerald-400">
+                                🔌 MCP ×{mcpCount}
+                              </span>
+                            )}
+                            {skillCount > 0 && (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-violet-900/30 text-violet-400">
+                                🧩 Skill ×{skillCount}
+                              </span>
+                            )}
                           </div>
                         ) : null;
                       })()}
@@ -246,16 +333,25 @@ export function TeamPage() {
 
           {/* ── 添加表单 ── */}
           {showAddForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAddForm(false)}>
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowAddForm(false)}
+            >
+              <div
+                className="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-[480px] space-y-4"
+                onClick={e => e.stopPropagation()}
+              >
                 <h3 className="text-lg font-bold text-slate-200">添加团队成员</h3>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-slate-500 mb-1 block">名称</label>
-                      <input value={newName} onChange={e => setNewName(e.target.value)}
+                      <input
+                        value={newName}
+                        onChange={e => setNewName(e.target.value)}
                         className={INPUT_CLS}
-                        placeholder="开发者 C" />
+                        placeholder="开发者 C"
+                      />
                     </div>
                     <div>
                       <label className="text-xs text-slate-500 mb-1 block">角色</label>
@@ -271,33 +367,56 @@ export function TeamPage() {
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">模型 (留空用全局配置)</label>
-                    <input value={newModel} onChange={e => setNewModel(e.target.value)}
+                    <input
+                      value={newModel}
+                      onChange={e => setNewModel(e.target.value)}
                       className={INPUT_CLS}
-                      placeholder="gpt-5.3-codex" />
+                      placeholder="gpt-5.3-codex"
+                    />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">能力标签 (逗号分隔)</label>
-                    <input value={newCaps} onChange={e => setNewCaps(e.target.value)}
+                    <input
+                      value={newCaps}
+                      onChange={e => setNewCaps(e.target.value)}
                       className={INPUT_CLS}
-                      placeholder="前端开发, React, TypeScript" />
+                      placeholder="前端开发, React, TypeScript"
+                    />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">系统提示词</label>
-                    <textarea value={newPrompt} onChange={e => setNewPrompt(e.target.value)} rows={3}
+                    <textarea
+                      value={newPrompt}
+                      onChange={e => setNewPrompt(e.target.value)}
+                      rows={3}
                       className={`${INPUT_CLS} resize-y`}
-                      placeholder="你是一位资深前端开发者..." />
+                      placeholder="你是一位资深前端开发者..."
+                    />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">上下文窗口 (tokens)</label>
-                    <input value={newMaxTokens} onChange={e => setNewMaxTokens(e.target.value)}
+                    <input
+                      value={newMaxTokens}
+                      onChange={e => setNewMaxTokens(e.target.value)}
                       className={INPUT_CLS}
-                      placeholder="128000" />
+                      placeholder="128000"
+                    />
                   </div>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
-                  <button onClick={handleAddMember} disabled={!newName.trim()}
-                    className="px-4 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm disabled:bg-slate-800 disabled:text-slate-600">添加</button>
+                  <button
+                    onClick={() => setShowAddForm(false)}
+                    className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleAddMember}
+                    disabled={!newName.trim()}
+                    className="px-4 py-2 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-sm disabled:bg-slate-800 disabled:text-slate-600"
+                  >
+                    添加
+                  </button>
                 </div>
               </div>
             </div>
@@ -323,12 +442,15 @@ export function TeamPage() {
               const agentIds = new Set(agents.map(a => a.id));
               const merged: (TeamMember & { status?: string; current_task?: string })[] = [
                 ...agents,
-                ...members.filter(m => !agentIds.has(m.id)).map(m => ({ ...m, status: 'idle' as const, current_task: undefined })),
+                ...members
+                  .filter(m => !agentIds.has(m.id))
+                  .map(m => ({ ...m, status: 'idle' as const, current_task: undefined })),
               ];
               return merged.length === 0 ? (
                 <div className="text-center py-8 text-slate-600 text-xs">
                   <div className="text-2xl mb-2">👥</div>
-                  尚无团队成员<br />
+                  尚无团队成员
+                  <br />
                   <span className="text-slate-700">前往「团队配置」添加成员</span>
                 </div>
               ) : (
@@ -360,7 +482,6 @@ export function TeamPage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

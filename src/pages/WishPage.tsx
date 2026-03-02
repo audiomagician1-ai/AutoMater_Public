@@ -1,4 +1,4 @@
-﻿/**
+/**
  * WishPage v5.0 — 需求管理 + 元Agent对话
  *
  * 左侧: 需求列表 (agent自主识别迭代需求)
@@ -26,12 +26,12 @@ import { MSG_STYLES } from '../components/AgentWorkFeed';
 // ═══════════════════════════════════════
 
 const WISH_STATUS: Record<string, { text: string; color: string; icon: string }> = {
-  pending:    { text: '待分析',   color: 'text-slate-400',   icon: '⏳' },
-  analyzing:  { text: 'PM 分析中', color: 'text-blue-400',  icon: '🧠' },
-  analyzed:   { text: '已分析',   color: 'text-emerald-400', icon: '✅' },
-  developing: { text: '开发中',   color: 'text-amber-400',   icon: '🔨' },
-  done:       { text: '已完成',   color: 'text-green-400',   icon: '🎉' },
-  rejected:   { text: '已拒绝',   color: 'text-red-400',     icon: '❌' },
+  pending: { text: '待分析', color: 'text-slate-400', icon: '⏳' },
+  analyzing: { text: 'PM 分析中', color: 'text-blue-400', icon: '🧠' },
+  analyzed: { text: '已分析', color: 'text-emerald-400', icon: '✅' },
+  developing: { text: '开发中', color: 'text-amber-400', icon: '🔨' },
+  done: { text: '已完成', color: 'text-green-400', icon: '🎉' },
+  rejected: { text: '已拒绝', color: 'text-red-400', icon: '❌' },
 };
 
 // ═══════════════════════════════════════
@@ -41,7 +41,8 @@ const WISH_STATUS: Record<string, { text: string; color: string; icon: string }>
 const GREETING: MetaAgentMessage = {
   id: 'greeting',
   role: 'assistant',
-  content: '你好！我是元Agent管家，你的一站式项目助手。你可以：\n• 直接告诉我你的需求想法，我会自动创建并启动开发\n• 查询任何项目的设计文档、技术架构、进度状态\n• 调整工作流程、查看团队配置\n有什么需要？',
+  content:
+    '你好！我是元Agent管家，你的一站式项目助手。你可以：\n• 直接告诉我你的需求想法，我会自动创建并启动开发\n• 查询任何项目的设计文档、技术架构、进度状态\n• 调整工作流程、查看团队配置\n有什么需要？',
   timestamp: Date.now(),
 };
 
@@ -58,7 +59,9 @@ function formatSessionTime(iso: string): string {
   try {
     const d = new Date(iso);
     return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
 }
 
 function formatTokens(n: number): string {
@@ -71,7 +74,11 @@ function formatTokens(n: number): string {
 // ModeSwitchBadge — 会话模式切换徽章
 // ═══════════════════════════════════════
 
-function ModeSwitchBadge({ sessionId, currentMode, onRefresh }: {
+function ModeSwitchBadge({
+  sessionId,
+  currentMode,
+  onRefresh,
+}: {
   sessionId: string;
   currentMode: ChatMode;
   onRefresh: () => void;
@@ -92,12 +99,17 @@ function ModeSwitchBadge({ sessionId, currentMode, onRefresh }: {
   }, [open]);
 
   const handleSwitch = async (mode: ChatMode) => {
-    if (mode === currentMode) { setOpen(false); return; }
+    if (mode === currentMode) {
+      setOpen(false);
+      return;
+    }
     try {
       // 更新 DB 中的 session chat_mode
       await window.automater.session.updateChatMode(sessionId, mode);
       onRefresh();
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
     setOpen(false);
   };
 
@@ -105,7 +117,10 @@ function ModeSwitchBadge({ sessionId, currentMode, onRefresh }: {
     <div className="relative shrink-0" ref={ref}>
       {/* 模式图标按钮 — 更大、可点击 */}
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        onClick={e => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
         className={`w-6 h-6 rounded-md flex items-center justify-center text-sm hover:bg-slate-700/60 transition-all ${info.color}`}
         title={`${info.label}模式 · 点击切换`}
       >
@@ -128,12 +143,16 @@ function ModeSwitchBadge({ sessionId, currentMode, onRefresh }: {
                 onMouseEnter={() => setHoveredMode(m)}
                 onMouseLeave={() => setHoveredMode(null)}
                 className={`relative flex flex-col items-center gap-1 px-3.5 py-2.5 transition-all min-w-[56px]
-                  ${isActive
-                    ? 'bg-forge-600/20 border-b-2 border-forge-500'
-                    : 'hover:bg-slate-800/80 border-b-2 border-transparent'}`}
+                  ${
+                    isActive
+                      ? 'bg-forge-600/20 border-b-2 border-forge-500'
+                      : 'hover:bg-slate-800/80 border-b-2 border-transparent'
+                  }`}
               >
                 <span className="text-base">{mi.icon}</span>
-                <span className={`text-[10px] font-medium whitespace-nowrap ${isActive ? 'text-forge-400' : 'text-slate-400'}`}>
+                <span
+                  className={`text-[10px] font-medium whitespace-nowrap ${isActive ? 'text-forge-400' : 'text-slate-400'}`}
+                >
                   {mi.label}
                 </span>
               </button>
@@ -170,34 +189,46 @@ function SessionListPanel() {
     setLoading(true);
     try {
       const list = await window.automater.metaAgent.listChatSessions(currentProjectId);
-      setSessionList((list || []).map((s) => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
-    } catch { /* silent */ }
+      setSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
+    } catch {
+      /* silent */
+    }
     setLoading(false);
   }, [currentProjectId, setSessionList]);
 
-  useEffect(() => { loadSessions(); }, [currentProjectId]);
+  useEffect(() => {
+    loadSessions();
+  }, [currentProjectId]);
   useEffect(() => {
     const t = setInterval(loadSessions, 15_000);
     return () => clearInterval(t);
   }, [loadSessions]);
 
-  const handleSelect = useCallback(async (sessId: string) => {
-    setCurrentSessionId(sessId);
-    if (messagesMap.has(sessId) && (messagesMap.get(sessId)?.length ?? 0) > 0) return;
-    try {
-      const rows = await window.automater.metaAgent.loadMessages(sessId);
-      if (rows?.length) {
-        setMessages(sessId, rows.map(r => ({
-          id: r.id,
-          role: r.role as 'user' | 'assistant',
-          content: r.content,
-          timestamp: new Date(r.createdAt).getTime(),
-          triggeredWish: r.triggeredWish || undefined,
-          attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
-        })));
+  const handleSelect = useCallback(
+    async (sessId: string) => {
+      setCurrentSessionId(sessId);
+      if (messagesMap.has(sessId) && (messagesMap.get(sessId)?.length ?? 0) > 0) return;
+      try {
+        const rows = await window.automater.metaAgent.loadMessages(sessId);
+        if (rows?.length) {
+          setMessages(
+            sessId,
+            rows.map(r => ({
+              id: r.id,
+              role: r.role as 'user' | 'assistant',
+              content: r.content,
+              timestamp: new Date(r.createdAt).getTime(),
+              triggeredWish: r.triggeredWish || undefined,
+              attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
+            })),
+          );
+        }
+      } catch {
+        /* silent */
       }
-    } catch { /* silent */ }
-  }, [messagesMap, setCurrentSessionId, setMessages]);
+    },
+    [messagesMap, setCurrentSessionId, setMessages],
+  );
 
   // ── 右键菜单 ──
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sessId: string } | null>(null);
@@ -214,7 +245,9 @@ function SessionListPanel() {
       const rows = await window.automater.metaAgent.loadMessages(ctxMenu.sessId);
       const text = (rows || []).map(r => `[${r.role}] ${r.content}`).join('\n\n');
       await navigator.clipboard.writeText(text);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
     closeCtx();
   };
   const handleCopyConclusions = async () => {
@@ -227,14 +260,18 @@ function SessionListPanel() {
         .filter(c => c.length > 20);
       const last3 = conclusions.slice(-3);
       await navigator.clipboard.writeText(last3.join('\n\n---\n\n'));
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
     closeCtx();
   };
   const handleOpenFolder = async () => {
     if (!ctxMenu) return;
     try {
       await window.automater.session.openBackupFolder(ctxMenu.sessId);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
     closeCtx();
   };
 
@@ -247,14 +284,23 @@ function SessionListPanel() {
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={e => e.stopPropagation()}
         >
-          <button onClick={handleCopyAll} className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2">
+          <button
+            onClick={handleCopyAll}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
             <span>📋</span>复制全部
           </button>
-          <button onClick={handleCopyConclusions} className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2">
+          <button
+            onClick={handleCopyConclusions}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
             <span>💡</span>复制关键结论
           </button>
           <div className="border-t border-slate-800 my-0.5" />
-          <button onClick={handleOpenFolder} className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2">
+          <button
+            onClick={handleOpenFolder}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
             <span>📁</span>跳转至所在文件夹
           </button>
         </div>
@@ -283,6 +329,8 @@ function SessionListPanel() {
                         setCurrentSessionId(null);
                         // Store the desired mode for next session creation
                         (window as unknown as Record<string, unknown>).__nextChatMode = m;
+                        // Notify MetaAgentChat to update pendingMode
+                        window.dispatchEvent(new CustomEvent('meta-agent:mode-change', { detail: m }));
                         setNewChatOpen(false);
                       }}
                       className="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors"
@@ -316,11 +364,13 @@ function SessionListPanel() {
             <div
               key={sess.id}
               onClick={() => handleSelect(sess.id)}
-              onContextMenu={(e) => handleCtx(e, sess.id)}
+              onContextMenu={e => handleCtx(e, sess.id)}
               className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] transition-colors group cursor-pointer
-                ${isSelected
-                  ? 'bg-forge-600/15 border border-forge-500/30 text-slate-200'
-                  : 'border border-transparent hover:bg-slate-900/80 hover:border-slate-800 text-slate-400'}`}
+                ${
+                  isSelected
+                    ? 'bg-forge-600/15 border border-forge-500/30 text-slate-200'
+                    : 'border border-transparent hover:bg-slate-900/80 hover:border-slate-800 text-slate-400'
+                }`}
             >
               <div className="flex items-center gap-1.5 mb-0.5">
                 {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
@@ -339,7 +389,8 @@ function SessionListPanel() {
         {!loading && sessionList.length === 0 && (
           <div className="text-center py-8 text-slate-600 text-[10px]">
             <div className="text-lg mb-1.5">💬</div>
-            暂无历史会话<br />
+            暂无历史会话
+            <br />
             <span className="text-slate-700">在右侧对话即可自动创建</span>
           </div>
         )}
@@ -378,7 +429,9 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
       {msg.type === 'tool-result' && msg.tool ? (
         <div className="space-y-0.5">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+            <span
+              className={`text-[10px] font-mono px-1 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}
+            >
               {msg.tool.name}
             </span>
             <span className="text-[10px] text-slate-500 truncate max-w-[300px]">{msg.tool.args}</span>
@@ -398,7 +451,10 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
         </div>
       )}
       {isLong && !expanded && (
-        <div className="text-[9px] text-slate-600 mt-0.5 cursor-pointer hover:text-slate-400" onClick={() => setExpanded(true)}>
+        <div
+          className="text-[9px] text-slate-600 mt-0.5 cursor-pointer hover:text-slate-400"
+          onClick={() => setExpanded(true)}
+        >
           点击展开 ▸
         </div>
       )}
@@ -422,15 +478,62 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const chatKey = currentSessionId || currentProjectId || '_global';
   const messages = messagesMap.get(chatKey) || [];
 
+  // ── 模式管理 ──
+  // pendingMode: 无 session 时本地保持的待定模式 (React state → 即时刷新 UI)
+  const [pendingMode, setPendingMode] = useState<ChatMode>(
+    ((window as unknown as Record<string, unknown>).__nextChatMode as ChatMode) || 'work',
+  );
+
   // 当前 session 的模式
   const currentChatMode: ChatMode = useMemo(() => {
     if (currentSessionId) {
       const sess = sessionList.find(s => s.id === currentSessionId);
       if (sess?.chatMode) return sess.chatMode;
     }
-    // 新对话: 从临时变量获取
-    return ((window as unknown as Record<string, unknown>).__nextChatMode as ChatMode) || 'work';
-  }, [currentSessionId, sessionList]);
+    // 新对话: 使用本地 pendingMode (同步到 window.__nextChatMode)
+    return pendingMode;
+  }, [currentSessionId, sessionList, pendingMode]);
+
+  // 模式切换弹出框
+  const [modePopoverOpen, setModePopoverOpen] = useState(false);
+  const modePopoverRef = useRef<HTMLDivElement>(null);
+
+  // 关闭 popover 当点击外部
+  useEffect(() => {
+    if (!modePopoverOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (modePopoverRef.current && !modePopoverRef.current.contains(e.target as Node)) setModePopoverOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [modePopoverOpen]);
+
+  const handleModeSwitch = async (mode: ChatMode) => {
+    if (mode === currentChatMode) {
+      setModePopoverOpen(false);
+      return;
+    }
+    if (currentSessionId) {
+      // 已有 session → 更新 DB
+      try {
+        await window.automater.session.updateChatMode(currentSessionId, mode);
+        // 刷新 session 列表以反映新模式
+        const list = await window.automater.metaAgent.listChatSessions(currentProjectId);
+        if (list) {
+          useAppStore
+            .getState()
+            .setMetaSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
+        }
+      } catch {
+        /* silent */
+      }
+    } else {
+      // 无 session → 更新本地 pendingMode + window 临时变量
+      setPendingMode(mode);
+      (window as unknown as Record<string, unknown>).__nextChatMode = mode;
+    }
+    setModePopoverOpen(false);
+  };
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -440,23 +543,37 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // 思维过程 (工作消息)
-  const metaAgentWorkMsgsRaw = useAppStore(s => s.agentWorkMessages.get('meta-agent'));
+  const metaCK = currentProjectId ? currentProjectId + ':meta-agent' : 'meta-agent';
+  const metaAgentWorkMsgsRaw = useAppStore(s => s.agentWorkMessages.get(metaCK));
   const metaAgentWorkMsgs = metaAgentWorkMsgsRaw ?? EMPTY_WORK_MSGS;
   const sendingStartMsgIndexRef = useRef(0);
 
   // Load config for dynamic name + greeting
   useEffect(() => {
-    window.automater.metaAgent.getConfig().then((config: MetaAgentConfig) => {
-      if (config.name) setAgentName(config.name);
-      if (config.greeting) setGreetingText(config.greeting);
-    }).catch(() => {});
+    window.automater.metaAgent
+      .getConfig()
+      .then((config: MetaAgentConfig) => {
+        if (config.name) setAgentName(config.name);
+        if (config.greeting) setGreetingText(config.greeting);
+      })
+      .catch(() => {});
   }, [settingsOpen]);
+
+  // 监听 SessionListPanel 的新对话模式选择
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const mode = (e as CustomEvent).detail as ChatMode;
+      if (mode) setPendingMode(mode);
+    };
+    window.addEventListener('meta-agent:mode-change', handler);
+    return () => window.removeEventListener('meta-agent:mode-change', handler);
+  }, []);
 
   // 切换项目时恢复最近活跃会话
   useEffect(() => {
     // 不再无条件清除 sessionId — 仅当项目变化时才重置
     const prevProjectId = useAppStore.getState().currentMetaSessionId
-      ? undefined  // 有活跃 session 时不轻易清除
+      ? undefined // 有活跃 session 时不轻易清除
       : null;
 
     (async () => {
@@ -466,19 +583,26 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           const latest = sessions[0];
           if (latest.status === 'active') {
             // 如果已经是当前 session 且 zustand 中有消息，跳过重新加载
-            if (currentSessionId === latest.id && messagesMap.has(latest.id) && (messagesMap.get(latest.id)?.length || 0) > 0) {
+            if (
+              currentSessionId === latest.id &&
+              messagesMap.has(latest.id) &&
+              (messagesMap.get(latest.id)?.length || 0) > 0
+            ) {
               return;
             }
             const rows = await window.automater.metaAgent.loadMessages(latest.id);
             if (rows?.length) {
-              useAppStore.getState().setMetaAgentMessages(latest.id, rows.map(r => ({
-                id: r.id,
-                role: r.role as 'user' | 'assistant',
-                content: r.content,
-                timestamp: new Date(r.createdAt).getTime(),
-                triggeredWish: r.triggeredWish || undefined,
-                attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
-              })));
+              useAppStore.getState().setMetaAgentMessages(
+                latest.id,
+                rows.map(r => ({
+                  id: r.id,
+                  role: r.role as 'user' | 'assistant',
+                  content: r.content,
+                  timestamp: new Date(r.createdAt).getTime(),
+                  triggeredWish: r.triggeredWish || undefined,
+                  attachments: r.attachments?.map(a => ({ ...a, type: a.type as 'image' | 'file' })) || undefined,
+                })),
+              );
               setCurrentSessionId(latest.id);
               return;
             }
@@ -494,16 +618,19 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
   // Listen for daemon messages
   useEffect(() => {
-    const unsub = window.automater.on('meta-agent:daemon-message', (data: { type: string; reply: string; timestamp?: string }) => {
-      const typeLabel = data.type === 'heartbeat' ? '💓 心跳' : data.type === 'hook' ? '🪝 事件' : '⏰ 定时';
-      const daemonMsg: MetaAgentMessage = {
-        id: `daemon-${Date.now()}`,
-        role: 'assistant',
-        content: `[${typeLabel}] ${data.reply}`,
-        timestamp: Number(data.timestamp) || Date.now(),
-      };
-      addMessage(chatKey, daemonMsg);
-    });
+    const unsub = window.automater.on(
+      'meta-agent:daemon-message',
+      (data: { type: string; reply: string; timestamp?: string }) => {
+        const typeLabel = data.type === 'heartbeat' ? '💓 心跳' : data.type === 'hook' ? '🪝 事件' : '⏰ 定时';
+        const daemonMsg: MetaAgentMessage = {
+          id: `daemon-${Date.now()}`,
+          role: 'assistant',
+          content: `[${typeLabel}] ${data.reply}`,
+          timestamp: Number(data.timestamp) || Date.now(),
+        };
+        addMessage(chatKey, daemonMsg);
+      },
+    );
     return unsub;
   }, [chatKey, addMessage]);
 
@@ -518,13 +645,20 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     let sessionId = currentSessionId;
     if (!sessionId) {
       try {
-        const modeForNew = ((window as unknown as Record<string, unknown>).__nextChatMode as ChatMode) || 'work';
-        const newSession = await window.automater.session.create(currentProjectId, META_AGENT_ID, 'meta-agent', modeForNew);
+        const modeForNew = currentChatMode;
+        const newSession = await window.automater.session.create(
+          currentProjectId,
+          META_AGENT_ID,
+          'meta-agent',
+          modeForNew,
+        );
         sessionId = newSession.id;
         setCurrentSessionId(sessionId);
         // 清除临时变量
         delete (window as unknown as Record<string, unknown>).__nextChatMode;
-      } catch { sessionId = null; }
+      } catch {
+        sessionId = null;
+      }
     }
 
     const activeChatKey = sessionId || currentProjectId || '_global';
@@ -542,10 +676,15 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
     // 持久化 user 消息
     if (sessionId) {
-      window.automater.metaAgent.saveMessage({
-        id: userMsg.id, sessionId, projectId: currentProjectId,
-        role: 'user', content: userMsg.content,
-      }).catch(() => {});
+      window.automater.metaAgent
+        .saveMessage({
+          id: userMsg.id,
+          sessionId,
+          projectId: currentProjectId,
+          role: 'user',
+          content: userMsg.content,
+        })
+        .catch(() => {});
     }
 
     // Placeholder
@@ -568,7 +707,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         currentProjectId,
         userMsg.content,
         history,
-        undefined,  // attachments
+        undefined, // attachments
         currentChatMode,
       );
 
@@ -576,11 +715,16 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
       // 持久化 assistant 回复
       if (sessionId) {
-        window.automater.metaAgent.saveMessage({
-          id: assistantMsgId, sessionId, projectId: currentProjectId,
-          role: 'assistant', content: result.reply,
-          triggeredWish: result.wishCreated,
-        }).catch(() => {});
+        window.automater.metaAgent
+          .saveMessage({
+            id: assistantMsgId,
+            sessionId,
+            projectId: currentProjectId,
+            role: 'assistant',
+            content: result.reply,
+            triggeredWish: result.wishCreated,
+          })
+          .catch(() => {});
       }
 
       if (result.wishCreated) {
@@ -590,10 +734,15 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       const errContent = `❌ 请求失败: ${friendlyErrorMessage(err) || '未知错误'}。请检查 LLM 设置。`;
       updateLastAssistant(activeChatKey, errContent);
       if (sessionId) {
-        window.automater.metaAgent.saveMessage({
-          id: assistantMsgId, sessionId, projectId: currentProjectId,
-          role: 'assistant', content: errContent,
-        }).catch(() => {});
+        window.automater.metaAgent
+          .saveMessage({
+            id: assistantMsgId,
+            sessionId,
+            projectId: currentProjectId,
+            role: 'assistant',
+            content: errContent,
+          })
+          .catch(() => {});
       }
     } finally {
       setSending(false);
@@ -613,13 +762,59 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       <div className="flex-1 flex flex-col min-w-0">
         {!compact && (
           <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2 shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-forge-500 to-indigo-600 flex items-center justify-center text-sm">🤖</div>
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-forge-500 to-indigo-600 flex items-center justify-center text-sm">
+              🤖
+            </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-bold text-slate-200">{agentName}</div>
-              <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                <span className={`${modeInfo.color}`}>{modeInfo.icon} {modeInfo.label}模式</span>
-                <span className="text-slate-700">·</span>
-                <span>{modeInfo.desc}</span>
+              {/* ── 可点击的模式切换器 ── */}
+              <div className="relative" ref={modePopoverRef}>
+                <button
+                  onClick={() => setModePopoverOpen(!modePopoverOpen)}
+                  className="flex items-center gap-2 text-[10px] text-slate-500 hover:text-slate-300 transition-colors group"
+                >
+                  <span className={`${modeInfo.color}`}>
+                    {modeInfo.icon} {modeInfo.label}模式
+                  </span>
+                  <span className="text-slate-700">·</span>
+                  <span>{modeInfo.desc}</span>
+                  <svg
+                    className="w-3 h-3 text-slate-600 group-hover:text-slate-400 transition-colors"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M3 5l3 3 3-3" />
+                  </svg>
+                </button>
+                {modePopoverOpen && (
+                  <div className="absolute left-0 top-6 z-50 flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden">
+                    {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
+                      const mi = CHAT_MODE_INFO[m];
+                      const isActive = m === currentChatMode;
+                      return (
+                        <button
+                          key={m}
+                          onClick={() => handleModeSwitch(m)}
+                          className={`relative flex flex-col items-center gap-1 px-3.5 py-2.5 transition-all min-w-[56px]
+                            ${
+                              isActive
+                                ? 'bg-forge-600/20 border-b-2 border-forge-500'
+                                : 'hover:bg-slate-800/80 border-b-2 border-transparent'
+                            }`}
+                        >
+                          <span className="text-base">{mi.icon}</span>
+                          <span
+                            className={`text-[10px] font-medium whitespace-nowrap ${isActive ? 'text-forge-400' : 'text-slate-400'}`}
+                          >
+                            {mi.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
             <button
@@ -627,7 +822,17 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
               className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-forge-400 hover:bg-slate-800 transition-all"
               title="管家设置"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
@@ -640,28 +845,35 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           {displayMessages.map((msg, idx) => (
             <div key={msg.id}>
               <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-forge-600/20 text-forge-200 rounded-br-md whitespace-pre-wrap'
-                    : 'bg-slate-800/80 text-slate-300 rounded-bl-md'
-                }`}>
-                  {msg.role === 'assistant'
-                    ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                    : msg.content
-                  }
-                  {msg.triggeredWish && (
-                    <div className="mt-1 text-[10px] text-emerald-400">✅ 已创建需求</div>
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-forge-600/20 text-forge-200 rounded-br-md whitespace-pre-wrap'
+                      : 'bg-slate-800/80 text-slate-300 rounded-bl-md'
+                  }`}
+                >
+                  {msg.role === 'assistant' ? (
+                    <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  ) : (
+                    msg.content
                   )}
-                  <div className={`flex items-center gap-1.5 text-[9px] mt-1 ${msg.role === 'user' ? 'text-forge-400/50 justify-end' : 'text-slate-600'}`}>
-                    <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  {msg.triggeredWish && <div className="mt-1 text-[10px] text-emerald-400">✅ 已创建需求</div>}
+                  <div
+                    className={`flex items-center gap-1.5 text-[9px] mt-1 ${msg.role === 'user' ? 'text-forge-400/50 justify-end' : 'text-slate-600'}`}
+                  >
+                    <span>
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                     {msg.id !== 'greeting' && (
                       <button
-                        onClick={(e) => {
+                        onClick={e => {
                           e.stopPropagation();
                           navigator.clipboard.writeText(msg.id).catch(() => {});
                           const btn = e.currentTarget;
                           btn.textContent = '✓';
-                          setTimeout(() => { btn.textContent = `#${msg.id.slice(-6)}`; }, 1200);
+                          setTimeout(() => {
+                            btn.textContent = `#${msg.id.slice(-6)}`;
+                          }, 1200);
                         }}
                         className="font-mono opacity-40 hover:opacity-100 hover:text-forge-400 transition-opacity cursor-pointer"
                         title={`ID: ${msg.id} — 点击复制`}
@@ -674,20 +886,23 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
               </div>
 
               {/* 思维过程 / 工具调用 — 在最后一条 assistant 消息后内联展示 */}
-              {sending && idx === displayMessages.length - 1 && msg.role === 'assistant' && (() => {
-                const currentRoundWorkMsgs = metaAgentWorkMsgs.slice(sendingStartMsgIndexRef.current);
-                return currentRoundWorkMsgs.length > 0 ? (
-                  <div className="mt-2 space-y-1.5 pl-1 max-w-[85%]">
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mb-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>ReAct 工作流 · {currentRoundWorkMsgs.length} 条</span>
+              {sending &&
+                idx === displayMessages.length - 1 &&
+                msg.role === 'assistant' &&
+                (() => {
+                  const currentRoundWorkMsgs = metaAgentWorkMsgs.slice(sendingStartMsgIndexRef.current);
+                  return currentRoundWorkMsgs.length > 0 ? (
+                    <div className="mt-2 space-y-1.5 pl-1 max-w-[85%]">
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mb-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>ReAct 工作流 · {currentRoundWorkMsgs.length} 条</span>
+                      </div>
+                      {currentRoundWorkMsgs.map(wm => (
+                        <InlineWorkMessage key={wm.id} msg={wm} />
+                      ))}
                     </div>
-                    {currentRoundWorkMsgs.map(wm => (
-                      <InlineWorkMessage key={wm.id} msg={wm} />
-                    ))}
-                  </div>
-                ) : null;
-              })()}
+                  ) : null;
+                })()}
             </div>
           ))}
           <div ref={chatEndRef} />
@@ -699,7 +914,12 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               placeholder={compact ? '发消息...' : `${modeInfo.icon} ${modeInfo.label}模式 — 发消息...`}
               className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
               disabled={sending}
@@ -708,10 +928,10 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
               onClick={handleSend}
               disabled={!input.trim() || sending}
               className="px-3 py-2 rounded-xl bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
-              >
-                {sending ? '...' : '↑'}
-              </button>
-            </div>
+            >
+              {sending ? '...' : '↑'}
+            </button>
+          </div>
         </div>
 
         {settingsOpen && <MetaAgentSettings onClose={() => setSettingsOpen(false)} />}
@@ -763,11 +983,11 @@ interface FeatureItem {
 // ═══════════════════════════════════════
 
 const FEATURE_STATUS: Record<string, { text: string; color: string; bg: string; icon: string }> = {
-  todo:        { text: '待做',   color: 'text-slate-400',   bg: 'bg-slate-500/20',   icon: '📋' },
-  in_progress: { text: '开发中', color: 'text-blue-400',    bg: 'bg-blue-500/20',    icon: '🔨' },
-  reviewing:   { text: '审查中', color: 'text-amber-400',   bg: 'bg-amber-500/20',   icon: '🔍' },
-  passed:      { text: '已完成', color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: '✅' },
-  failed:      { text: '失败',   color: 'text-red-400',     bg: 'bg-red-500/20',     icon: '❌' },
+  todo: { text: '待做', color: 'text-slate-400', bg: 'bg-slate-500/20', icon: '📋' },
+  in_progress: { text: '开发中', color: 'text-blue-400', bg: 'bg-blue-500/20', icon: '🔨' },
+  reviewing: { text: '审查中', color: 'text-amber-400', bg: 'bg-amber-500/20', icon: '🔍' },
+  passed: { text: '已完成', color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: '✅' },
+  failed: { text: '失败', color: 'text-red-400', bg: 'bg-red-500/20', icon: '❌' },
 };
 
 // ═══════════════════════════════════════
@@ -803,24 +1023,24 @@ function WishDetailPanel({
       // 1) QA failure
       if (f.status === 'failed') {
         featureReasons.push(
-          f.pm_verdict_feedback
-            ? `QA 未通过: ${f.pm_verdict_feedback.slice(0, 120)}`
-            : 'QA 审查未通过'
+          f.pm_verdict_feedback ? `QA 未通过: ${f.pm_verdict_feedback.slice(0, 120)}` : 'QA 审查未通过',
         );
       }
 
       // 2) PM verdict rejection
       if (f.pm_verdict === 'rejected' || f.pm_verdict === 'fail') {
         featureReasons.push(
-          f.pm_verdict_feedback
-            ? `PM 验收拒绝: ${f.pm_verdict_feedback.slice(0, 120)}`
-            : 'PM 验收未通过'
+          f.pm_verdict_feedback ? `PM 验收拒绝: ${f.pm_verdict_feedback.slice(0, 120)}` : 'PM 验收未通过',
         );
       }
 
       // 3) Unmet dependencies
       let deps: string[] = [];
-      try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* ignore */ }
+      try {
+        deps = JSON.parse(f.depends_on || '[]');
+      } catch {
+        /* ignore */
+      }
       const unmetDeps = deps.filter(depId => {
         const dep = featureMap.get(depId);
         return !dep || dep.status !== 'passed';
@@ -874,7 +1094,12 @@ function WishDetailPanel({
         </div>
         <button
           onClick={async () => {
-            const { confirmed } = await confirm({ title: '删除需求', message: '确定要删除此需求吗？此操作无法撤销。', confirmText: '删除', danger: true });
+            const { confirmed } = await confirm({
+              title: '删除需求',
+              message: '确定要删除此需求吗？此操作无法撤销。',
+              confirmText: '删除',
+              danger: true,
+            });
             if (confirmed) onDelete(wish.id);
           }}
           className="text-[10px] text-red-500/60 hover:text-red-400 transition-colors"
@@ -923,7 +1148,9 @@ function WishDetailPanel({
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
-              <span className="text-xs text-slate-400 shrink-0">{passedCount}/{totalCount} ({progressPct}%)</span>
+              <span className="text-xs text-slate-400 shrink-0">
+                {passedCount}/{totalCount} ({progressPct}%)
+              </span>
             </div>
             <div className="flex gap-3 mt-2 text-[10px]">
               {Object.entries(FEATURE_STATUS).map(([key, s]) => {
@@ -973,9 +1200,17 @@ function WishDetailPanel({
                 const fst = FEATURE_STATUS[f.status] || FEATURE_STATUS.todo;
                 const isExpanded = expandedFeatureId === f.id;
                 let deps: string[] = [];
-                try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* ignore */ }
+                try {
+                  deps = JSON.parse(f.depends_on || '[]');
+                } catch {
+                  /* ignore */
+                }
                 let criteria: string[] = [];
-                try { criteria = JSON.parse(f.acceptance_criteria || '[]'); } catch { /* ignore */ }
+                try {
+                  criteria = JSON.parse(f.acceptance_criteria || '[]');
+                } catch {
+                  /* ignore */
+                }
 
                 return (
                   <div key={f.id} className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
@@ -989,9 +1224,17 @@ function WishDetailPanel({
                         {fst.icon} {fst.text}
                       </span>
                       <span className="text-xs text-slate-300 truncate flex-1">{f.title || f.description}</span>
-                      <span className={`text-[10px] px-1 py-0.5 rounded ${
-                        f.priority === 0 ? 'bg-red-500/20 text-red-400' : f.priority === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'
-                      }`}>P{f.priority}</span>
+                      <span
+                        className={`text-[10px] px-1 py-0.5 rounded ${
+                          f.priority === 0
+                            ? 'bg-red-500/20 text-red-400'
+                            : f.priority === 1
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-slate-700 text-slate-500'
+                        }`}
+                      >
+                        P{f.priority}
+                      </span>
                       {f.locked_by && <span className="text-[10px] text-forge-400">🔨 {f.locked_by}</span>}
                     </button>
 
@@ -1022,10 +1265,14 @@ function WishDetailPanel({
                                 const dep = features.find(df => df.id === depId);
                                 const depDone = dep?.status === 'passed';
                                 return (
-                                  <span key={depId} className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                    depDone ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                                  }`}>
-                                    {depDone ? '✅' : '⏳'} {depId}{dep ? ` · ${dep.title.slice(0, 15)}` : ''}
+                                  <span
+                                    key={depId}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                      depDone ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    {depDone ? '✅' : '⏳'} {depId}
+                                    {dep ? ` · ${dep.title.slice(0, 15)}` : ''}
                                   </span>
                                 );
                               })}
@@ -1050,16 +1297,16 @@ function WishDetailPanel({
 
                         {/* PM verdict */}
                         {f.pm_verdict && (
-                          <div className={`rounded-md px-2.5 py-1.5 text-[11px] ${
-                            f.pm_verdict === 'pass' || f.pm_verdict === 'approved'
-                              ? 'bg-emerald-500/10 text-emerald-400'
-                              : 'bg-red-500/10 text-red-400'
-                          }`}>
+                          <div
+                            className={`rounded-md px-2.5 py-1.5 text-[11px] ${
+                              f.pm_verdict === 'pass' || f.pm_verdict === 'approved'
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : 'bg-red-500/10 text-red-400'
+                            }`}
+                          >
                             <span className="font-medium">PM 验收: {f.pm_verdict}</span>
                             {f.pm_verdict_score != null && <span className="ml-2">({f.pm_verdict_score}分)</span>}
-                            {f.pm_verdict_feedback && (
-                              <p className="mt-0.5 opacity-80">{f.pm_verdict_feedback}</p>
-                            )}
+                            {f.pm_verdict_feedback && <p className="mt-0.5 opacity-80">{f.pm_verdict_feedback}</p>}
                           </div>
                         )}
 
@@ -1089,7 +1336,8 @@ function WishDetailPanel({
         {totalCount === 0 && wish.status !== 'pending' && wish.status !== 'rejected' && (
           <div className="text-center py-8 text-slate-600 text-xs">
             <div className="text-2xl mb-2">📦</div>
-            暂无关联 Feature<br />
+            暂无关联 Feature
+            <br />
             可能还在 PM 分析阶段或尚未进入开发
           </div>
         )}
@@ -1133,15 +1381,24 @@ export function WishPage() {
     setFeatures((data || []) as FeatureItem[]);
   }, [currentProjectId]);
 
-  useEffect(() => { loadWishes(); }, [loadWishes]);
-  useEffect(() => { loadFeatures(); }, [loadFeatures]);
   useEffect(() => {
-    const t = setInterval(() => { loadWishes(); loadFeatures(); }, 5000);
+    loadWishes();
+  }, [loadWishes]);
+  useEffect(() => {
+    loadFeatures();
+  }, [loadFeatures]);
+  useEffect(() => {
+    const t = setInterval(() => {
+      loadWishes();
+      loadFeatures();
+    }, 5000);
     return () => clearInterval(t);
   }, [loadWishes, loadFeatures]);
   // 元Agent创建需求后刷新列表
   useEffect(() => {
-    const handler = () => { loadWishes(); };
+    const handler = () => {
+      loadWishes();
+    };
     window.addEventListener('meta-agent:wish-created', handler);
     return () => window.removeEventListener('meta-agent:wish-created', handler);
   }, [loadWishes]);
@@ -1201,7 +1458,10 @@ export function WishPage() {
         <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-200">需求管理</h2>
           <button
-            onClick={() => { setShowNewWish(true); setSelectedWishId(null); }}
+            onClick={() => {
+              setShowNewWish(true);
+              setSelectedWishId(null);
+            }}
             className="text-[10px] px-2 py-1 rounded-lg bg-forge-600 hover:bg-forge-500 text-white transition-colors"
             title="新需求"
           >
@@ -1225,16 +1485,24 @@ export function WishPage() {
             return (
               <button
                 key={w.id}
-                onClick={() => { setSelectedWishId(w.id); setShowNewWish(false); setShowDetail(true); }}
+                onClick={() => {
+                  setSelectedWishId(w.id);
+                  setShowNewWish(false);
+                  setShowDetail(true);
+                }}
                 className={`w-full text-left px-4 py-3 border-b border-slate-800/50 transition-colors ${
-                  selectedWishId === w.id ? 'bg-forge-600/10 border-l-2 border-l-forge-500' : 'hover:bg-slate-800/50 border-l-2 border-l-transparent'
+                  selectedWishId === w.id
+                    ? 'bg-forge-600/10 border-l-2 border-l-forge-500'
+                    : 'hover:bg-slate-800/50 border-l-2 border-l-transparent'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs">{st.icon}</span>
                   <span className={`text-[10px] font-medium ${st.color}`}>{st.text}</span>
                   {hasDocs && <span className="text-[10px] text-slate-600">📄</span>}
-                  <span className="text-[10px] text-slate-600 ml-auto">{new Date(w.created_at).toLocaleDateString()}</span>
+                  <span className="text-[10px] text-slate-600 ml-auto">
+                    {new Date(w.created_at).toLocaleDateString()}
+                  </span>
                 </div>
                 <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">{w.content}</p>
               </button>
@@ -1256,13 +1524,20 @@ export function WishPage() {
               placeholder="详细描述你的需求..."
               rows={8}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 placeholder-slate-600 resize-y focus:outline-none focus:border-forge-500 transition-colors text-sm leading-relaxed"
-              onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSubmitWish(); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && e.ctrlKey) handleSubmitWish();
+              }}
               autoFocus
             />
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-slate-600">{newWish.length} 字符 · Ctrl+Enter 提交</span>
               <div className="flex gap-2">
-                <button onClick={() => setShowNewWish(false)} className="px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+                <button
+                  onClick={() => setShowNewWish(false)}
+                  className="px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  取消
+                </button>
                 <button
                   onClick={handleSubmitWish}
                   disabled={!newWish.trim() || submitting}

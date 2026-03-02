@@ -78,7 +78,8 @@ function isRipgrepAvailable(): boolean {
         }
       }
     }
-  } catch { /* silent: ripgrep执行失败,降级搜索 */
+  } catch {
+    /* silent: ripgrep执行失败,降级搜索 */
     _rgAvailable = false;
   }
   return _rgAvailable;
@@ -99,14 +100,14 @@ export function codeSearch(
   workspacePath: string,
   pattern: string,
   options: {
-    include?: string[];          // 文件过滤: ['*.ts', '*.py']
-    exclude?: string[];          // 排除模式: ['*.test.ts']
-    context?: number;            // 上下文行数，默认 2
-    maxResults?: number;         // 最多返回结果数，默认 50
-    caseSensitive?: boolean;     // 区分大小写，默认 false
-    respectGitignore?: boolean;  // 遵守 .gitignore，默认 true
-    fixedString?: boolean;       // 固定字符串搜索（非正则），默认 false
-    wholeWord?: boolean;         // 全词匹配，默认 false
+    include?: string[]; // 文件过滤: ['*.ts', '*.py']
+    exclude?: string[]; // 排除模式: ['*.test.ts']
+    context?: number; // 上下文行数，默认 2
+    maxResults?: number; // 最多返回结果数，默认 50
+    caseSensitive?: boolean; // 区分大小写，默认 false
+    respectGitignore?: boolean; // 遵守 .gitignore，默认 true
+    fixedString?: boolean; // 固定字符串搜索（非正则），默认 false
+    wholeWord?: boolean; // 全词匹配，默认 false
   } = {},
 ): SearchResult {
   const start = Date.now();
@@ -135,10 +136,13 @@ function ripgrepSearch(
   startTime: number,
 ): SearchResult {
   const args: string[] = [
-    '--json',                         // JSON 结构化输出
-    '-C', String(options.context),    // 上下文行
-    '-m', '5',                        // 每文件最多5行匹配
-    '--max-filesize', '1M',           // 跳过 >1MB 文件
+    '--json', // JSON 结构化输出
+    '-C',
+    String(options.context), // 上下文行
+    '-m',
+    '5', // 每文件最多5行匹配
+    '--max-filesize',
+    '1M', // 跳过 >1MB 文件
   ];
 
   if (!options.caseSensitive) args.push('-i');
@@ -182,7 +186,8 @@ function ripgrepSearch(
 
     const stdout = result.stdout || '';
     return parseRipgrepJson(stdout, options.maxResults, startTime);
-  } catch { /* silent: ripgrep JSON解析失败 */
+  } catch {
+    /* silent: ripgrep JSON解析失败 */
     return fallbackSearch(workspacePath, pattern, options, startTime);
   }
 }
@@ -219,7 +224,11 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
 
   for (const raw of lines) {
     let parsed: RgJsonLine;
-    try { parsed = JSON.parse(raw); } catch { continue; }
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
 
     if (parsed.type === 'match' && parsed.data) {
       totalMatches++;
@@ -241,7 +250,6 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
       pendingByFile.get(match.file)!.push(match);
       currentFile = match.file;
       lastMatchIdx = pendingByFile.get(match.file)!.length - 1;
-
     } else if (parsed.type === 'context' && parsed.data && totalMatches <= maxResults) {
       const file = (parsed.data.path?.text || '').replace(/\\/g, '/');
       const lineNum = parsed.data.line_number || 0;
@@ -304,7 +312,8 @@ function fallbackSearch(
       engine: 'fallback',
       durationMs: Date.now() - startTime,
     };
-  } catch { /* silent: grep搜索异常 */
+  } catch {
+    /* silent: grep搜索异常 */
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
 }
@@ -336,9 +345,10 @@ function buildFallbackCmd(
   if (process.platform === 'win32') {
     const escapedPattern = escapePowerShellSingleQuote(safePattern);
     // include globs 也需要转义
-    const includeFilter = options.include && options.include.length > 0
-      ? ` -Include ${options.include.map(i => `'${escapePowerShellSingleQuote(i)}'`).join(',')}`
-      : '';
+    const includeFilter =
+      options.include && options.include.length > 0
+        ? ` -Include ${options.include.map(i => `'${escapePowerShellSingleQuote(i)}'`).join(',')}`
+        : '';
     const caseFlag = options.caseSensitive ? '' : ' -CaseSensitive:$false';
     const ctx = Math.min(Math.max(0, options.context), 10); // clamp context 0-10
     const maxRes = Math.min(Math.max(1, options.maxResults), 200); // clamp results 1-200
@@ -347,9 +357,10 @@ function buildFallbackCmd(
     return `powershell -NoProfile -Command "Get-ChildItem -Recurse -File${includeFilter} | Where-Object { $_.FullName -notmatch 'node_modules|.git|dist|__pycache__|.next' } | Select-String -Pattern '${escapedPattern}'${caseFlag} -Context ${ctx},${ctx} | Select-Object -First ${maxRes} | Out-String -Width 300"`;
   } else {
     const escapedPattern = escapeShellDoubleQuote(safePattern);
-    const includeFlag = options.include && options.include.length > 0
-      ? options.include.map(i => `--include="${escapeShellDoubleQuote(i)}"`).join(' ')
-      : '';
+    const includeFlag =
+      options.include && options.include.length > 0
+        ? options.include.map(i => `--include="${escapeShellDoubleQuote(i)}"`).join(' ')
+        : '';
     const caseFlag = options.caseSensitive ? '' : '-i';
     const ctx = Math.min(Math.max(0, options.context), 10);
     const maxRes = Math.min(Math.max(1, options.maxResults), 200);
@@ -388,7 +399,8 @@ async function fallbackSearchAsync(
       engine: 'fallback',
       durationMs: Date.now() - startTime,
     };
-  } catch { /* silent: grep搜索异常 */
+  } catch {
+    /* silent: grep搜索异常 */
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
 }
@@ -432,7 +444,11 @@ function parseFallbackOutput(raw: string, workspacePath: string, maxResults: num
     const m = line.match(/^(?:\s*>?\s*)?(.+?):(\d+):(.*)$/);
     if (!m) continue;
 
-    let filepath = m[1].trim().replace(workspacePath, '').replace(/^[\\/]+/, '').replace(/\\/g, '/');
+    const filepath = m[1]
+      .trim()
+      .replace(workspacePath, '')
+      .replace(/^[\\/]+/, '')
+      .replace(/\\/g, '/');
     matches.push({
       file: filepath,
       line: parseInt(m[2], 10),
@@ -478,9 +494,7 @@ export function formatSearchResult(result: SearchResult): string {
     }
   }
 
-  const footer = [
-    `\n[${result.engine}] ${result.totalMatches} 匹配, ${byFile.size} 文件, ${result.durationMs}ms`,
-  ];
+  const footer = [`\n[${result.engine}] ${result.totalMatches} 匹配, ${byFile.size} 文件, ${result.durationMs}ms`];
   if (result.truncated) footer.push(`(结果已截断至 ${result.matches.length} 条)`);
 
   return parts.join('\n') + '\n' + footer.join(' ');
@@ -507,9 +521,11 @@ export function codeSearchFiles(
     try {
       const args = [
         '--files',
-        '-g', pattern,
-        '--max-count', String(maxResults + 1),
-        '.',  // 显式指定搜索目录，防止 rg 从 stdin 读取
+        '-g',
+        pattern,
+        '--max-count',
+        String(maxResults + 1),
+        '.', // 显式指定搜索目录，防止 rg 从 stdin 读取
       ];
       if (options.respectGitignore === false) args.push('--no-ignore');
 
@@ -523,7 +539,9 @@ export function codeSearchFiles(
         timeout: 10000,
       });
 
-      const files = (result.stdout || '').trim().split('\n')
+      const files = (result.stdout || '')
+        .trim()
+        .split('\n')
         .filter(f => f.trim())
         .map(f => f.replace(/\\/g, '/'));
 
@@ -532,7 +550,8 @@ export function codeSearchFiles(
         totalFound: files.length,
         truncated: files.length > maxResults,
       };
-    } catch { /* silent: 文件列表搜索异常 */
+    } catch {
+      /* silent: 文件列表搜索异常 */
       // fallthrough to fallback
     }
   }
@@ -557,7 +576,11 @@ function fallbackFileSearch(workspacePath: string, pattern: string, maxResults: 
   function walk(dir: string, relative: string): void {
     if (results.length >= maxResults) return;
     let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
 
     for (const entry of entries) {
       if (results.length >= maxResults) return;
@@ -594,9 +617,9 @@ export function readManyFiles(
   workspacePath: string,
   patterns: string[],
   options: {
-    maxFiles?: number;          // 最多读取文件数，默认 30
-    maxLinesPerFile?: number;   // 每文件最多行数，默认 200
-    maxTotalChars?: number;     // 总字符数上限，默认 80000
+    maxFiles?: number; // 最多读取文件数，默认 30
+    maxLinesPerFile?: number; // 每文件最多行数，默认 200
+    maxTotalChars?: number; // 总字符数上限，默认 80000
   } = {},
 ): ReadManyResult {
   const maxFiles = options.maxFiles ?? 30;
@@ -624,7 +647,10 @@ export function readManyFiles(
   let totalChars = 0;
 
   for (const relPath of allFiles) {
-    if (result.files.length >= maxFiles) { result.truncated = true; break; }
+    if (result.files.length >= maxFiles) {
+      result.truncated = true;
+      break;
+    }
 
     const absPath = path.join(workspacePath, relPath);
     try {
@@ -637,9 +663,7 @@ export function readManyFiles(
       const raw = fs.readFileSync(absPath, 'utf-8');
       const lines = raw.split('\n');
       const truncatedLines = lines.slice(0, maxLinesPerFile);
-      const content = truncatedLines
-        .map((line, i) => `${String(i + 1).padStart(4)}| ${line}`)
-        .join('\n');
+      const content = truncatedLines.map((line, i) => `${String(i + 1).padStart(4)}| ${line}`).join('\n');
 
       const linesTruncated = lines.length > maxLinesPerFile;
       const suffix = linesTruncated ? `\n... [截断: 共 ${lines.length} 行, 仅显示 ${maxLinesPerFile} 行]` : '';
@@ -658,8 +682,9 @@ export function readManyFiles(
       });
       result.totalLines += lines.length;
       totalChars += fileContent.length;
-
-    } catch { continue; }
+    } catch {
+      continue;
+    }
   }
 
   return result;
@@ -668,12 +693,38 @@ export function readManyFiles(
 function isBinaryFile(absPath: string): boolean {
   const ext = path.extname(absPath).toLowerCase();
   const binaryExts = new Set([
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
-    '.pdf', '.zip', '.tar', '.gz', '.7z', '.rar',
-    '.exe', '.dll', '.so', '.dylib', '.wasm',
-    '.mp3', '.mp4', '.avi', '.mov', '.wav',
-    '.ttf', '.woff', '.woff2', '.eot', '.otf',
-    '.sqlite', '.db', '.lock',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.bmp',
+    '.ico',
+    '.webp',
+    '.svg',
+    '.pdf',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.7z',
+    '.rar',
+    '.exe',
+    '.dll',
+    '.so',
+    '.dylib',
+    '.wasm',
+    '.mp3',
+    '.mp4',
+    '.avi',
+    '.mov',
+    '.wav',
+    '.ttf',
+    '.woff',
+    '.woff2',
+    '.eot',
+    '.otf',
+    '.sqlite',
+    '.db',
+    '.lock',
   ]);
   return binaryExts.has(ext);
 }
@@ -705,7 +756,7 @@ export function formatReadManyResult(result: ReadManyResult): string {
  */
 export async function streamReadFile(
   filePath: string,
-  offset: number = 1,    // 从第几行开始（1-based）
+  offset: number = 1, // 从第几行开始（1-based）
   limit: number = 300,
 ): Promise<{
   content: string;
@@ -730,7 +781,8 @@ export async function streamReadFile(
     const allLines = raw.split('\n');
     const start = Math.max(0, offset - 1);
     const end = Math.min(start + limit, allLines.length);
-    const numbered = allLines.slice(start, end)
+    const numbered = allLines
+      .slice(start, end)
       .map((line, i) => `${String(start + i + 1).padStart(6)}| ${line}`)
       .join('\n');
 
@@ -754,7 +806,7 @@ export async function streamReadFile(
     let collected = 0;
     const lines: string[] = [];
 
-    rl.on('line', (line) => {
+    rl.on('line', line => {
       currentLine++;
       if (currentLine > startIdx && collected < limit) {
         lines.push(`${String(currentLine).padStart(6)}| ${line}`);
@@ -817,8 +869,8 @@ export async function queryCodeGraph(
   workspacePath: string,
   query: {
     type: 'depends_on' | 'depended_by' | 'related' | 'summary';
-    file?: string;          // 目标文件 (相对路径)
-    hops?: number;          // 遍历跳数，默认 2
+    file?: string; // 目标文件 (相对路径)
+    hops?: number; // 遍历跳数，默认 2
   },
 ): Promise<string> {
   const graph = await getOrBuildGraph(workspacePath);
@@ -860,7 +912,7 @@ export async function queryCodeGraph(
 
 async function getOrBuildGraph(workspacePath: string): Promise<CodeGraph> {
   const now = Date.now();
-  if (_cachedGraph && _cachedGraphWorkspace === workspacePath && (now - _cachedGraphTime) < GRAPH_CACHE_TTL) {
+  if (_cachedGraph && _cachedGraphWorkspace === workspacePath && now - _cachedGraphTime < GRAPH_CACHE_TTL) {
     return _cachedGraph;
   }
   _cachedGraph = await buildCodeGraph(workspacePath);

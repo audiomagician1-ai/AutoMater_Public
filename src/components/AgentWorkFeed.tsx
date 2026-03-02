@@ -16,16 +16,17 @@ const EMPTY_MSGS: readonly AgentWorkMessage[] = [];
 // Constants
 // ═══════════════════════════════════════
 
-export const MSG_STYLES: Record<AgentWorkMessage['type'], { icon: string; border: string; bg: string; label: string }> = {
-  think:       { icon: '💭', border: 'border-l-blue-500',    bg: 'bg-blue-500/5',    label: '思考' },
-  'tool-call': { icon: '🔧', border: 'border-l-amber-500',  bg: 'bg-amber-500/5',   label: '工具' },
-  'tool-result':{ icon: '📦', border: 'border-l-emerald-500',bg: 'bg-emerald-500/5', label: '结果' },
-  output:      { icon: '✅', border: 'border-l-green-500',   bg: 'bg-green-500/5',   label: '输出' },
-  status:      { icon: '📌', border: 'border-l-slate-500',   bg: 'bg-slate-500/5',   label: '状态' },
-  'sub-agent': { icon: '🔬', border: 'border-l-violet-500',  bg: 'bg-violet-500/5',  label: '子Agent' },
-  error:       { icon: '⚠️', border: 'border-l-red-500',     bg: 'bg-red-500/5',     label: '错误' },
-  plan:        { icon: '📋', border: 'border-l-orange-500',  bg: 'bg-orange-500/5',  label: '计划' },
-};
+export const MSG_STYLES: Record<AgentWorkMessage['type'], { icon: string; border: string; bg: string; label: string }> =
+  {
+    think: { icon: '💭', border: 'border-l-blue-500', bg: 'bg-blue-500/5', label: '思考' },
+    'tool-call': { icon: '🔧', border: 'border-l-amber-500', bg: 'bg-amber-500/5', label: '工具' },
+    'tool-result': { icon: '📦', border: 'border-l-emerald-500', bg: 'bg-emerald-500/5', label: '结果' },
+    output: { icon: '✅', border: 'border-l-green-500', bg: 'bg-green-500/5', label: '输出' },
+    status: { icon: '📌', border: 'border-l-slate-500', bg: 'bg-slate-500/5', label: '状态' },
+    'sub-agent': { icon: '🔬', border: 'border-l-violet-500', bg: 'bg-violet-500/5', label: '子Agent' },
+    error: { icon: '⚠️', border: 'border-l-red-500', bg: 'bg-red-500/5', label: '错误' },
+    plan: { icon: '📋', border: 'border-l-orange-500', bg: 'bg-orange-500/5', label: '计划' },
+  };
 
 const ROLE_INFO: Record<string, { icon: string; title: string }> = {
   pm: { icon: '🧠', title: '产品经理' },
@@ -55,9 +56,11 @@ export interface AgentWorkFeedProps {
 }
 
 export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWorkFeedProps) {
-  const messagesRaw = useAppStore(s => s.agentWorkMessages.get(agentId));
+  const currentProjectId = useAppStore(s => s.currentProjectId);
+  const compKey = currentProjectId ? `${currentProjectId}:${agentId}` : agentId;
+  const messagesRaw = useAppStore(s => s.agentWorkMessages.get(compKey));
   const messages = messagesRaw ?? EMPTY_MSGS;
-  const reactState = useAppStore(s => s.agentReactStates.get(agentId));
+  const reactState = useAppStore(s => s.agentReactStates.get(compKey));
   const activeStream = useAppStore(s => s.activeStreams.get(agentId));
   const feedRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -96,9 +99,15 @@ export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWork
           </div>
           {latestIter && (
             <div className="flex gap-3 text-xs text-slate-400">
-              <span>迭代 <span className="text-slate-200 font-mono">{latestIter.iteration}</span></span>
-              <span>Token <span className="text-slate-200 font-mono">{formatTokens(latestIter.totalContextTokens)}</span></span>
-              <span>成本 <span className="text-emerald-400 font-mono">${latestIter.cumulativeCost.toFixed(4)}</span></span>
+              <span>
+                迭代 <span className="text-slate-200 font-mono">{latestIter.iteration}</span>
+              </span>
+              <span>
+                Token <span className="text-slate-200 font-mono">{formatTokens(latestIter.totalContextTokens)}</span>
+              </span>
+              <span>
+                成本 <span className="text-emerald-400 font-mono">${latestIter.cumulativeCost.toFixed(4)}</span>
+              </span>
             </div>
           )}
         </div>
@@ -130,7 +139,7 @@ export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWork
             <div
               key={msg.id}
               className={`border-l-2 ${style.border} ${style.bg} rounded-r-lg px-3 py-2 transition-colors hover:brightness-110`}
-              onClick={() => isLong ? setExpandedMsgId(isExpanded ? null : msg.id) : undefined}
+              onClick={() => (isLong ? setExpandedMsgId(isExpanded ? null : msg.id) : undefined)}
             >
               <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
                 <span>{style.icon}</span>
@@ -143,17 +152,23 @@ export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWork
               {msg.type === 'tool-result' && msg.tool ? (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}
+                    >
                       {msg.tool.name}
                     </span>
                     <span className="text-xs text-slate-500 truncate">{msg.tool.args}</span>
                   </div>
                   {msg.tool.outputPreview && (
-                    <pre className="text-[11px] text-slate-400 font-mono whitespace-pre-wrap break-all leading-relaxed">{msg.tool.outputPreview}</pre>
+                    <pre className="text-[11px] text-slate-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
+                      {msg.tool.outputPreview}
+                    </pre>
                   )}
                 </div>
               ) : (
-                <div className={`text-sm text-slate-300 leading-relaxed ${isLong && !isExpanded ? 'line-clamp-3 cursor-pointer' : 'whitespace-pre-wrap break-all'}`}>
+                <div
+                  className={`text-sm text-slate-300 leading-relaxed ${isLong && !isExpanded ? 'line-clamp-3 cursor-pointer' : 'whitespace-pre-wrap break-all'}`}
+                >
                   {msg.content}
                 </div>
               )}
@@ -184,15 +199,31 @@ export function AgentWorkFeed({ agentId, compact = false, maxHeight }: AgentWork
       {!compact && latestIter && (
         <div className="shrink-0 px-4 py-2 border-t border-slate-800 flex items-center gap-4 text-[11px] text-slate-500">
           <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div className={`h-full rounded-full transition-all ${
-              latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000) > 0.8 ? 'bg-amber-500' : 'bg-emerald-500'
-            }`} style={{ width: `${Math.min((latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000)) * 100, 100)}%` }} />
+            <div
+              className={`h-full rounded-full transition-all ${
+                latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000) > 0.8
+                  ? 'bg-amber-500'
+                  : 'bg-emerald-500'
+              }`}
+              style={{
+                width: `${Math.min((latestIter.totalContextTokens / (reactState?.maxContextWindow || 128000)) * 100, 100)}%`,
+              }}
+            />
           </div>
-          <span>ctx {formatTokens(latestIter.totalContextTokens)} / {formatTokens(reactState?.maxContextWindow || 128000)}</span>
+          <span>
+            ctx {formatTokens(latestIter.totalContextTokens)} / {formatTokens(reactState?.maxContextWindow || 128000)}
+          </span>
           <span>{messages.length} 条消息</span>
           {!autoScroll && (
-            <button onClick={() => { setAutoScroll(true); if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }}
-              className="text-forge-400 hover:text-forge-300 transition-colors">↓ 回到最新</button>
+            <button
+              onClick={() => {
+                setAutoScroll(true);
+                if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+              }}
+              className="text-forge-400 hover:text-forge-300 transition-colors"
+            >
+              ↓ 回到最新
+            </button>
           )}
         </div>
       )}

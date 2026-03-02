@@ -33,7 +33,20 @@ export interface ToolResult {
   success: boolean;
   output: string;
   /** 操作类型 (用于 UI 展示) */
-  action?: 'read' | 'write' | 'edit' | 'search' | 'shell' | 'git' | 'github' | 'web' | 'think' | 'plan' | 'computer' | 'complete' | 'blocked';
+  action?:
+    | 'read'
+    | 'write'
+    | 'edit'
+    | 'search'
+    | 'shell'
+    | 'git'
+    | 'github'
+    | 'web'
+    | 'think'
+    | 'plan'
+    | 'computer'
+    | 'complete'
+    | 'blocked';
   /** 附带图片 Base64 (截图/浏览器截图等) */
   _imageBase64?: string;
 }
@@ -64,7 +77,6 @@ export interface ToolContext {
   /** v16.0: 项目级权限开关 */
   permissions?: AgentPermissions;
 }
-
 
 // ═══════════════════════════════════════
 // Formatting & Filtering
@@ -108,9 +120,7 @@ export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): Ope
   }
 
   // 1. 内置工具
-  const builtinTools = TOOL_DEFINITIONS
-    .filter(t => allowed.has(t.name))
-    .map(toOpenAITool);
+  const builtinTools = TOOL_DEFINITIONS.filter(t => allowed.has(t.name)).map(toOpenAITool);
 
   // 2. MCP 工具 (延迟导入避免循环依赖)
   const mcpTools = getExternalMcpTools(role);
@@ -123,12 +133,10 @@ export function getToolsForRole(role: AgentRole, gitMode: string = 'local'): Ope
 
 /** 返回所有工具 (OpenAI format)，可选按 gitMode 过滤 GitHub 工具 */
 export function getToolsForLLM(gitMode: string = 'local'): OpenAIFunctionTool[] {
-  const builtinTools = TOOL_DEFINITIONS
-    .filter(t => {
-      if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
-      return true;
-    })
-    .map(toOpenAITool);
+  const builtinTools = TOOL_DEFINITIONS.filter(t => {
+    if (gitMode !== 'github' && t.name.startsWith('github_')) return false;
+    return true;
+  }).map(toOpenAITool);
 
   const mcpTools = getExternalMcpTools();
   const skillTools = getExternalSkillTools();
@@ -142,16 +150,19 @@ export function getToolsForLLM(gitMode: string = 'local'): OpenAIFunctionTool[] 
 function getExternalMcpTools(role?: string): OpenAIFunctionTool[] {
   try {
     // Lazy import to avoid circular dependency
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
     const allTools = mcpManager.getAllTools();
 
-    return allTools.map(t => toOpenAITool({
-      name: `mcp_${t.serverId}_${t.name}`,
-      description: `[MCP] ${t.description}`,
-      parameters: t.inputSchema,
-    }));
-  } catch { /* silent: MCP tools load failed */
+    return allTools.map(t =>
+      toOpenAITool({
+        name: `mcp_${t.serverId}_${t.name}`,
+        description: `[MCP] ${t.description}`,
+        parameters: t.inputSchema,
+      }),
+    );
+  } catch {
+    /* silent: MCP tools load failed */
     return [];
   }
 }
@@ -162,25 +173,25 @@ function getExternalMcpTools(role?: string): OpenAIFunctionTool[] {
 function getExternalSkillTools(role?: string): OpenAIFunctionTool[] {
   try {
     // Lazy import to avoid circular dependency
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
-    const defs = role
-      ? skillManager.getDefinitionsForRole(role)
-      : skillManager.getAllDefinitions();
+    const defs = role ? skillManager.getDefinitionsForRole(role) : skillManager.getAllDefinitions();
     return defs.map(toOpenAITool);
-  } catch { /* silent: skill definitions load failed */
+  } catch {
+    /* silent: skill definitions load failed */
     return [];
   }
 }
 
 /** 解析 LLM 返回的 tool_calls (OpenAI 格式 → ToolCall[]) */
-export function parseToolCalls(message: { tool_calls?: Array<{ function: { name: string; arguments: string | Record<string, unknown> } }> }): ToolCall[] {
+export function parseToolCalls(message: {
+  tool_calls?: Array<{ function: { name: string; arguments: string | Record<string, unknown> } }>;
+}): ToolCall[] {
   if (!message?.tool_calls) return [];
-  return message.tool_calls.map((tc) => ({
+  return message.tool_calls.map(tc => ({
     name: tc.function.name,
-    arguments: typeof tc.function.arguments === 'string'
-      ? safeParseToolArgs(tc.function.arguments)
-      : tc.function.arguments,
+    arguments:
+      typeof tc.function.arguments === 'string' ? safeParseToolArgs(tc.function.arguments) : tc.function.arguments,
   }));
 }
 
@@ -189,22 +200,41 @@ export function isAsyncTool(toolName: string): boolean {
   // MCP 和 Skill 工具始终异步执行
   if (toolName.startsWith('mcp_') || toolName.startsWith('skill_')) return true;
 
-  return toolName.startsWith('github_')
-    || toolName.startsWith('browser_')
-    || toolName.startsWith('sandbox_')
-    || toolName.startsWith('git_')
-    || toolName.startsWith('deploy_')
-    || toolName.startsWith('supabase_')
-    || toolName.startsWith('cloudflare_')
-    || ['web_search', 'fetch_url', 'http_request',
-        'web_search_boost', 'deep_research', 'run_blackbox_tests',
-        'analyze_image', 'compare_screenshots', 'visual_assert',
-        'spawn_agent', 'spawn_parallel', 'spawn_researcher',
-        'read_file', 'read_many_files', 'code_graph_query',  // v17.0: async file ops
-        'generate_image', 'edit_image',
-        'glob_files', 'run_command', 'run_test', 'run_lint', // v17.1: execSync → async migration
-        'wait_for_process', // v19.0: 阻塞等待后台进程完成
-        'search_files', 'code_search', // v17.1: codeSearch fallback async
-        'download_file', 'search_images',  // v19.0
-       ].includes(toolName);
+  return (
+    toolName.startsWith('github_') ||
+    toolName.startsWith('browser_') ||
+    toolName.startsWith('sandbox_') ||
+    toolName.startsWith('git_') ||
+    toolName.startsWith('deploy_') ||
+    toolName.startsWith('supabase_') ||
+    toolName.startsWith('cloudflare_') ||
+    [
+      'web_search',
+      'fetch_url',
+      'http_request',
+      'web_search_boost',
+      'deep_research',
+      'run_blackbox_tests',
+      'analyze_image',
+      'compare_screenshots',
+      'visual_assert',
+      'spawn_agent',
+      'spawn_parallel',
+      'spawn_researcher',
+      'read_file',
+      'read_many_files',
+      'code_graph_query', // v17.0: async file ops
+      'generate_image',
+      'edit_image',
+      'glob_files',
+      'run_command',
+      'run_test',
+      'run_lint', // v17.1: execSync → async migration
+      'wait_for_process', // v19.0: 阻塞等待后台进程完成
+      'search_files',
+      'code_search', // v17.1: codeSearch fallback async
+      'download_file',
+      'search_images', // v19.0
+    ].includes(toolName)
+  );
 }

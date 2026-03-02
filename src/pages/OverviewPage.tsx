@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OverviewPage — 项目全景 (v7.1 compact layout)
  *
  * 子组件已提取到 ./overview/ 目录:
@@ -15,8 +15,9 @@
  *   - 导入分析仅在分析时显示
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { filterByProject } from '../stores/slices/agent-slice';
 import { TechBackground } from '../components/TechBackground';
 import { SystemMonitor } from '../components/SystemMonitor';
 import { ActivityCharts } from '../components/ActivityCharts';
@@ -36,7 +37,11 @@ import {
 
 export function OverviewPage() {
   const currentProjectId = useAppStore(s => s.currentProjectId);
-  const featureStatuses = useAppStore(s => s.featureStatuses);
+  const rawFeatureStatuses = useAppStore(s => s.featureStatuses);
+  const featureStatuses = useMemo(
+    () => filterByProject(rawFeatureStatuses, currentProjectId),
+    [rawFeatureStatuses, currentProjectId],
+  );
   const addLog = useAppStore(s => s.addLog);
   const settingsConfigured = useAppStore(s => s.settingsConfigured);
   const setGlobalPage = useAppStore(s => s.setGlobalPage);

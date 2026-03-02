@@ -1,10 +1,18 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '../../stores/app-store';
+import { filterByProject } from '../../stores/slices/agent-slice';
 import {
-  type Feature, type ViewLevel, type BreadcrumbItem, type GraphNode,
-  STATUS_COLOR, CATEGORY_BADGE,
-  buildDagreGraph, aggregateModules, aggregateSubModules,
-  statusCountsFromFeatures, dominantStatus,
+  type Feature,
+  type ViewLevel,
+  type BreadcrumbItem,
+  type GraphNode,
+  STATUS_COLOR,
+  CATEGORY_BADGE,
+  buildDagreGraph,
+  aggregateModules,
+  aggregateSubModules,
+  statusCountsFromFeatures,
+  dominantStatus,
   getAgentRoleIcon,
 } from './types';
 
@@ -54,9 +62,7 @@ export function InteractiveGraph({
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [tooltipAgent, setTooltipAgent] = useState<{ agentId: string; x: number; y: number } | null>(null);
   const [viewLevel, setViewLevel] = useState<ViewLevel>('module');
-  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([
-    { level: 'module', label: '系统模块' },
-  ]);
+  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([{ level: 'module', label: '系统模块' }]);
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
   const [filterSubGroup, setFilterSubGroup] = useState<string | null>(null);
 
@@ -76,7 +82,11 @@ export function InteractiveGraph({
         const depGroups = new Set<string>();
         for (const f of feats) {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
+          try {
+            deps = JSON.parse(f.depends_on || '[]');
+          } catch {
+            /* malformed JSON in depends_on — treat as no deps */
+          }
           for (const d of deps) {
             if (!groupFeatureIds.has(d)) {
               for (const [gn, gfeats] of groups) {
@@ -88,7 +98,8 @@ export function InteractiveGraph({
           }
         }
         return {
-          id: name, label: name,
+          id: name,
+          label: name,
           status: dominantStatus(counts),
           category: feats[0]?.category || 'core',
           deps: [...depGroups],
@@ -106,8 +117,19 @@ export function InteractiveGraph({
       if (subGroups.size <= 1) {
         const featureNodes = groupFeatures.map(f => {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
-          return { id: f.id, label: f.title || f.description, status: f.status, category: f.category, deps, feature: f };
+          try {
+            deps = JSON.parse(f.depends_on || '[]');
+          } catch {
+            /* malformed JSON in depends_on — treat as no deps */
+          }
+          return {
+            id: f.id,
+            label: f.title || f.description,
+            status: f.status,
+            category: f.category,
+            deps,
+            feature: f,
+          };
         });
         return buildDagreGraph(featureNodes, 180, 56);
       }
@@ -118,7 +140,11 @@ export function InteractiveGraph({
         const depSubs = new Set<string>();
         for (const f of feats) {
           let deps: string[] = [];
-          try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
+          try {
+            deps = JSON.parse(f.depends_on || '[]');
+          } catch {
+            /* malformed JSON in depends_on — treat as no deps */
+          }
           for (const d of deps) {
             if (!subFeatureIds.has(d)) {
               for (const [sn, sfeats] of subGroups) {
@@ -128,7 +154,8 @@ export function InteractiveGraph({
           }
         }
         return {
-          id: name, label: name,
+          id: name,
+          label: name,
           status: dominantStatus(counts),
           category: feats[0]?.category || 'core',
           deps: [...depSubs],
@@ -148,7 +175,11 @@ export function InteractiveGraph({
 
     const featureNodes = filtered.map(f => {
       let deps: string[] = [];
-      try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* malformed JSON in depends_on — treat as no deps */ }
+      try {
+        deps = JSON.parse(f.depends_on || '[]');
+      } catch {
+        /* malformed JSON in depends_on — treat as no deps */
+      }
       return { id: f.id, label: f.title || f.description, status: f.status, category: f.category, deps, feature: f };
     });
     return buildDagreGraph(featureNodes, 180, 56);
@@ -183,7 +214,11 @@ export function InteractiveGraph({
       if (rect) {
         const cx = e.clientX - rect.left;
         const cy = e.clientY - rect.top;
-        return { scale: newScale, x: cx - (cx - t.x) * (newScale / t.scale), y: cy - (cy - t.y) * (newScale / t.scale) };
+        return {
+          scale: newScale,
+          x: cx - (cx - t.x) * (newScale / t.scale),
+          y: cy - (cy - t.y) * (newScale / t.scale),
+        };
       }
       return { ...t, scale: newScale };
     });
@@ -220,10 +255,7 @@ export function InteractiveGraph({
     } else if (viewLevel === 'submodule' && node.childCount) {
       setViewLevel('feature');
       setFilterSubGroup(node.id);
-      setBreadcrumb(prev => [
-        ...prev,
-        { level: 'feature', label: node.label, filterValue: node.id },
-      ]);
+      setBreadcrumb(prev => [...prev, { level: 'feature', label: node.label, filterValue: node.id }]);
       setTransform({ x: 0, y: 0, scale: 1 });
     }
   };
@@ -301,9 +333,27 @@ export function InteractiveGraph({
       >
         {/* Controls */}
         <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
-          <button onClick={zoomIn} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center" title="放大">+</button>
-          <button onClick={zoomOut} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center" title="缩小">−</button>
-          <button onClick={resetView} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs flex items-center justify-center" title="重置">⟲</button>
+          <button
+            onClick={zoomIn}
+            className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center"
+            title="放大"
+          >
+            +
+          </button>
+          <button
+            onClick={zoomOut}
+            className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm flex items-center justify-center"
+            title="缩小"
+          >
+            −
+          </button>
+          <button
+            onClick={resetView}
+            className="w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs flex items-center justify-center"
+            title="重置"
+          >
+            ⟲
+          </button>
         </div>
         <div className="absolute bottom-3 left-3 z-10 text-[10px] text-slate-600">
           缩放: {(transform.scale * 100).toFixed(0)}% · 滚轮缩放 · 拖拽平移 · 双击下钻
@@ -322,7 +372,15 @@ export function InteractiveGraph({
               <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
               </marker>
-              <marker id="arrow-hl" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <marker
+                id="arrow-hl"
+                viewBox="0 0 10 10"
+                refX="10"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c7cfa" />
               </marker>
             </defs>
@@ -337,9 +395,12 @@ export function InteractiveGraph({
                 const midX = (fromX + toX) / 2;
                 const isHl = hoveredNode === e.from.id || hoveredNode === e.to.id;
                 return (
-                  <path key={i}
+                  <path
+                    key={i}
                     d={`M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`}
-                    fill="none" stroke={isHl ? '#5c7cfa' : '#334155'} strokeWidth={isHl ? 2 : 1.5}
+                    fill="none"
+                    stroke={isHl ? '#5c7cfa' : '#334155'}
+                    strokeWidth={isHl ? 2 : 1.5}
                     markerEnd={isHl ? 'url(#arrow-hl)' : 'url(#arrow)'}
                     className="transition-all duration-200"
                   />
@@ -352,23 +413,43 @@ export function InteractiveGraph({
                 const isHl = hoveredNode === node.id;
                 const isAggregate = !!node.childCount;
                 const agent = !isAggregate && node.feature ? getAgentForFeature(node.id) : null;
-                const moduleAgents = isAggregate ? getAgentsForFeatureSet(moduleFeatureIds.get(node.id) || new Set()) : [];
+                const moduleAgents = isAggregate
+                  ? getAgentsForFeatureSet(moduleFeatureIds.get(node.id) || new Set())
+                  : [];
 
                 return (
-                  <g key={node.id} transform={`translate(${node.x}, ${node.y})`}
+                  <g
+                    key={node.id}
+                    transform={`translate(${node.x}, ${node.y})`}
                     onMouseEnter={() => setHoveredNode(node.id)}
-                    onMouseLeave={() => { setHoveredNode(null); setTooltipAgent(null); }}
+                    onMouseLeave={() => {
+                      setHoveredNode(null);
+                      setTooltipAgent(null);
+                    }}
                     onDoubleClick={() => handleDoubleClick(node)}
                     className="cursor-pointer"
                   >
                     {(node.status === 'in_progress' || agent || moduleAgents.length > 0) && (
-                      <rect width={node.width} height={node.height} rx={10} fill="none" stroke={sc.stroke} strokeWidth={2} opacity={0.3}>
+                      <rect
+                        width={node.width}
+                        height={node.height}
+                        rx={10}
+                        fill="none"
+                        stroke={sc.stroke}
+                        strokeWidth={2}
+                        opacity={0.3}
+                      >
                         <animate attributeName="opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite" />
                       </rect>
                     )}
 
-                    <rect width={node.width} height={node.height} rx={10} fill={sc.fill}
-                      stroke={isHl ? '#5c7cfa' : sc.stroke} strokeWidth={isHl ? 2 : 1}
+                    <rect
+                      width={node.width}
+                      height={node.height}
+                      rx={10}
+                      fill={sc.fill}
+                      stroke={isHl ? '#5c7cfa' : sc.stroke}
+                      strokeWidth={isHl ? 2 : 1}
                       className="transition-all duration-200"
                     />
 
@@ -378,8 +459,15 @@ export function InteractiveGraph({
                       )}
                     </circle>
 
-                    <text x={26} y={isAggregate ? 24 : node.height * 0.42} fontSize={11} fill={sc.text} fontFamily="sans-serif">
-                      {CATEGORY_BADGE[node.category] || ''} {node.label.length > 16 ? node.label.slice(0, 15) + '…' : node.label}
+                    <text
+                      x={26}
+                      y={isAggregate ? 24 : node.height * 0.42}
+                      fontSize={11}
+                      fill={sc.text}
+                      fontFamily="sans-serif"
+                    >
+                      {CATEGORY_BADGE[node.category] || ''}{' '}
+                      {node.label.length > 16 ? node.label.slice(0, 15) + '…' : node.label}
                     </text>
 
                     {isAggregate && (
@@ -390,7 +478,9 @@ export function InteractiveGraph({
                         <g transform={`translate(0, ${node.height - 10})`}>
                           <MiniProgressBar counts={node.statusCounts || {}} width={node.width} />
                         </g>
-                        <text x={node.width - 8} y={16} fontSize={8} fill="#475569" textAnchor="end">双击展开</text>
+                        <text x={node.width - 8} y={16} fontSize={8} fill="#475569" textAnchor="end">
+                          双击展开
+                        </text>
                       </>
                     )}
 
@@ -399,48 +489,80 @@ export function InteractiveGraph({
                         {moduleAgents.slice(0, 3).map((ma, idx) => {
                           const ri = getAgentRoleIcon(ma.agentId);
                           return (
-                            <g key={ma.agentId} transform={`translate(${-idx * 20}, 0)`}
-                              onMouseEnter={(e) => {
+                            <g
+                              key={ma.agentId}
+                              transform={`translate(${-idx * 20}, 0)`}
+                              onMouseEnter={e => {
                                 const svgRect = containerRef.current?.getBoundingClientRect();
                                 if (svgRect) {
-                                  setTooltipAgent({ agentId: ma.agentId, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
+                                  setTooltipAgent({
+                                    agentId: ma.agentId,
+                                    x: e.clientX - svgRect.left,
+                                    y: e.clientY - svgRect.top,
+                                  });
                                 }
                               }}
-                              onClick={(e) => {
+                              onClick={e => {
                                 e.stopPropagation();
                                 const svgRect = containerRef.current?.getBoundingClientRect();
                                 if (svgRect) {
-                                  setTooltipAgent(prev => prev?.agentId === ma.agentId ? null : { agentId: ma.agentId, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
+                                  setTooltipAgent(prev =>
+                                    prev?.agentId === ma.agentId
+                                      ? null
+                                      : {
+                                          agentId: ma.agentId,
+                                          x: e.clientX - svgRect.left,
+                                          y: e.clientY - svgRect.top,
+                                        },
+                                  );
                                 }
                               }}
                               className="cursor-pointer"
                             >
                               <circle cx={0} cy={0} r={10} fill="#0f172a" stroke={ri.color} strokeWidth={1.5}>
-                                <animate attributeName="stroke-opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+                                <animate
+                                  attributeName="stroke-opacity"
+                                  values="1;0.4;1"
+                                  dur="2s"
+                                  repeatCount="indefinite"
+                                />
                               </circle>
-                              <text x={0} y={4} textAnchor="middle" fontSize={10}>{ri.icon}</text>
+                              <text x={0} y={4} textAnchor="middle" fontSize={10}>
+                                {ri.icon}
+                              </text>
                             </g>
                           );
                         })}
                         {moduleAgents.length > 3 && (
-                          <text x={-60} y={4} fontSize={8} fill="#94a3b8" textAnchor="end">+{moduleAgents.length - 3}</text>
+                          <text x={-60} y={4} fontSize={8} fill="#94a3b8" textAnchor="end">
+                            +{moduleAgents.length - 3}
+                          </text>
                         )}
                       </g>
                     )}
 
                     {!isAggregate && agent && (
-                      <g transform={`translate(${node.width - 16}, ${node.height / 2})`}
-                        onMouseEnter={(e) => {
+                      <g
+                        transform={`translate(${node.width - 16}, ${node.height / 2})`}
+                        onMouseEnter={e => {
                           const svgRect = containerRef.current?.getBoundingClientRect();
                           if (svgRect) {
-                            setTooltipAgent({ agentId: agent.agentId, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
+                            setTooltipAgent({
+                              agentId: agent.agentId,
+                              x: e.clientX - svgRect.left,
+                              y: e.clientY - svgRect.top,
+                            });
                           }
                         }}
-                        onClick={(e) => {
+                        onClick={e => {
                           e.stopPropagation();
                           const svgRect = containerRef.current?.getBoundingClientRect();
                           if (svgRect) {
-                            setTooltipAgent(prev => prev?.agentId === agent.agentId ? null : { agentId: agent.agentId, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top });
+                            setTooltipAgent(prev =>
+                              prev?.agentId === agent.agentId
+                                ? null
+                                : { agentId: agent.agentId, x: e.clientX - svgRect.left, y: e.clientY - svgRect.top },
+                            );
                           }
                         }}
                         className="cursor-pointer"
@@ -450,9 +572,16 @@ export function InteractiveGraph({
                           return (
                             <>
                               <circle cx={0} cy={0} r={12} fill="#0f172a" stroke={ri.color} strokeWidth={2}>
-                                <animate attributeName="stroke-opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite" />
+                                <animate
+                                  attributeName="stroke-opacity"
+                                  values="1;0.3;1"
+                                  dur="1.5s"
+                                  repeatCount="indefinite"
+                                />
                               </circle>
-                              <text x={0} y={4} textAnchor="middle" fontSize={12}>{ri.icon}</text>
+                              <text x={0} y={4} textAnchor="middle" fontSize={12}>
+                                {ri.icon}
+                              </text>
                             </>
                           );
                         })()}
@@ -460,7 +589,9 @@ export function InteractiveGraph({
                     )}
 
                     {!isAggregate && (
-                      <text x={node.width - 8} y={14} fontSize={9} fill="#475569" textAnchor="end">P{node.feature?.priority ?? ''}</text>
+                      <text x={node.width - 8} y={14} fontSize={9} fill="#475569" textAnchor="end">
+                        P{node.feature?.priority ?? ''}
+                      </text>
                     )}
                   </g>
                 );
@@ -470,53 +601,65 @@ export function InteractiveGraph({
         </div>
 
         {/* Agent tooltip overlay */}
-        {tooltipAgent && (() => {
-          const agentData = agentStatuses.get(tooltipAgent.agentId);
-          if (!agentData) return null;
-          const ri = getAgentRoleIcon(tooltipAgent.agentId);
-          const roleName = tooltipAgent.agentId.startsWith('pm') ? '产品经理'
-            : tooltipAgent.agentId.startsWith('arch') ? '架构师'
-            : tooltipAgent.agentId.startsWith('dev') ? '开发者'
-            : tooltipAgent.agentId.startsWith('qa') ? 'QA'
-            : 'Agent';
-          return (
-            <div
-              className="absolute z-30 pointer-events-none"
-              style={{ left: tooltipAgent.x + 16, top: tooltipAgent.y - 10 }}
-            >
-              <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-2xl min-w-[180px]">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-base">{ri.icon}</span>
-                  <div>
-                    <div className="text-xs font-bold text-slate-200">{roleName}</div>
-                    <div className="text-[9px] text-slate-500 font-mono">{tooltipAgent.agentId}</div>
-                  </div>
-                  <span className="ml-auto w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: ri.color }} />
-                </div>
-                <div className="border-t border-slate-800 pt-1.5 space-y-0.5">
-                  <div className="text-[10px]">
-                    <span className="text-slate-500">状态: </span>
-                    <span style={{ color: ri.color }} className="font-medium">
-                      {agentData.status === 'working' ? '工作中' : agentData.status === 'idle' ? '待机' : agentData.status}
-                    </span>
-                  </div>
-                  {agentData.currentTask && (
-                    <div className="text-[10px]">
-                      <span className="text-slate-500">任务: </span>
-                      <span className="text-slate-300 font-mono">{agentData.currentTask}</span>
+        {tooltipAgent &&
+          (() => {
+            const agentData = agentStatuses.get(tooltipAgent.agentId);
+            if (!agentData) return null;
+            const ri = getAgentRoleIcon(tooltipAgent.agentId);
+            const roleName = tooltipAgent.agentId.startsWith('pm')
+              ? '产品经理'
+              : tooltipAgent.agentId.startsWith('arch')
+                ? '架构师'
+                : tooltipAgent.agentId.startsWith('dev')
+                  ? '开发者'
+                  : tooltipAgent.agentId.startsWith('qa')
+                    ? 'QA'
+                    : 'Agent';
+            return (
+              <div
+                className="absolute z-30 pointer-events-none"
+                style={{ left: tooltipAgent.x + 16, top: tooltipAgent.y - 10 }}
+              >
+                <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-2xl min-w-[180px]">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-base">{ri.icon}</span>
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">{roleName}</div>
+                      <div className="text-[9px] text-slate-500 font-mono">{tooltipAgent.agentId}</div>
                     </div>
-                  )}
-                  {agentData.featureTitle && (
+                    <span
+                      className="ml-auto w-2 h-2 rounded-full animate-pulse"
+                      style={{ backgroundColor: ri.color }}
+                    />
+                  </div>
+                  <div className="border-t border-slate-800 pt-1.5 space-y-0.5">
                     <div className="text-[10px]">
-                      <span className="text-slate-500">内容: </span>
-                      <span className="text-slate-300">{agentData.featureTitle.slice(0, 50)}</span>
+                      <span className="text-slate-500">状态: </span>
+                      <span style={{ color: ri.color }} className="font-medium">
+                        {agentData.status === 'working'
+                          ? '工作中'
+                          : agentData.status === 'idle'
+                            ? '待机'
+                            : agentData.status}
+                      </span>
                     </div>
-                  )}
+                    {agentData.currentTask && (
+                      <div className="text-[10px]">
+                        <span className="text-slate-500">任务: </span>
+                        <span className="text-slate-300 font-mono">{agentData.currentTask}</span>
+                      </div>
+                    )}
+                    {agentData.featureTitle && (
+                      <div className="text-[10px]">
+                        <span className="text-slate-500">内容: </span>
+                        <span className="text-slate-300">{agentData.featureTitle.slice(0, 50)}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
       </div>
     </div>
   );

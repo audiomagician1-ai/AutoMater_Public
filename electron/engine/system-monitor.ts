@@ -119,9 +119,7 @@ function sampleCpuUsage(): { usage: number; cores: number; perCore: number[] } {
   const prevTotalTick = _prevCpuTimes.reduce((a, b) => a + b.total, 0);
 
   // 总体使用率 = 全核心平均
-  const avgUsage = perCore.length > 0
-    ? Math.round(perCore.reduce((a, b) => a + b, 0) / perCore.length)
-    : 0;
+  const avgUsage = perCore.length > 0 ? Math.round(perCore.reduce((a, b) => a + b, 0) / perCore.length) : 0;
 
   return { usage: avgUsage, cores: cpus.length, perCore };
 }
@@ -131,7 +129,9 @@ function sampleCpuUsage(): { usage: number; cores: number; perCore: number[] } {
 // ═══════════════════════════════════════
 
 let _lastGpu: { usage: number; memoryPercent: number; name: string } = {
-  usage: -1, memoryPercent: -1, name: 'N/A',
+  usage: -1,
+  memoryPercent: -1,
+  name: 'N/A',
 };
 let _gpuSamplePending = false;
 
@@ -142,11 +142,15 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
   _gpuSamplePending = true;
   try {
     const { execSync } = await import('child_process');
-    const output = execSync( // SYNC-OK: nvidia-smi <50ms, 已有 _gpuSamplePending guard 防并发
+    const output = execSync(
+      // SYNC-OK: nvidia-smi <50ms, 已有 _gpuSamplePending guard 防并发
       'nvidia-smi --query-gpu=utilization.gpu,utilization.memory,name --format=csv,noheader,nounits',
       { timeout: 3000, encoding: 'utf8', windowsHide: true },
     );
-    const parts = output.trim().split(',').map(s => s.trim());
+    const parts = output
+      .trim()
+      .split(',')
+      .map(s => s.trim());
     if (parts.length >= 3) {
       _lastGpu = {
         usage: parseInt(parts[0]) || 0,
@@ -154,7 +158,8 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
         name: parts[2],
       };
     }
-  } catch { /* silent: 系统指标采集失败,返回空 */
+  } catch {
+    /* silent: 系统指标采集失败,返回空 */
     // nvidia-smi 不存在或执行失败 — 保持上一次值或 -1
   }
   _gpuSamplePending = false;
@@ -165,8 +170,8 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
 // 网络 + 磁盘 (差值估算)
 // ═══════════════════════════════════════
 
-let _prevNet = { rx: 0, tx: 0, ts: Date.now() };
-let _prevDisk = { read: 0, write: 0, ts: Date.now() };
+const _prevNet = { rx: 0, tx: 0, ts: Date.now() };
+const _prevDisk = { read: 0, write: 0, ts: Date.now() };
 
 function sampleNetwork(): { rxBytesPerSec: number; txBytesPerSec: number } {
   const interfaces = os.networkInterfaces();
@@ -225,7 +230,9 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
   const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
 
   // 按分钟聚合 events 表
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
       strftime('%Y-%m-%dT%H:%M:00', created_at) AS minute,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -237,10 +244,21 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
     WHERE project_id = ? AND created_at >= ?
     GROUP BY minute
     ORDER BY minute ASC
-  `).all(projectId, since) as Array<{ minute: string; input_tokens: number; output_tokens: number; cost_usd: number; llm_calls: number; tool_calls: number }>;
+  `,
+    )
+    .all(projectId, since) as Array<{
+    minute: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    llm_calls: number;
+    tool_calls: number;
+  }>;
 
   // 代码行写入：从 tool:result 事件中提取 (file-writer 写入会记录行数)
-  const lineRows = db.prepare(`
+  const lineRows = db
+    .prepare(
+      `
     SELECT
       strftime('%Y-%m-%dT%H:%M:00', created_at) AS minute,
       COALESCE(SUM(CAST(json_extract(data, '$.linesWritten') AS INTEGER)), 0) AS lines
@@ -250,7 +268,9 @@ export function getActivityTimeseries(projectId: string, minutes: number = 30): 
       AND json_extract(data, '$.linesWritten') IS NOT NULL
     GROUP BY minute
     ORDER BY minute ASC
-  `).all(projectId, since) as Array<{ minute: string; lines: number }>;
+  `,
+    )
+    .all(projectId, since) as Array<{ minute: string; lines: number }>;
 
   const linesMap = new Map<string, number>();
   for (const r of lineRows) linesMap.set(r.minute, r.lines);

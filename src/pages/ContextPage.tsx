@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ContextPage — 上下文资产管理器 (v2.0)
  *
  * 显示团队每位成员的上下文状态：
@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { filterByProject } from '../stores/slices/agent-slice';
 import { toast } from '../stores/toast-store';
 
 // Types: ContextSection, ContextSnapshot, TeamMember are global (src/types/api.d.ts)
@@ -17,12 +18,12 @@ import { toast } from '../stores/toast-store';
 // 角色图标 & 颜色映射
 // ═══════════════════════════════════════
 const ROLE_META: Record<string, { icon: string; color: string; bgGlow: string }> = {
-  pm:        { icon: '👔', color: 'text-violet-400',  bgGlow: 'from-violet-500/10' },
-  architect: { icon: '🏗️', color: 'text-blue-400',    bgGlow: 'from-blue-500/10' },
-  tech_lead: { icon: '🎯', color: 'text-indigo-400',  bgGlow: 'from-indigo-500/10' },
+  pm: { icon: '👔', color: 'text-violet-400', bgGlow: 'from-violet-500/10' },
+  architect: { icon: '🏗️', color: 'text-blue-400', bgGlow: 'from-blue-500/10' },
+  tech_lead: { icon: '🎯', color: 'text-indigo-400', bgGlow: 'from-indigo-500/10' },
   developer: { icon: '💻', color: 'text-emerald-400', bgGlow: 'from-emerald-500/10' },
-  qa:        { icon: '🔍', color: 'text-amber-400',   bgGlow: 'from-amber-500/10' },
-  devops:    { icon: '🚀', color: 'text-cyan-400',    bgGlow: 'from-cyan-500/10' },
+  qa: { icon: '🔍', color: 'text-amber-400', bgGlow: 'from-amber-500/10' },
+  devops: { icon: '🚀', color: 'text-cyan-400', bgGlow: 'from-cyan-500/10' },
 };
 const DEFAULT_ROLE_META = { icon: '🤖', color: 'text-slate-400', bgGlow: 'from-slate-500/10' };
 
@@ -34,17 +35,34 @@ function getRoleMeta(role: string) {
 // Source 颜色映射
 // ═══════════════════════════════════════
 const SOURCE_COLORS: Record<string, { bg: string; bar: string; text: string; border: string }> = {
-  'project-config': { bg: 'bg-violet-500/10', bar: 'bg-violet-500', text: 'text-violet-400', border: 'border-violet-500/30' },
-  'architecture':   { bg: 'bg-blue-500/10',   bar: 'bg-blue-500',   text: 'text-blue-400',   border: 'border-blue-500/30' },
-  'file-tree':      { bg: 'bg-emerald-500/10', bar: 'bg-emerald-500', text: 'text-emerald-400', border: 'border-emerald-500/30' },
-  'repo-map':       { bg: 'bg-amber-500/10',   bar: 'bg-amber-500',   text: 'text-amber-400',   border: 'border-amber-500/30' },
-  'dependency':     { bg: 'bg-cyan-500/10',    bar: 'bg-cyan-500',    text: 'text-cyan-400',    border: 'border-cyan-500/30' },
-  'keyword-match':  { bg: 'bg-pink-500/10',    bar: 'bg-pink-500',    text: 'text-pink-400',    border: 'border-pink-500/30' },
-  'plan':           { bg: 'bg-orange-500/10',   bar: 'bg-orange-500',  text: 'text-orange-400',  border: 'border-orange-500/30' },
-  'qa-feedback':    { bg: 'bg-red-500/10',     bar: 'bg-red-500',     text: 'text-red-400',     border: 'border-red-500/30' },
+  'project-config': {
+    bg: 'bg-violet-500/10',
+    bar: 'bg-violet-500',
+    text: 'text-violet-400',
+    border: 'border-violet-500/30',
+  },
+  architecture: { bg: 'bg-blue-500/10', bar: 'bg-blue-500', text: 'text-blue-400', border: 'border-blue-500/30' },
+  'file-tree': {
+    bg: 'bg-emerald-500/10',
+    bar: 'bg-emerald-500',
+    text: 'text-emerald-400',
+    border: 'border-emerald-500/30',
+  },
+  'repo-map': { bg: 'bg-amber-500/10', bar: 'bg-amber-500', text: 'text-amber-400', border: 'border-amber-500/30' },
+  dependency: { bg: 'bg-cyan-500/10', bar: 'bg-cyan-500', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+  'keyword-match': { bg: 'bg-pink-500/10', bar: 'bg-pink-500', text: 'text-pink-400', border: 'border-pink-500/30' },
+  plan: { bg: 'bg-orange-500/10', bar: 'bg-orange-500', text: 'text-orange-400', border: 'border-orange-500/30' },
+  'qa-feedback': { bg: 'bg-red-500/10', bar: 'bg-red-500', text: 'text-red-400', border: 'border-red-500/30' },
 };
-const DEFAULT_COLOR = { bg: 'bg-slate-500/10', bar: 'bg-slate-500', text: 'text-slate-400', border: 'border-slate-500/30' };
-function getColor(source: string) { return SOURCE_COLORS[source] ?? DEFAULT_COLOR; }
+const DEFAULT_COLOR = {
+  bg: 'bg-slate-500/10',
+  bar: 'bg-slate-500',
+  text: 'text-slate-400',
+  border: 'border-slate-500/30',
+};
+function getColor(source: string) {
+  return SOURCE_COLORS[source] ?? DEFAULT_COLOR;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -75,20 +93,23 @@ function TokenBudgetBar({ snapshot }: { snapshot: ContextSnapshot }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
         <span className="text-slate-400">
-          Token 预算: <span className={isOverBudget ? 'text-red-400 font-bold' : 'text-slate-200'}>
+          Token 预算:{' '}
+          <span className={isOverBudget ? 'text-red-400 font-bold' : 'text-slate-200'}>
             {formatTokens(snapshot.totalTokens)}
           </span>
           {' / '}
           {formatTokens(snapshot.tokenBudget)}
         </span>
-        <span className={`font-mono ${isOverBudget ? 'text-red-400' : usedRatio > 0.8 ? 'text-amber-400' : 'text-emerald-400'}`}>
+        <span
+          className={`font-mono ${isOverBudget ? 'text-red-400' : usedRatio > 0.8 ? 'text-amber-400' : 'text-emerald-400'}`}
+        >
           {(usedRatio * 100).toFixed(0)}%
         </span>
       </div>
 
       <div className="relative h-6 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
         <div className="absolute inset-0 flex">
-          {snapshot.sections.map((sec) => {
+          {snapshot.sections.map(sec => {
             const width = (sec.tokens / snapshot.tokenBudget) * 100;
             if (width < 0.5) return null;
             const color = getColor(sec.source);
@@ -111,7 +132,10 @@ function TokenBudgetBar({ snapshot }: { snapshot: ContextSnapshot }) {
           })}
         </div>
         {isOverBudget && (
-          <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10" style={{ left: `${(1 / usedRatio) * 100}%` }} />
+          <div
+            className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
+            style={{ left: `${(1 / usedRatio) * 100}%` }}
+          />
         )}
       </div>
 
@@ -134,11 +158,19 @@ function TokenBudgetBar({ snapshot }: { snapshot: ContextSnapshot }) {
 // ═══════════════════════════════════════
 // ContextSectionCard — 模块卡片（点击选中，不再内联展开）
 // ═══════════════════════════════════════
-function ContextSectionCard({ section, tokenBudget, isActive, onSelect }: {
-  section: ContextSection; tokenBudget: number; isActive?: boolean; onSelect?: () => void;
+function ContextSectionCard({
+  section,
+  tokenBudget,
+  isActive,
+  onSelect,
+}: {
+  section: ContextSection;
+  tokenBudget: number;
+  isActive?: boolean;
+  onSelect?: () => void;
 }) {
   const color = getColor(section.source);
-  const ratio = (section.tokens / tokenBudget * 100).toFixed(1);
+  const ratio = ((section.tokens / tokenBudget) * 100).toFixed(1);
 
   return (
     <div
@@ -149,9 +181,13 @@ function ContextSectionCard({ section, tokenBudget, isActive, onSelect }: {
         <span className="text-lg text-slate-500">{isActive ? '◆' : '▶'}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className={`text-sm font-medium ${isActive ? 'text-cyan-400' : color.text} truncate`}>{section.name}</span>
+            <span className={`text-sm font-medium ${isActive ? 'text-cyan-400' : color.text} truncate`}>
+              {section.name}
+            </span>
             {section.truncated && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium shrink-0">截断</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium shrink-0">
+                截断
+              </span>
             )}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
@@ -159,11 +195,18 @@ function ContextSectionCard({ section, tokenBudget, isActive, onSelect }: {
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-xs font-mono text-slate-300">{formatTokens(section.tokens)} <span className="text-slate-500">tokens</span></div>
-          <div className="text-[10px] text-slate-500">{formatBytes(section.chars)} · {ratio}%</div>
+          <div className="text-xs font-mono text-slate-300">
+            {formatTokens(section.tokens)} <span className="text-slate-500">tokens</span>
+          </div>
+          <div className="text-[10px] text-slate-500">
+            {formatBytes(section.chars)} · {ratio}%
+          </div>
         </div>
         <div className="w-16 h-2 bg-slate-800 rounded-full overflow-hidden shrink-0">
-          <div className={`h-full ${color.bar} transition-all duration-300`} style={{ width: `${Math.min(parseFloat(ratio), 100)}%` }} />
+          <div
+            className={`h-full ${color.bar} transition-all duration-300`}
+            style={{ width: `${Math.min(parseFloat(ratio), 100)}%` }}
+          />
         </div>
       </div>
     </div>
@@ -195,10 +238,14 @@ function ContentPreviewPanel({ section }: { section: ContextSection }) {
       {/* 文件列表（如有） */}
       {section.files && section.files.length > 0 && (
         <div className="px-4 py-2 border-b border-slate-800/50 shrink-0">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">包含文件 ({section.files.length})</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+            包含文件 ({section.files.length})
+          </div>
           <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
             {section.files.map(f => (
-              <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{f}</span>
+              <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                {f}
+              </span>
             ))}
           </div>
         </div>
@@ -217,7 +264,13 @@ function ContentPreviewPanel({ section }: { section: ContextSection }) {
 // ═══════════════════════════════════════
 // MemberContextCard — 单个团队成员的上下文面板
 // ═══════════════════════════════════════
-function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect }: {
+function MemberContextCard({
+  member,
+  snapshot,
+  agentStatus,
+  isSelected,
+  onSelect,
+}: {
   member: TeamMember;
   snapshot: ContextSnapshot | null;
   agentStatus?: { status: string; currentTask: string | null; featureTitle?: string } | null;
@@ -225,7 +278,13 @@ function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect
   onSelect: () => void;
 }) {
   const meta = getRoleMeta(member.role);
-  const caps = (() => { try { return JSON.parse(member.capabilities || '[]'); } catch { return []; } })();
+  const caps = (() => {
+    try {
+      return JSON.parse(member.capabilities || '[]');
+    } catch {
+      return [];
+    }
+  })();
   const isWorking = agentStatus?.status === 'working';
 
   return (
@@ -242,23 +301,27 @@ function MemberContextCard({ member, snapshot, agentStatus, isSelected, onSelect
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2.5">
           {/* 头像区 */}
-          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-base border border-slate-700/50 shrink-0 ${isWorking ? 'ring-1 ring-emerald-500/30' : ''}`}>
+          <div
+            className={`w-8 h-8 rounded-lg bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-base border border-slate-700/50 shrink-0 ${isWorking ? 'ring-1 ring-emerald-500/30' : ''}`}
+          >
             {meta.icon}
           </div>
           {/* 基本信息 */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className={`font-medium text-xs ${meta.color} truncate`}>{member.name}</span>
-              <span className="text-[9px] px-1 py-0.5 rounded bg-slate-800 text-slate-500 uppercase shrink-0">{member.role}</span>
+              <span className="text-[9px] px-1 py-0.5 rounded bg-slate-800 text-slate-500 uppercase shrink-0">
+                {member.role}
+              </span>
             </div>
             {isWorking && agentStatus.featureTitle ? (
-              <div className="text-[9px] text-emerald-400 truncate mt-0.5">
-                🔨 {agentStatus.featureTitle}
-              </div>
+              <div className="text-[9px] text-emerald-400 truncate mt-0.5">🔨 {agentStatus.featureTitle}</div>
             ) : (
               <div className="flex gap-1 mt-0.5 overflow-hidden">
                 {caps.slice(0, 2).map((c: string) => (
-                  <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-800/50 text-slate-500 truncate">{c}</span>
+                  <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-800/50 text-slate-500 truncate">
+                    {c}
+                  </span>
                 ))}
                 {caps.length > 2 && <span className="text-[9px] text-slate-600">+{caps.length - 2}</span>}
               </div>
@@ -323,7 +386,8 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
     setError(null);
     setPreview(null);
     const budget = member.max_context_tokens ?? 128000;
-    window.automater.context.previewBaseline(projectId, member.role, budget)
+    window.automater.context
+      .previewBaseline(projectId, member.role, budget)
       .then((res: { success: boolean; snapshot?: ContextSnapshot; error?: string }) => {
         if (res.success && res.snapshot) {
           setBaseline(res.snapshot);
@@ -343,10 +407,14 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* 模块列表列 */}
-      <div className={`${preview ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}>
+      <div
+        className={`${preview ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}
+      >
         {/* 成员信息头 */}
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-2xl border border-slate-700/30`}>
+          <div
+            className={`w-10 h-10 rounded-xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-2xl border border-slate-700/30`}
+          >
             {meta.icon}
           </div>
           <div>
@@ -382,7 +450,8 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
                   >
                     <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
                       <div className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] whitespace-nowrap shadow-xl">
-                        <span className="font-medium">{sec.name}</span><br/>
+                        <span className="font-medium">{sec.name}</span>
+                        <br />
                         {formatTokens(sec.tokens)} tokens · {width.toFixed(1)}%
                       </div>
                     </div>
@@ -417,17 +486,13 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
             正在计算基线上下文...
           </div>
         )}
-        {error && (
-          <div className="text-center text-sm text-red-400 py-4">❌ {error}</div>
-        )}
+        {error && <div className="text-center text-sm text-red-400 py-4">❌ {error}</div>}
 
         {/* 基线上下文模块列表 */}
         {baseline && baseline.sections.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-medium text-slate-300">
-                固定加载模块 ({baseline.sections.length})
-              </h3>
+              <h3 className="text-xs font-medium text-slate-300">固定加载模块 ({baseline.sections.length})</h3>
               <span className="text-[10px] text-slate-500">任务分配前已固定占用 · 点击查看内容</span>
             </div>
             {baseline.sections.map((sec: ContextSection) => (
@@ -458,7 +523,9 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
             <button
               onClick={() => setPreview(null)}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800"
-            >✕</button>
+            >
+              ✕
+            </button>
           </div>
           <ContentPreviewPanel section={preview} />
         </div>
@@ -472,12 +539,16 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
 // ═══════════════════════════════════════
 function findAgentStatusForMember(
   member: TeamMember,
-  agentStatuses: Map<string, { status: string; currentTask: string | null; featureTitle?: string }>
+  agentStatuses: Map<string, { status: string; currentTask: string | null; featureTitle?: string }>,
 ) {
   // Match by role prefix: pm-xxx → pm, arch-xxx → architect, dev-xxx → developer, qa-xxx → qa
   const rolePrefixes: Record<string, string[]> = {
-    pm: ['pm-'], architect: ['arch-'], developer: ['dev-'], qa: ['qa-'],
-    devops: ['devops-'], reviewer: ['review-'],
+    pm: ['pm-'],
+    architect: ['arch-'],
+    developer: ['dev-'],
+    qa: ['qa-'],
+    devops: ['devops-'],
+    reviewer: ['review-'],
   };
   const prefixes = rolePrefixes[member.role] || [];
   for (const [agentId, status] of agentStatuses) {
@@ -503,21 +574,28 @@ export function ContextPage() {
   // 加载团队成员
   useEffect(() => {
     if (!currentProjectId) return;
-    window.automater.team.list(currentProjectId).then(data => {
-      setMembers((data || []) as TeamMember[]);
-    }).catch(() => {});
+    window.automater.team
+      .list(currentProjectId)
+      .then(data => {
+        setMembers((data || []) as TeamMember[]);
+      })
+      .catch(() => {});
   }, [currentProjectId]);
 
   // 从后端拉取缓存的快照
   useEffect(() => {
     if (!currentProjectId) return;
     setLoading(true);
-    window.automater.project.getContextSnapshots(currentProjectId).then(data => {
-      const store = useAppStore.getState();
-      for (const [, snap] of Object.entries(data)) {
-        store.updateContextSnapshot(snap as ContextSnapshot);
-      }
-    }).catch(() => {}).finally(() => setLoading(false));
+    window.automater.project
+      .getContextSnapshots(currentProjectId)
+      .then(data => {
+        const store = useAppStore.getState();
+        for (const [, snap] of Object.entries(data)) {
+          store.updateContextSnapshot(currentProjectId!, snap as ContextSnapshot);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [currentProjectId]);
 
   // 按角色排序: pm → architect → tech_lead → developer → qa → devops → 其他
@@ -553,7 +631,10 @@ export function ContextPage() {
       if (contextSnapshots.has(m.id) || contextSnapshots.has(m.name)) count++;
       else {
         for (const [aid] of contextSnapshots) {
-          if (aid.includes(m.name) || aid.includes(m.role)) { count++; break; }
+          if (aid.includes(m.name) || aid.includes(m.role)) {
+            count++;
+            break;
+          }
         }
       }
     }
@@ -568,11 +649,7 @@ export function ContextPage() {
 
   // 空状态
   if (!currentProjectId) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500">
-        请先选择一个项目
-      </div>
-    );
+    return <div className="flex items-center justify-center h-full text-slate-500">请先选择一个项目</div>;
   }
 
   if (members.length === 0 && !loading) {
@@ -633,7 +710,10 @@ export function ContextPage() {
             else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name)!;
             else {
               for (const [aid, s] of contextSnapshots) {
-                if (aid.includes(member.name) || aid.includes(member.role)) { snap = s; break; }
+                if (aid.includes(member.name) || aid.includes(member.role)) {
+                  snap = s;
+                  break;
+                }
               }
             }
             return (
@@ -643,7 +723,10 @@ export function ContextPage() {
                 snapshot={snap}
                 agentStatus={findAgentStatusForMember(member, agentStatuses)}
                 isSelected={selected?.id === member.id}
-                onSelect={() => { setSelectedMemberId(member.id); setPreviewSection(null); }}
+                onSelect={() => {
+                  setSelectedMemberId(member.id);
+                  setPreviewSection(null);
+                }}
               />
             );
           })}
@@ -653,7 +736,9 @@ export function ContextPage() {
         {selected && selectedSnapshot ? (
           <div className="flex-1 flex overflow-hidden">
             {/* 中间列: 模块列表 */}
-            <div className={`${previewSection ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}>
+            <div
+              className={`${previewSection ? 'w-1/2' : 'flex-1'} overflow-y-auto px-4 py-4 space-y-4 border-r border-slate-800/50 transition-all`}
+            >
               {/* Token 预算条 */}
               <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4">
                 <TokenBudgetBar snapshot={selectedSnapshot} />
@@ -683,7 +768,9 @@ export function ContextPage() {
               {/* 模块卡片列表 */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-medium text-slate-300">上下文模块 ({selectedSnapshot.sections.length})</h2>
+                  <h2 className="text-xs font-medium text-slate-300">
+                    上下文模块 ({selectedSnapshot.sections.length})
+                  </h2>
                   <span className="text-[10px] text-slate-500">点击预览内容</span>
                 </div>
                 {selectedSnapshot.sections.map((sec: ContextSection) => (
@@ -707,7 +794,9 @@ export function ContextPage() {
                   <button
                     onClick={() => setPreviewSection(null)}
                     className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
                 <ContentPreviewPanel section={previewSection} />
               </div>

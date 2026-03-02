@@ -779,6 +779,139 @@ function parseJsonRobust<T>(raw: string, label: string): T | null {
   }
 }
 
+// ═══════════════════════════════════════
+// Prompt builders for Phase 2 fuse
+// ═══════════════════════════════════════
+
+/**
+ * Build prompt for Step A: structured architecture data (architecture-tree + module-graph JSON)
+ */
+function buildStructurePrompt(
+  projectName: string,
+  scan: ScanResult,
+  probesByType: Map<string, ProbeReport[]>,
+  merged: MergedFindings,
+): string {
+  const findings = merged.findings
+    .slice(0, 60)
+    .map(f => `- [${f.type}] ${f.id}: ${f.description} (${f.files.slice(0, 3).join(', ')})`)
+    .join('\n');
+
+  const probesSummary = Array.from(probesByType.entries())
+    .map(
+      ([type, reports]) =>
+        `${type}: ${reports.length} 个探针, 共 ${reports.reduce((s, r) => s + r.findings.length, 0)} 条发现`,
+    )
+    .join('\n');
+
+  return `项目: ${projectName}
+文件数: ${scan.snapshot.fileCount}, 技术栈: ${scan.snapshot.techStack.join(', ')}
+入口文件: ${scan.seedFiles
+    .slice(0, 10)
+    .map(f => f.file)
+    .join(', ')}
+
+探针分析汇总:
+${probesSummary}
+
+关键发现 (前60条):
+${findings}
+
+请根据以上信息生成两个 JSON 代码块:
+
+1. \`\`\`architecture-tree
+一个 ArchTree JSON: { nodes: ArchNode[], edges: ArchEdge[] }
+- ArchNode: { id, label, type ("domain"|"module"|"component"|"entry-point"|"api-layer"|"data-layer"|"config"|"utility"|"business-logic"), parentId (null for top-level), description, files: string[], loc, publicAPI: string[] }
+- ArchEdge: { source, target, type ("contains"|"depends"|"calls"|"imports"|"dataflow"), label? }
+- 层级: domain (顶层分组) → module (功能模块) → component (具体组件/文件)
+- 每个 domain 的 parentId = null, module 的 parentId = domain.id, component 的 parentId = module.id
+\`\`\`
+
+2. \`\`\`module-graph
+一个 ModuleGraph JSON: { nodes: ModuleGraphNode[], edges: ModuleGraphEdge[] }
+- ModuleGraphNode: { id, type ("module"|"entry-point"|"api-layer"|"data-layer"|"config"|"utility"), path, responsibility, publicAPI: string[], keyTypes: string[], patterns: string[], issues: string[], fileCount, loc }
+- ModuleGraphEdge: { source, target, type ("import"|"dataflow"|"event"|"config"|"ipc"), weight }
+\`\`\`
+
+只输出这两个代码块，不要多余解释。`;
+}
+
+/**
+ * Build prompt for Step B: documentation (ARCHITECTURE.md + KNOWN-ISSUES.md)
+ */
+function buildDocsPrompt(
+  projectName: string,
+  scan: ScanResult,
+  probesByType: Map<string, ProbeReport[]>,
+  merged: MergedFindings,
+  archTree: ArchTree,
+  moduleGraph: ModuleGraph,
+): string {
+  const archSummary =
+    archTree.nodes.length > 0
+      ? `架构树: ${archTree.nodes.filter(n => !n.parentId).length} 个域, ${archTree.nodes.length} 个节点总计`
+      : '(未生成架构树)';
+
+  const mgSummary =
+    moduleGraph.nodes.length > 0
+      ? `模块图: ${moduleGraph.nodes.length} 个模块, ${moduleGraph.edges.length} 条依赖`
+      : '(未生成模块图)';
+
+  const topDomains =
+    archTree.nodes
+      .filter(n => !n.parentId)
+      .map(
+        n =>
+          `- ${n.name}: ${n.responsibility || n.type} (${archTree.nodes.filter(c => c.parentId === n.id).length} 子模块)`,
+      )
+      .join('\n') || '(无)';
+
+  const issues =
+    merged.findings
+      .filter(f => f.type === 'anti-pattern' || f.type === 'dependency')
+      .slice(0, 30)
+      .map(f => `- [${f.type}] ${f.description} (${f.files.slice(0, 2).join(', ')})`)
+      .join('\n') || '(无显著问题)';
+
+  const probesSummary = Array.from(probesByType.entries())
+    .map(
+      ([type, reports]) =>
+        `${type}: ${reports.length} 个, ${reports.reduce((s, r) => s + r.findings.length, 0)} 条发现`,
+    )
+    .join(', ');
+
+  return `项目: ${projectName}
+技术栈: ${scan.snapshot.techStack.join(', ')}
+${archSummary}
+${mgSummary}
+顶层架构域:
+${topDomains}
+
+探针: ${probesSummary}
+
+已知问题/技术债:
+${issues}
+
+请输出两个 Markdown 代码块:
+
+1. \`\`\`architecture-doc
+完整的 ARCHITECTURE.md 文档:
+- 项目概述 (一段话)
+- 架构总览 (层级描述)
+- 各模块详述 (每个主要模块的职责、接口、依赖)
+- 数据流 (关键数据如何在模块间流转)
+- 技术栈说明
+\`\`\`
+
+2. \`\`\`known-issues
+完整的 KNOWN-ISSUES.md 文档:
+- 按严重度分组列出所有已识别问题
+- 包含问题描述、影响范围、涉及文件、建议修复方向
+\`\`\`
+
+只输出这两个代码块。`;
+}
+
 /**
  * Phase 2: 拼图合成 — 拆分为两步 LLM 调用:
  *   Step A: 结构化输出 (architecture-tree + module-graph JSON)
@@ -976,7 +1109,7 @@ function groupProbesByType(reports: ProbeReport[]): Map<string, ProbeReport[]> {
  * 当 LLM 未生成 architecture-tree 时，从 module-graph + detectModules 自动推导层级树。
  * 策略: 按 module-graph node.type 分组为 domain, 每个 node 变为 module, 文件按目录拆分为 component。
  */
-function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleInfo[]): ArchTree {
+export function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: ModuleInfo[]): ArchTree {
   const TYPE_TO_DOMAIN: Record<string, string> = {
     'entry-point': '入口层',
     'api-layer': 'API 层',

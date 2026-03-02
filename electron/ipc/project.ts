@@ -32,7 +32,7 @@ import {
 } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
-import { importProject } from '../engine/project-importer';
+import { importProject, deriveArchTreeFromModuleGraph } from '../engine/project-importer';
 import { collectBaselineContext, loadModuleGraph, loadKnownIssues } from '../engine/context-collector';
 import {
   detectIncrementalChanges,
@@ -1197,6 +1197,21 @@ export function setupProjectHandlers() {
     }
 
     stopOrchestrator(projectId);
+
+    // v23.0: TODO — 项目停止时异步触发经验整理 (consolidateOnProjectEnd 尚未实现)
+    // try {
+    //   const projRow = db.prepare('SELECT workspace_path, name FROM projects WHERE id = ?').get(projectId) as
+    //     | { workspace_path?: string; name?: string } | undefined;
+    //   if (projRow?.workspace_path) {
+    //     const settings = getSettings();
+    //     if (settings) {
+    //       consolidateOnProjectEnd(projRow.workspace_path, projRow.name || projectId, settings)
+    //         .then(({ summary }) => { sendToUI(bw, 'agent:log', { projectId, agentId: 'system', content: summary }); })
+    //         .catch((err: unknown) => log.warn('Post-stop consolidation failed', { error: String(err) }));
+    //     }
+    //   }
+    // } catch { /* non-critical */ }
+
     return { success: true };
   });
 
@@ -1639,8 +1654,35 @@ export function setupProjectHandlers() {
       | undefined;
     if (!project?.workspace_path) return { success: false, error: 'Project not found' };
     const treePath = path.join(project.workspace_path, '.automater/analysis/architecture-tree.json');
-    if (!fs.existsSync(treePath))
+
+    // v10.1: Auto-derive from module-graph if architecture-tree.json is missing
+    if (!fs.existsSync(treePath)) {
+      const moduleGraph = loadModuleGraph(project.workspace_path);
+      if (moduleGraph && moduleGraph.nodes.length > 0) {
+        try {
+          const stubModules = moduleGraph.nodes.map((n: any) => ({
+            id: n.id,
+            rootPath: n.path,
+            files: [] as string[],
+            loc: n.loc || 0,
+            dependsOn: [] as string[],
+            dependedBy: [] as string[],
+          }));
+          const derivedTree = deriveArchTreeFromModuleGraph(moduleGraph, stubModules);
+          const analysisDir = path.join(project.workspace_path, '.automater/analysis');
+          fs.mkdirSync(analysisDir, { recursive: true });
+          fs.writeFileSync(treePath, JSON.stringify(derivedTree, null, 2), 'utf-8');
+          log.info(
+            `Auto-derived architecture-tree.json: ${derivedTree.nodes.length} nodes, ${derivedTree.edges.length} edges`,
+          );
+          return { success: true, tree: derivedTree };
+        } catch (deriveErr) {
+          log.warn('Failed to auto-derive architecture-tree from module-graph', { error: String(deriveErr) });
+        }
+      }
       return { success: false, error: 'Architecture tree not available (run import analysis first)' };
+    }
+
     try {
       const tree = JSON.parse(fs.readFileSync(treePath, 'utf-8'));
       return { success: true, tree };

@@ -1,33 +1,50 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { filterByProject } from '../stores/slices/agent-slice';
 
 type Feature = {
-  id: string; title: string; description: string; priority: number;
-  category: string; status: string; locked_by: string | null;
+  id: string;
+  title: string;
+  description: string;
+  priority: number;
+  category: string;
+  status: string;
+  locked_by: string | null;
   resume_snapshot?: string | null;
 };
 
 /** v8.1: 工作类型 → 简短中文标签 */
 const WORK_TYPE_LABELS: Record<string, string> = {
-  'pm-analysis': 'PM分析', 'pm-design': 'PM设计', 'pm-incremental': 'PM增量',
-  'pm-acceptance': 'PM验收', 'architect-design': '架构设计',
-  'dev-implement': '开发', 'dev-rework': '重做',
-  'qa-review': 'QA审查', 'qa-tdd': 'TDD',
-  'devops-build': '构建', 'doc-generation': '文档', 'meta-agent': '元Agent',
+  'pm-analysis': 'PM分析',
+  'pm-design': 'PM设计',
+  'pm-incremental': 'PM增量',
+  'pm-acceptance': 'PM验收',
+  'architect-design': '架构设计',
+  'dev-implement': '开发',
+  'dev-rework': '重做',
+  'qa-review': 'QA审查',
+  'qa-tdd': 'TDD',
+  'devops-build': '构建',
+  'doc-generation': '文档',
+  'meta-agent': '元Agent',
 };
 
 const STATUS_COLS = [
-  { key: 'todo',        label: '待做',   color: 'bg-slate-500',   ring: 'ring-slate-500/30' },
-  { key: 'in_progress', label: '开发中', color: 'bg-blue-500',    ring: 'ring-blue-500/30' },
-  { key: 'reviewing',   label: '审查中', color: 'bg-amber-500',   ring: 'ring-amber-500/30' },
-  { key: 'paused',      label: '已暂停', color: 'bg-orange-500',  ring: 'ring-orange-500/30' },
-  { key: 'passed',      label: '已完成', color: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
-  { key: 'failed',      label: '失败',   color: 'bg-red-500',     ring: 'ring-red-500/30' },
+  { key: 'todo', label: '待做', color: 'bg-slate-500', ring: 'ring-slate-500/30' },
+  { key: 'in_progress', label: '开发中', color: 'bg-blue-500', ring: 'ring-blue-500/30' },
+  { key: 'reviewing', label: '审查中', color: 'bg-amber-500', ring: 'ring-amber-500/30' },
+  { key: 'paused', label: '已暂停', color: 'bg-orange-500', ring: 'ring-orange-500/30' },
+  { key: 'passed', label: '已完成', color: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
+  { key: 'failed', label: '失败', color: 'bg-red-500', ring: 'ring-red-500/30' },
 ];
 
 export function BoardPage() {
   const currentProjectId = useAppStore(s => s.currentProjectId);
-  const featureStatuses = useAppStore(s => s.featureStatuses);
+  const rawFeatureStatuses = useAppStore(s => s.featureStatuses);
+  const featureStatuses = useMemo(
+    () => filterByProject(rawFeatureStatuses, currentProjectId),
+    [rawFeatureStatuses, currentProjectId],
+  );
   const [features, setFeatures] = useState<Feature[]>([]);
   const [sessionSummaries, setSessionSummaries] = useState<Record<string, FeatureSessionSummary>>({});
 
@@ -39,11 +56,18 @@ export function BoardPage() {
     try {
       const summaries = await window.automater.session.batchFeatureSummaries(currentProjectId);
       setSessionSummaries(summaries || {});
-    } catch { /* session API 可能未就绪 */ }
+    } catch {
+      /* session API 可能未就绪 */
+    }
   };
 
-  useEffect(() => { load(); }, [currentProjectId]);
-  useEffect(() => { const t = setInterval(load, 4000); return () => clearInterval(t); }, [currentProjectId]);
+  useEffect(() => {
+    load();
+  }, [currentProjectId]);
+  useEffect(() => {
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [currentProjectId]);
 
   const enriched = features.map(f => ({
     ...f,
@@ -51,7 +75,11 @@ export function BoardPage() {
   }));
 
   if (!currentProjectId) {
-    return <div className="h-full flex items-center justify-center text-slate-500"><p>加载中...</p></div>;
+    return (
+      <div className="h-full flex items-center justify-center text-slate-500">
+        <p>加载中...</p>
+      </div>
+    );
   }
 
   const getByStatus = (s: string) => enriched.filter(f => f.status === s);
@@ -66,12 +94,19 @@ export function BoardPage() {
           {total > 0 && (
             <div className="flex items-center gap-2">
               <div className="w-32 h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${(passed / total) * 100}%` }} />
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: `${(passed / total) * 100}%` }}
+                />
               </div>
-              <span className="text-xs text-slate-400">{passed}/{total}</span>
+              <span className="text-xs text-slate-400">
+                {passed}/{total}
+              </span>
             </div>
           )}
-          <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300">🔄</button>
+          <button onClick={load} className="text-sm text-slate-500 hover:text-slate-300">
+            🔄
+          </button>
         </div>
       </div>
 
@@ -89,36 +124,48 @@ export function BoardPage() {
                 {items.map(f => {
                   const ss = sessionSummaries[f.id];
                   return (
-                    <div key={f.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1 hover:border-slate-700 transition-colors">
+                    <div
+                      key={f.id}
+                      className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1 hover:border-slate-700 transition-colors"
+                    >
                       <div className="flex items-start justify-between">
                         <span className="text-[10px] text-slate-600 font-mono">{f.id}</span>
-                        <span className={`text-[10px] px-1 py-0.5 rounded ${f.priority === 0 ? 'bg-red-500/20 text-red-400' : f.priority === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'}`}>P{f.priority}</span>
+                        <span
+                          className={`text-[10px] px-1 py-0.5 rounded ${f.priority === 0 ? 'bg-red-500/20 text-red-400' : f.priority === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'}`}
+                        >
+                          P{f.priority}
+                        </span>
                       </div>
                       <p className="text-xs text-slate-300 leading-snug line-clamp-2">{f.title || f.description}</p>
                       {f.locked_by && <p className="text-[10px] text-forge-400">🔨 {f.locked_by}</p>}
                       {/* v18.0: paused 状态 — 显示续跑信息和按钮 */}
-                      {f.status === 'paused' && (() => {
-                        let snap: { iterations?: number; cost?: number } = {};
-                        try { snap = f.resume_snapshot ? JSON.parse(f.resume_snapshot) : {}; } catch { /* ignore */ }
-                        return (
-                          <div className="pt-1 space-y-1">
-                            <p className="text-[10px] text-orange-400">
-                              ⏸️ 已执行 {snap.iterations ?? '?'} 轮{snap.cost ? ` · $${snap.cost.toFixed(4)}` : ''}
-                            </p>
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (!currentProjectId) return;
-                                await window.automater.project.resumeFeature(currentProjectId, f.id);
-                                load();
-                              }}
-                              className="w-full text-[10px] px-2 py-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 rounded transition-colors font-medium"
-                            >
-                              ▶ 继续执行
-                            </button>
-                          </div>
-                        );
-                      })()}
+                      {f.status === 'paused' &&
+                        (() => {
+                          let snap: { iterations?: number; cost?: number } = {};
+                          try {
+                            snap = f.resume_snapshot ? JSON.parse(f.resume_snapshot) : {};
+                          } catch {
+                            /* ignore */
+                          }
+                          return (
+                            <div className="pt-1 space-y-1">
+                              <p className="text-[10px] text-orange-400">
+                                ⏸️ 已执行 {snap.iterations ?? '?'} 轮{snap.cost ? ` · $${snap.cost.toFixed(4)}` : ''}
+                              </p>
+                              <button
+                                onClick={async e => {
+                                  e.stopPropagation();
+                                  if (!currentProjectId) return;
+                                  await window.automater.project.resumeFeature(currentProjectId, f.id);
+                                  load();
+                                }}
+                                className="w-full text-[10px] px-2 py-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 rounded transition-colors font-medium"
+                              >
+                                ▶ 继续执行
+                              </button>
+                            </div>
+                          );
+                        })()}
                       {/* v8.1: Session 关联摘要 */}
                       {ss && ss.totalSessions > 0 && (
                         <div className="flex items-center gap-1 flex-wrap pt-0.5">

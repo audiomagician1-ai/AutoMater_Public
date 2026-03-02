@@ -439,9 +439,7 @@ interface AutoMaterAPI {
     /** v9.1: 获取架构文档 (ARCHITECTURE.md) */
     getArchitectureDoc(projectId: string): Promise<{ success: boolean; content?: string; error?: string }>;
     /** v7.0: 检测增量变更 */
-    detectIncrementalChanges(
-      projectId: string,
-    ): Promise<{
+    detectIncrementalChanges(projectId: string): Promise<{
       success: boolean;
       changedFiles?: string[];
       affectedProbeTypes?: string[];
@@ -552,9 +550,7 @@ interface AutoMaterAPI {
   /** v5.0: Skill 目录管理 */
   skill: {
     getDirectory(): Promise<string>;
-    setDirectory(
-      dirPath: string,
-    ): Promise<{
+    setDirectory(dirPath: string): Promise<{
       success: boolean;
       loaded: number;
       skills: SkillSummary[];
@@ -777,6 +773,7 @@ interface IpcAgentSpawnedData {
 }
 
 interface IpcAgentStatusData {
+  projectId: string;
   agentId: string;
   status: string;
   currentTask?: string | null;
@@ -784,6 +781,7 @@ interface IpcAgentStatusData {
 }
 
 interface IpcFeatureStatusData {
+  projectId: string;
   featureId: string;
   status: string;
 }
@@ -813,10 +811,12 @@ interface IpcAgentToolCallData {
 }
 
 interface IpcContextSnapshotData {
+  projectId: string;
   snapshot?: ContextSnapshot;
 }
 
 interface IpcReactStateData {
+  projectId: string;
   state?: AgentReactState;
 }
 

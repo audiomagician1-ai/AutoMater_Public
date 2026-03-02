@@ -144,23 +144,15 @@ export function recordToolCall(record: Omit<ToolCallRecord, 'id'>): string {
 /**
  * 获取最近 N 条工具调用记录
  */
-export function getRecentToolCalls(
-  projectId?: string,
-  limit: number = 50,
-): ToolCallRecord[] {
-  let filtered = projectId
-    ? _records.filter(r => r.projectId === projectId)
-    : _records;
+export function getRecentToolCalls(projectId?: string, limit: number = 50): ToolCallRecord[] {
+  const filtered = projectId ? _records.filter(r => r.projectId === projectId) : _records;
   return filtered.slice(-limit).reverse(); // 最新在前
 }
 
 /**
  * 获取特定 Agent 的工具调用记录
  */
-export function getToolCallsByAgent(
-  agentId: string,
-  limit: number = 100,
-): ToolCallRecord[] {
+export function getToolCallsByAgent(agentId: string, limit: number = 100): ToolCallRecord[] {
   return _records
     .filter(r => r.agentId === agentId)
     .slice(-limit)
@@ -312,25 +304,29 @@ export function getCostBreakdown(projectId?: string): CostBreakdown {
  * 分析工具调用瓶颈
  */
 export function getBottleneckReport(projectId?: string): BottleneckReport {
-  const relevant = projectId
-    ? _records.filter(r => r.projectId === projectId)
-    : _records;
+  const relevant = projectId ? _records.filter(r => r.projectId === projectId) : _records;
 
   if (relevant.length === 0) {
     return { slowestTools: [], failingTools: [], largestOutputTools: [] };
   }
 
   // 按工具聚合
-  const toolStats = new Map<string, {
-    durations: number[];
-    failCount: number;
-    totalCount: number;
-    outputSizes: number[];
-  }>();
+  const toolStats = new Map<
+    string,
+    {
+      durations: number[];
+      failCount: number;
+      totalCount: number;
+      outputSizes: number[];
+    }
+  >();
 
   for (const r of relevant) {
     const existing = toolStats.get(r.toolName) || {
-      durations: [], failCount: 0, totalCount: 0, outputSizes: [],
+      durations: [],
+      failCount: 0,
+      totalCount: 0,
+      outputSizes: [],
     };
     existing.durations.push(r.durationMs);
     existing.totalCount += 1;

@@ -241,18 +241,11 @@ export function addInstance(
  * 如果同 domain 已有相似 pattern → 合并(追加子项)
  * 如果超容量 → 淘汰 use_count 最低的
  */
-export function addOrMergePattern(
-  workspacePath: string,
-  domain: string,
-  text: string,
-  derivedFrom?: string,
-): Pattern {
+export function addOrMergePattern(workspacePath: string, domain: string, text: string, derivedFrom?: string): Pattern {
   const lib = loadProjectLibrary(workspacePath);
 
   // 查找同 domain 的现有 pattern
-  const existing = lib.patterns.find(p =>
-    p.domain === domain && stringSimilarity(p.text, text) > 0.4
-  );
+  const existing = lib.patterns.find(p => p.domain === domain && stringSimilarity(p.text, text) > 0.4);
 
   if (existing) {
     // 合并: 追加新内容到现有 pattern
@@ -298,11 +291,7 @@ export function addOrMergePattern(
  * 添加 principle (仅在反复验证的 pattern 升级时调用)
  * 容量满时合并到最相似的现有 principle
  */
-export function addOrMergePrinciple(
-  workspacePath: string,
-  text: string,
-  derivedFrom?: string,
-): Principle {
+export function addOrMergePrinciple(workspacePath: string, text: string, derivedFrom?: string): Principle {
   const lib = loadProjectLibrary(workspacePath);
 
   // 检查重复
@@ -428,7 +417,7 @@ export function formatLibraryForContext(
 
   // 2. Patterns — 按相关性过滤
   if (lib.patterns.length > 0) {
-    let patterns = [...lib.patterns];
+    const patterns = [...lib.patterns];
 
     // 优先相关 domain
     if (relevantDomains && relevantDomains.length > 0) {
@@ -494,9 +483,7 @@ export function contributeToGlobal(workspacePath: string, projectName: string): 
 
   for (const pattern of candidates) {
     // 全局库去重
-    if (globalLib.patterns.some(g =>
-      g.domain === pattern.domain && stringSimilarity(g.text, pattern.text) > 0.5
-    )) {
+    if (globalLib.patterns.some(g => g.domain === pattern.domain && stringSimilarity(g.text, pattern.text) > 0.5)) {
       continue;
     }
 
@@ -540,10 +527,7 @@ export function contributeToGlobal(workspacePath: string, projectName: string): 
  * 从全局经验库注入相关经验到新项目
  * (在项目初始化时调用)
  */
-export function injectGlobalExperience(
-  workspacePath: string,
-  relevantDomains: string[],
-): number {
+export function injectGlobalExperience(workspacePath: string, relevantDomains: string[]): number {
   const globalLib = loadGlobalLibrary();
   const projectLib = loadProjectLibrary(workspacePath);
 
@@ -552,9 +536,7 @@ export function injectGlobalExperience(
   let injected = 0;
 
   for (const pattern of relevant) {
-    if (!projectLib.patterns.some(p =>
-      p.domain === pattern.domain && stringSimilarity(p.text, pattern.text) > 0.5
-    )) {
+    if (!projectLib.patterns.some(p => p.domain === pattern.domain && stringSimilarity(p.text, pattern.text) > 0.5)) {
       projectLib.patterns.push({
         ...pattern,
         id: pattern.id.replace('G-', 'INJ-'),
@@ -643,7 +625,9 @@ export function compactProjectMemory(workspacePath: string, maxChars: number = 8
     const compacted = `${header}\n\n> ⚠️ ${removedCount} 条旧经验已被压缩 (${new Date().toISOString().split('T')[0]})\n\n${kept}`;
     fs.writeFileSync(memPath, compacted, 'utf-8');
 
-    log.info(`Compacted project-memory.md: ${content.length} → ${compacted.length} chars, removed ${removedCount} old entries`);
+    log.info(
+      `Compacted project-memory.md: ${content.length} → ${compacted.length} chars, removed ${removedCount} old entries`,
+    );
     return true;
   } catch (err) {
     log.warn('Failed to compact project memory', { error: String(err) });
@@ -682,9 +666,42 @@ function stringSimilarity(a: string, b: string): number {
 /** 从多条 instance 中提取共同关键词 */
 function clusterByKeywords(instances: Instance[]): Map<string, Instance[]> {
   // 提取每条 instance 的关键词 (>= 2 字的非停用词)
-  const stopWords = new Set(['的', '了', '在', '是', '和', '与', '或', '到', '从', '对', '被', '把',
-    'the', 'is', 'in', 'at', 'to', 'a', 'an', 'of', 'for', 'and', 'or', 'but',
-    '修复', '问题', '导致', '错误', '使用', '需要', '可以', '通过', '进行', '设置']);
+  const stopWords = new Set([
+    '的',
+    '了',
+    '在',
+    '是',
+    '和',
+    '与',
+    '或',
+    '到',
+    '从',
+    '对',
+    '被',
+    '把',
+    'the',
+    'is',
+    'in',
+    'at',
+    'to',
+    'a',
+    'an',
+    'of',
+    'for',
+    'and',
+    'or',
+    'but',
+    '修复',
+    '问题',
+    '导致',
+    '错误',
+    '使用',
+    '需要',
+    '可以',
+    '通过',
+    '进行',
+    '设置',
+  ]);
 
   function extractKeywords(text: string): string[] {
     // 提取中英文词汇
