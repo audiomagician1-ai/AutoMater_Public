@@ -288,7 +288,7 @@ export abstract class BaseProbe {
         model,
         messages,
         this.signal,
-        Math.min(this.config.tokenBudget, 4096),
+        this.config.tokenBudget,  // 由调度器根据项目规模动态设置, 不再硬限 4096
         1, // 1 retry for probes (they're cheap)
       );
 

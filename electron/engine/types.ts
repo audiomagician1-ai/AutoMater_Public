@@ -31,6 +31,8 @@ export interface AppSettings {
   workerCount: number;
   /** 每日预算上限 USD (0 = 不限) */
   dailyBudgetUsd: number;
+  /** 项目导入预算上限 USD (0 = 不限, 默认 5.0) — 控制探针总花费 */
+  importBudgetUsd?: number;
   /** TDD 模式: QA 先生成测试骨架, Developer 围绕测试编码 (G14) */
   tddMode?: boolean;
   /** 用户自定义模型定价 (优先于内置价格表)。key = 模型名, value = $/1K tokens */

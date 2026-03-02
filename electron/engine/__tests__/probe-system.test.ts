@@ -322,6 +322,53 @@ describe('planProbes', () => {
       expect(probe.description).toBeTruthy();
     }
   });
+
+  it('scales budgets with project size', () => {
+    // medium project (9 files in test fixture → scale=medium)
+    const medScan = makeScanResult();
+    const medPlan = planProbes(medScan);
+
+    // large project override
+    const lgScan = makeScanResult();
+    lgScan.profile = { ...lgScan.profile, scale: 'large' };
+    const lgPlan = planProbes(lgScan);
+
+    // massive project override
+    const msScan = makeScanResult();
+    msScan.profile = { ...msScan.profile, scale: 'massive' };
+    const msPlan = planProbes(msScan);
+
+    // Entry probe token budget should grow with scale
+    const medEntry = medPlan.probes.find(p => p.type === 'entry')!;
+    const lgEntry = lgPlan.probes.find(p => p.type === 'entry')!;
+    const msEntry = msPlan.probes.find(p => p.type === 'entry')!;
+
+    expect(lgEntry.tokenBudget).toBeGreaterThan(medEntry.tokenBudget);
+    expect(msEntry.tokenBudget).toBeGreaterThan(lgEntry.tokenBudget);
+
+    // maxFilesToRead should also grow
+    expect(lgEntry.maxFilesToRead).toBeGreaterThan(medEntry.maxFilesToRead);
+    expect(msEntry.maxFilesToRead).toBeGreaterThan(lgEntry.maxFilesToRead);
+
+    // medium entry budget should be >= 10K (no longer 8K hard limit)
+    expect(medEntry.tokenBudget).toBeGreaterThanOrEqual(10000);
+
+    // massive entry budget should be >= 16K
+    expect(msEntry.tokenBudget).toBeGreaterThanOrEqual(16000);
+  });
+
+  it('allows multi-round exploration for large projects', () => {
+    const lgScan = makeScanResult();
+    lgScan.profile = { ...lgScan.profile, scale: 'large' };
+    const plan = planProbes(lgScan);
+
+    const entry = plan.probes.find(p => p.type === 'entry')!;
+    expect(entry.maxRounds).toBeGreaterThanOrEqual(2);
+
+    // Non-entry probes for large should also allow multi-round
+    const api = plan.probes.find(p => p.type === 'api-boundary')!;
+    expect(api.maxRounds).toBeGreaterThanOrEqual(2);
+  });
 });
 
 // ═══════════════════════════════════════

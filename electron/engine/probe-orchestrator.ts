@@ -32,9 +32,31 @@ const log = createLogger('probe-orchestrator');
 // Probe Planning
 // ═══════════════════════════════════════
 
+/** Default per-probe token budgets by scale (output maxTokens for callLLM) */
+const SCALE_BUDGETS: Record<string, { entry: number; module: number; api: number; data: number; config: number; smell: number }> = {
+  medium:  { entry: 12000, module: 10000, api: 10000, data: 10000, config: 8000, smell: 8000 },
+  large:   { entry: 16000, module: 12000, api: 12000, data: 12000, config: 10000, smell: 10000 },
+  massive: { entry: 20000, module: 16000, api: 16000, data: 16000, config: 12000, smell: 12000 },
+};
+
+/** Default per-probe maxFilesToRead by scale */
+const SCALE_MAX_FILES: Record<string, { entry: number; module: number; api: number; data: number; config: number; smell: number }> = {
+  medium:  { entry: 15, module: 10, api: 12, data: 12, config: 10, smell: 12 },
+  large:   { entry: 20, module: 14, api: 16, data: 16, config: 12, smell: 16 },
+  massive: { entry: 25, module: 18, api: 20, data: 20, config: 16, smell: 20 },
+};
+
+/** Default maxRounds by scale */
+const SCALE_MAX_ROUNDS: Record<string, { entry: number; module: number; other: number }> = {
+  medium:  { entry: 2, module: 2, other: 1 },
+  large:   { entry: 3, module: 2, other: 2 },
+  massive: { entry: 3, module: 3, other: 2 },
+};
+
 /**
  * Generate exploration plan based on Phase 0 scan results.
- * Probe count scales with project size (medium: 8-12, large: 15-25, massive: 25-40).
+ * All budgets/limits scale dynamically with project size.
+ * Probe count: medium ~6-8, large ~10-15, massive ~15-25.
  */
 export function planProbes(scan: ScanResult): ExplorationPlan {
   const probes: ProbeConfig[] = [];
@@ -44,18 +66,11 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
   const { profile, hubFiles, communities, snapshot } = scan;
   const scale = profile.scale;
 
-  // Token budgets per probe type
-  const budgets = {
-    entry: 8000,
-    module: 6000,
-    'api-boundary': 6000,
-    'data-model': 6000,
-    'config-infra': 5000,
-    smell: 5000,
-  };
+  const budgets = SCALE_BUDGETS[scale] || SCALE_BUDGETS.medium;
+  const maxFiles = SCALE_MAX_FILES[scale] || SCALE_MAX_FILES.medium;
+  const maxRounds = SCALE_MAX_ROUNDS[scale] || SCALE_MAX_ROUNDS.medium;
 
   // ── Entry Probes (priority 1) ──
-  // One probe per entry file
   const entryFiles = scan.seedFiles
     .filter(s => s.reason === 'entry')
     .map(s => s.file);
@@ -65,9 +80,9 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
       id: nextId('entry'),
       type: 'entry',
       seeds: entryFiles.slice(0, 3),
-      graphHops: 4,
-      maxFilesToRead: 12,
-      maxRounds: 2,
+      graphHops: scale === 'massive' ? 5 : 4,
+      maxFilesToRead: maxFiles.entry,
+      maxRounds: maxRounds.entry,
       tokenBudget: budgets.entry,
       priority: 1,
       description: `入口追踪: ${entryFiles.slice(0, 3).join(', ')}`,
@@ -75,16 +90,15 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
   }
 
   // ── Module Probes (priority 2) ──
-  // One probe per community center or hub file
   const moduleSeeds = selectModuleSeeds(hubFiles, communities, scale);
   for (const group of moduleSeeds) {
     probes.push({
       id: nextId('module'),
       type: 'module',
       seeds: group.seeds,
-      graphHops: 2,
-      maxFilesToRead: 8,
-      maxRounds: 1,
+      graphHops: 3,
+      maxFilesToRead: maxFiles.module,
+      maxRounds: maxRounds.module,
       tokenBudget: budgets.module,
       priority: 2,
       description: `模块纵深: ${group.label}`,
@@ -96,9 +110,9 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
     id: nextId('api'),
     type: 'api-boundary',
     seeds: scan.seedFiles.filter(s => s.reason === 'hub').map(s => s.file).slice(0, 5),
-    maxFilesToRead: 10,
-    maxRounds: 1,
-    tokenBudget: budgets['api-boundary'],
+    maxFilesToRead: maxFiles.api,
+    maxRounds: maxRounds.other,
+    tokenBudget: budgets.api,
     priority: 3,
     description: 'API 边界: 路由/handler/IPC 端点',
   });
@@ -108,9 +122,9 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
     id: nextId('data'),
     type: 'data-model',
     seeds: findDataModelSeeds(scan),
-    maxFilesToRead: 10,
-    maxRounds: 1,
-    tokenBudget: budgets['data-model'],
+    maxFilesToRead: maxFiles.data,
+    maxRounds: maxRounds.other,
+    tokenBudget: budgets.data,
     priority: 3,
     description: '数据模型: 类型/Schema/ORM 定义',
   });
@@ -120,9 +134,9 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
     id: nextId('config'),
     type: 'config-infra',
     seeds: findConfigSeeds(scan),
-    maxFilesToRead: 8,
-    maxRounds: 1,
-    tokenBudget: budgets['config-infra'],
+    maxFilesToRead: maxFiles.config,
+    maxRounds: maxRounds.other,
+    tokenBudget: budgets.config,
     priority: 4,
     description: '配置/基础设施: 构建/部署/环境',
   });
@@ -132,8 +146,8 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
     id: nextId('smell'),
     type: 'smell',
     seeds: [],
-    maxFilesToRead: 10,
-    maxRounds: 1,
+    maxFilesToRead: maxFiles.smell,
+    maxRounds: maxRounds.other,
     tokenBudget: budgets.smell,
     priority: 5,
     description: '异常检测: TODO/HACK/大文件/循环依赖',
@@ -145,9 +159,10 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
   // Estimate totals
   const estimatedTotalTokens = probes.reduce((s, p) => s + p.tokenBudget, 0);
   const avgProbeMs = 15000; // ~15s per probe with fast model
-  const estimatedDurationMs = Math.ceil(probes.length / 3) * avgProbeMs; // assuming concurrency=3
+  const estimatedDurationMs = Math.ceil(probes.length / 3) * avgProbeMs;
 
   log.info(`Exploration plan: ${probes.length} probes, ~${estimatedTotalTokens} tokens, ~${Math.round(estimatedDurationMs / 1000)}s`, {
+    scale,
     types: probes.map(p => p.type).join(', '),
   });
 

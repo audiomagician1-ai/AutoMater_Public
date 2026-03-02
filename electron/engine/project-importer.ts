@@ -120,6 +120,22 @@ const MODULE_GRAPH_FILE = '.automater/analysis/module-graph.json';
 const KNOWN_ISSUES_FILE = '.automater/docs/KNOWN-ISSUES.md';
 const MAX_SCAN_FILES = 5000;
 
+/** 默认导入预算 $5 — 足够覆盖大型项目的完整探测 + Phase 2 合成 */
+const DEFAULT_IMPORT_BUDGET_USD = 5.0;
+
+/**
+ * 解析导入预算:
+ *   1. 优先使用用户在设置中配置的 importBudgetUsd
+ *   2. 如果未配置或为 0，使用默认值 $5
+ *   3. 不再与 dailyBudgetUsd 取 min — 导入是一次性操作，不应受日常预算约束
+ */
+function resolveImportBudget(settings: { importBudgetUsd?: number; dailyBudgetUsd?: number }): number {
+  if (settings.importBudgetUsd && settings.importBudgetUsd > 0) {
+    return settings.importBudgetUsd;
+  }
+  return DEFAULT_IMPORT_BUDGET_USD;
+}
+
 // 忽略的目录
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
@@ -490,7 +506,7 @@ async function phase1Probe(
   const reports = await executeProbes(scan, scan.explorationPlan, {
     concurrency: Math.min(settings.workerCount || 3, 4),
     signal,
-    budgetUsd: settings.dailyBudgetUsd > 0 ? Math.min(settings.dailyBudgetUsd, 1.0) : 1.0,
+    budgetUsd: resolveImportBudget(settings),
     settings,
     onProbeComplete: (report) => {
       probeStatuses.set(report.probeId, {
