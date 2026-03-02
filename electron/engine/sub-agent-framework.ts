@@ -106,7 +106,7 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
 
 ## 规则
 - 你只能读取和搜索，不能修改任何文件
-- 先用 list_files 了解结构，再 read_file / search_files 深入
+- ⭐ 先用 search_files / code_search 搜索关键词定位目标，再用 read_file(offset, limit) 精读
 - 使用 deep_research 进行复杂问题的多轮深度调研
 - 使用 web_search_boost 进行多引擎并行搜索获取更全面结果
 - 结论必须具体，引用文件名和行号
@@ -126,7 +126,7 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
     systemPrompt: `你是一位编码实现专家。你的任务是根据需求编写或修改代码。
 
 ## 规则
-- 先阅读相关代码理解上下文，再动手修改
+- ⭐ 先用 search_files 搜索定位相关代码，再用 read_file(offset, limit) 精读目标区域
 - 使用 edit_file 精确编辑，避免 write_file 覆盖已有文件
 - 修改后用 run_command 或 run_test 验证
 - 调用 task_complete 结束并列出改动的文件`,
@@ -154,6 +154,7 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
 
 ## 规则
 - 只读操作，不修改代码
+- ⭐ 用 search_files 定位目标代码，用 read_file(offset, limit) 精读关键段
 - 给出具体的行号和改进建议
 - 区分 must-fix 和 nice-to-have
 - 调用 task_complete 输出完整审查报告`,

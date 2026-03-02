@@ -63,7 +63,7 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
     params: [
       { name: 'path', type: 'string', required: true, maxLength: 500, validate: validateReadPath },
       { name: 'offset', type: 'number', required: false, min: 1, max: 100000 },
-      { name: 'limit', type: 'number', required: false, min: 1, max: 1000 },
+      { name: 'limit', type: 'number', required: false, min: 1, max: 500 },
     ],
     sideEffect: 'none', rateLimit: 60, requiresWorkspace: true,
   },
@@ -518,10 +518,11 @@ export function checkSemanticLoop(
       case 'batch_edit':
         escalation = `🔴 强制策略升级: 你已经对文件 "${targetFile}" 的 edit_file/batch_edit 操作连续失败 ${failCount} 次。\n` +
           `请立即执行以下步骤:\n` +
-          `1. 使用 read_file 重新读取 "${targetFile}" 的完整最新内容\n` +
-          `2. 如果改动范围较大 (>30% 的文件内容)，直接使用 write_file 重写整个文件\n` +
-          `3. 如果改动范围较小，仔细核对 old_string 确保与文件内容完全一致（包括空格和缩进）\n` +
-          `⚠️ 禁止在不 read_file 的情况下再次尝试 edit_file`;
+          `1. 使用 search_files 搜索你想修改的关键内容，获取精确行号\n` +
+          `2. 使用 read_file(offset=行号-5, limit=40) 只读取目标区域的最新内容\n` +
+          `3. 如果改动范围较大 (>30% 的文件内容)，直接使用 write_file 重写整个文件\n` +
+          `4. 如果改动范围较小，仔细核对 old_string 确保与文件内容完全一致（包括空格和缩进）\n` +
+          `⚠️ 禁止在不重新读取的情况下再次尝试 edit_file`;
         break;
       case 'run_command':
       case 'run_test':

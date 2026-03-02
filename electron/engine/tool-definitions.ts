@@ -15,13 +15,13 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
   // ── File Operations ──
   {
     name: 'read_file',
-    description: '读取文件内容（支持任意大小文件）。返回带行号的文本，支持 offset/limit 分页。大文件用流式读取，无大小限制。',
+    description: '读取文件指定行范围的内容。返回带行号的文本。⚡ 最佳实践: 先用 search_files/code_search 定位目标行号，再用 offset+limit 只读需要的部分（如 offset=142, limit=40 只读 30-50 行）。不带 offset 时默认从第 1 行开始，默认只读 200 行。',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: '文件路径（相对于工作区，或绝对路径需要 externalRead 权限）' },
-        offset: { type: 'number', description: '起始行号 (从1开始)，默认1' },
-        limit: { type: 'number', description: '读取行数，默认300（可在全景页配置），最大2000' },
+        offset: { type: 'number', description: '起始行号 (从1开始)。⚡ 建议: 用 search_files 获取行号后设置此参数' },
+        limit: { type: 'number', description: '读取行数，默认200，最大500。⚡ 通常 30-80 行足够理解一个函数/类' },
       },
       required: ['path'],
     },

@@ -66,7 +66,7 @@ const FAILURE_PATTERNS: FailurePattern[] = [
     toolPattern: /edit_file/,
     errorPattern: /old_string not found|未找到匹配|不匹配|old_string.*not/i,
     lessonType: 'param_fix',
-    descriptionTemplate: 'edit_file 的 old_string 与文件内容不匹配。先用 read_file 读取最新内容，确认精确匹配。',
+    descriptionTemplate: 'edit_file 的 old_string 与文件内容不匹配。先用 search_files 搜索目标代码获取行号，再用 read_file(offset, limit=40) 精读最新内容，确认精确匹配后重试。',
   },
 
   // 路径错误

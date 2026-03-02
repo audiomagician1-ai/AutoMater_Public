@@ -138,7 +138,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           const rfContent = fs.readFileSync(rfTarget, 'utf-8');
           const rfLines = rfContent.split('\n');
           const rfOffset = Math.max(1, call.arguments.offset ?? 1);
-          const rfLimit = Math.min(2000, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 300));
+          const rfLimit = Math.min(500, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 200));
           const rfSlice = rfLines.slice(rfOffset - 1, rfOffset - 1 + rfLimit);
           const rfOut = rfSlice.map((l, i) => `${rfOffset + i}| ${l}`).join('\n');
           const rfHasMore = rfOffset - 1 + rfLimit < rfLines.length;

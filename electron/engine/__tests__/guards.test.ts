@@ -54,7 +54,7 @@ describe('guardToolCall', () => {
   it('clamps number to valid range', () => {
     const result = guardToolCall('read_file', { path: 'file.ts', limit: 5000 }, true);
     expect(result.allowed).toBe(true);
-    expect(result.repairedArgs?.limit).toBe(1000); // max is 1000
+    expect(result.repairedArgs?.limit).toBe(500); // max is 500 (精准读写优化)
   });
 
   it('rejects tool requiring workspace when no workspace', () => {

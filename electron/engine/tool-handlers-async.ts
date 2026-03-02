@@ -236,7 +236,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     const inputPath = call.arguments.path || '';
     const normalizedInput = path.normalize(inputPath);
     const offset = Math.max(1, call.arguments.offset ?? 1);
-    const limit = Math.min(2000, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 300));
+    const limit = Math.min(500, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 200));
 
     let targetPath: string;
     if (path.isAbsolute(normalizedInput)) {

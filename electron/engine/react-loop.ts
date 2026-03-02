@@ -462,7 +462,7 @@ export async function reactDeveloperLoop(
           });
           messages.push({
             role: 'user',
-            content: '你需要使用工具来完成任务。请调用合适的工具（如 read_file、write_file、edit_file、run_command 等）。如果任务已全部完成，请调用 task_complete 工具。不要只输出文本，必须使用工具。',
+            content: '你需要使用工具来完成任务。请调用合适的工具（如 search_files 定位代码、read_file(offset,limit) 精读、edit_file 精确修改、run_command 验证等）。如果任务已全部完成，请调用 task_complete 工具。不要只输出文本，必须使用工具。',
           });
           continue;
         }
@@ -861,7 +861,7 @@ export async function reactDeveloperLoop(
         if (otherChanges) {
           messages.push({
             role: 'user',
-            content: otherChanges + '\n\n> 以上是其他并行 Worker 的最新变更，请注意避免冲突。如果你正在修改的文件被其他 Worker 修改过，请先 read_file 获取最新内容。',
+            content: otherChanges + '\n\n> 以上是其他并行 Worker 的最新变更，请注意避免冲突。如果你正在修改的文件被其他 Worker 修改过，请先用 search_files 定位变更区域，再用 read_file(offset, limit) 精读最新内容后再修改。',
           });
         }
       }
