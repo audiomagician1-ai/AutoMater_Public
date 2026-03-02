@@ -15,6 +15,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('DocsPage');
 
 // ═══════════════════════════════════════
 // Types
@@ -419,7 +422,7 @@ export function DocsPage() {
 
   const handleRollbackDoc = (item: DocTreeItem, version: number) => {
     // Placeholder — would call IPC to restore doc to specific version
-    console.log(`Rollback doc ${item.type}:${item.id} to v${version}`);
+    log.info(`Rollback doc ${item.type}:${item.id} to v${version}`);
     setVersionModal(null);
   };
 

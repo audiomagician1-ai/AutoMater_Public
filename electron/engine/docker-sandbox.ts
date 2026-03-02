@@ -202,13 +202,14 @@ export async function execInContainer(
       timedOut: false,
       durationMs: Date.now() - startTime,
     };
-  } catch (err: any) {
-    const timedOut = err.killed === true;
+  } catch (err: unknown) {
+    const e = err as { killed?: boolean; stdout?: string; stderr?: string; message?: string; code?: number };
+    const timedOut = e.killed === true;
     return {
       success: false,
-      stdout: (err.stdout || '').slice(0, 50_000),
-      stderr: (err.stderr || err.message || '').slice(0, 10_000),
-      exitCode: err.code ?? -1,
+      stdout: (e.stdout || '').slice(0, 50_000),
+      stderr: (e.stderr || e.message || '').slice(0, 10_000),
+      exitCode: e.code ?? -1,
       timedOut,
       durationMs: Date.now() - startTime,
     };

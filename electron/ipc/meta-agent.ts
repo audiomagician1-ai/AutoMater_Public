@@ -23,6 +23,7 @@ import { getToolsForRole, executeTool, executeToolAsync, type ToolContext, type 
 import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
+import type { LLMToolCall } from '../engine/types';
 
 const log = createLogger('ipc:meta-agent');
 import { toErrorMessage, createLogger } from '../engine/logger';
@@ -388,7 +389,7 @@ export function setupMetaAgentHandlers() {
 
     // Build messages for LLM
     const systemPrompt = buildSystemPrompt(config, memories);
-    const messages: Array<{ role: string; content: string; tool_calls?: any[]; tool_call_id?: string }> = [
+    const messages: Array<{ role: string; content: string; tool_calls?: LLMToolCall[]; tool_call_id?: string }> = [
       { role: 'system', content: systemPrompt },
     ];
 

@@ -202,14 +202,14 @@ ${config.appUrl ? `\nApp URL for E2E: ${config.appUrl}` : ''}
   try {
     const cleaned = result.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    tests = (parsed.tests || []).slice(0, 10).map((t: any, i: number) => ({
-      id: t.id || `T${String(i + 1).padStart(3, '0')}`,
-      name: t.name || `Test ${i + 1}`,
-      description: t.description || '',
-      type: t.type || 'unit',
-      command: t.command,
-      steps: t.steps,
-      expected: t.expected || '',
+    tests = (parsed.tests || []).slice(0, 10).map((t: Record<string, unknown>, i: number) => ({
+      id: (t.id as string) || `T${String(i + 1).padStart(3, '0')}`,
+      name: (t.name as string) || `Test ${i + 1}`,
+      description: (t.description as string) || '',
+      type: (t.type as string) || 'unit',
+      command: t.command as string,
+      steps: t.steps as string[] | undefined,
+      expected: (t.expected as string) || '',
     }));
   } catch {
     tests = [{

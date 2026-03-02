@@ -106,15 +106,17 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
 ## 规则
 - 你只能读取和搜索，不能修改任何文件
 - 先用 list_files 了解结构，再 read_file / search_files 深入
+- 使用 deep_research 进行复杂问题的多轮深度调研
+- 使用 web_search_boost 进行多引擎并行搜索获取更全面结果
 - 结论必须具体，引用文件名和行号
 - 调用 task_complete 结束并给出结论`,
     tools: [
       'read_file', 'list_files', 'search_files', 'glob_files',
-      'web_search', 'fetch_url',
+      'web_search', 'web_search_boost', 'deep_research', 'fetch_url',
       'memory_read', 'think', 'task_complete',
     ],
     canWrite: false,
-    maxIterations: 10,
+    maxIterations: 12,
     modelTier: 'worker',
   },
 
@@ -172,11 +174,13 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
 - 编写单元测试或集成测试
 - 使用 run_test 执行测试并验证通过
 - 可使用 browser_* 工具做 E2E 测试
+- 使用 run_blackbox_tests 进行自动化黑盒测试 + 迭代修复
 - 调用 task_complete 报告测试结果`,
     tools: [
       'read_file', 'write_file', 'edit_file',
       'list_files', 'search_files', 'glob_files',
       'run_command', 'run_test', 'run_lint',
+      'run_blackbox_tests',
       'browser_launch', 'browser_navigate', 'browser_screenshot', 'browser_snapshot',
       'browser_click', 'browser_type', 'browser_evaluate', 'browser_wait',
       'browser_network', 'browser_close',

@@ -10,6 +10,7 @@
 
 import { getDb } from '../db';
 import type { AppSettings, AnthropicContentBlock, OpenAIFunctionTool } from './types';
+import { NetworkError } from './types';
 import { createLogger } from './logger';
 
 const log = createLogger('llm-client');
@@ -69,12 +70,10 @@ export type StreamCallback = (chunk: string) => void;
  * 不可重试的 LLM 错误 — 模型不存在、API Key 无效、权限不足等。
  * react-loop / workerLoop 见到此错误应立即终止，不再重试。
  */
-export class NonRetryableError extends Error {
-  public readonly statusCode: number;
+export class NonRetryableError extends NetworkError {
   constructor(message: string, statusCode: number) {
-    super(message);
+    super(message, statusCode);
     this.name = 'NonRetryableError';
-    this.statusCode = statusCode;
   }
 }
 
@@ -184,7 +183,7 @@ async function throwOnHttpError(res: Response, provider: string): Promise<void> 
   if (res.status >= 400 && res.status < 500 && res.status !== 429) {
     throw new NonRetryableError(errMsg, res.status);
   }
-  throw new Error(errMsg);
+  throw new NetworkError(errMsg, res.status);
 }
 
 /** Combine multiple AbortSignals — any one aborts → combined aborts */

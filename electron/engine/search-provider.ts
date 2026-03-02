@@ -103,8 +103,8 @@ const braveProvider: ISearchProvider = {
       return { success: false, results: [], content: '', provider: 'brave', durationMs: Date.now() - start, error: `Brave HTTP ${res.status}` };
     }
 
-    const data = await res.json() as any;
-    const results: SearchResult[] = (data.web?.results || []).slice(0, maxResults).map((r: any) => ({
+    const data = await res.json() as { web?: { results?: Array<{ title?: string; url?: string; description?: string; age?: string; page_age?: string }> } };
+    const results: SearchResult[] = (data.web?.results || []).slice(0, maxResults).map((r) => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.description || '',
@@ -136,8 +136,8 @@ const searxngProvider: ISearchProvider = {
       return { success: false, results: [], content: '', provider: 'searxng', durationMs: Date.now() - start, error: `SearXNG HTTP ${res.status}` };
     }
 
-    const data = await res.json() as any;
-    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r: any) => ({
+    const data = await res.json() as { results?: Array<{ title?: string; url?: string; content?: string; publishedDate?: string; engine?: string }> };
+    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r) => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.content || '',
@@ -177,8 +177,8 @@ const tavilyProvider: ISearchProvider = {
       return { success: false, results: [], content: '', provider: 'tavily', durationMs: Date.now() - start, error: `Tavily HTTP ${res.status}` };
     }
 
-    const data = await res.json() as any;
-    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r: any) => ({
+    const data = await res.json() as { results?: Array<{ title?: string; url?: string; content?: string }>; answer?: string };
+    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r) => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.content || '',

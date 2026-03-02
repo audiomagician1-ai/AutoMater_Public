@@ -474,7 +474,7 @@ export async function browserConsole(
     touch();
 
     const messages: string[] = [];
-    const handler = (msg: any) => {
+    const handler = (msg: { type(): string; text(): string }) => {
       const msgType = msg.type();
       if (level === 'all'
         || (level === 'error' && msgType === 'error')

@@ -578,6 +578,19 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           : { success: false, output: `子 Agent ${call.arguments.agent_id} 不存在或已完成` };
       }
 
+      // v8.0: 搜索引擎配置 (同步)
+      case 'configure_search': {
+        const { configureSearch, getAvailableProviders } = require('./search-provider') as typeof import('./search-provider');
+        configureSearch({
+          braveApiKey: call.arguments.brave_api_key,
+          searxngUrl: call.arguments.searxng_url,
+          tavilyApiKey: call.arguments.tavily_api_key,
+          serperApiKey: call.arguments.serper_api_key,
+        });
+        const available = getAvailableProviders();
+        return { success: true, output: `搜索引擎配置已更新\n可用引擎: [${available.join(', ')}]\n\n提示: 配置 API Key 后搜索质量将大幅提升。Brave (免费2000次/月): https://brave.com/search/api/`, action: 'web' };
+      }
+
       default: {
         // MCP / Skill 外部工具 — sync 入口返回 placeholder，实际由 async 路径执行
         if (call.name.startsWith('mcp_') || call.name.startsWith('skill_')) {
@@ -645,6 +658,80 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     });
     const headersSummary = Object.entries(result.headers).slice(0, 10).map(([k, v]) => `${k}: ${v}`).join('\n');
     return { success: result.success, output: `HTTP ${result.status}\n--- Headers ---\n${headersSummary}\n--- Body ---\n${result.body}`.slice(0, 8000), action: 'web' };
+  }
+
+  // ── v8.0: Enhanced Search & Research ──
+  if (call.name === 'web_search_boost') {
+    const result = await webSearchBoost(call.arguments.query, call.arguments.max_results ?? 15);
+    return result.success
+      ? { success: true, output: `[${result.provider}]\n${result.content.slice(0, 8000)}`, action: 'web' }
+      : { success: false, output: `增强搜索失败: ${result.error}`, action: 'web' };
+  }
+
+  if (call.name === 'deep_research') {
+    const { deepResearch } = await import('./research-engine');
+    const { getDb } = await import('../db');
+    const db = getDb();
+    const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
+    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+
+    const abortController = new AbortController();
+    const result = await deepResearch(
+      {
+        question: call.arguments.question,
+        context: call.arguments.context,
+        depth: call.arguments.depth || 'standard',
+      },
+      settings,
+      abortController.signal,
+      (stage: string, detail: string) => log.info(`[research] [${stage}] ${detail}`),
+    );
+
+    if (!result.success) {
+      return { success: false, output: `研究失败: ${result.error}`, action: 'web' };
+    }
+
+    const summary = [
+      `## 深度研究完成`,
+      `置信度: ${result.confidence}% | 来源: ${result.sources.length} | Token: ${result.tokenUsage.input + result.tokenUsage.output}`,
+      `耗时: 分解=${result.timing.decomposition}ms 搜索=${result.timing.search}ms 提取=${result.timing.extraction}ms 分析=${result.timing.synthesis}ms`,
+      '',
+      result.report,
+    ].join('\n');
+
+    return { success: true, output: summary.slice(0, 12000), action: 'web' };
+  }
+
+  // ── v8.0: Black-box Test Runner ──
+  if (call.name === 'run_blackbox_tests') {
+    const { runBlackboxTests } = await import('./blackbox-test-runner');
+    const { getDb } = await import('../db');
+    const db = getDb();
+    const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
+    const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
+
+    const abortController = new AbortController();
+    const result = await runBlackboxTests(
+      {
+        workspacePath: ctx.workspacePath,
+        projectId: ctx.projectId,
+        featureDescription: call.arguments.feature_description,
+        acceptanceCriteria: call.arguments.acceptance_criteria,
+        codeFiles: call.arguments.code_files,
+        maxRounds: call.arguments.max_rounds ?? 5,
+        testTypes: call.arguments.test_types,
+        appUrl: call.arguments.app_url,
+        onProgress: (stage: string, detail: string) => log.info(`[blackbox] [${stage}] ${detail}`),
+      },
+      settings,
+      abortController.signal,
+    );
+
+    return {
+      success: result.success,
+      output: result.markdownReport.slice(0, 10000),
+      action: 'shell',
+    };
   }
 
   // ── Browser ──
@@ -846,10 +933,10 @@ async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Promise<To
     const settingsRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
     const settings: AppSettings = settingsRow ? JSON.parse(settingsRow.value) : {};
 
-    const tasks = (call.arguments.tasks || []).map((t: any) => ({
-      id: t.id,
-      config: { preset: t.preset },
-      task: t.task,
+    const tasks = (call.arguments.tasks || []).map((t: Record<string, unknown>) => ({
+      id: t.id as string,
+      config: { preset: t.preset as string },
+      task: t.task as string,
     }));
 
     const results = await spawnParallel(tasks, ctx, settings, (msg: string) => log.info(msg));

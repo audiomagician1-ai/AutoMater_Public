@@ -1,6 +1,9 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('OutputPage');
 
 // ── Types ──
 interface FileNode {
@@ -208,7 +211,7 @@ export function OutputPage() {
 
   const handleRollback = async (filePath: string, hash: string) => {
     // Placeholder — would run git checkout <hash> -- <file>
-    console.log(`Rollback ${filePath} to ${hash}`);
+    log.info(`Rollback ${filePath} to ${hash}`);
     setVersionModal(null);
     loadTree();
   };
