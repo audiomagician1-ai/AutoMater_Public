@@ -66,6 +66,18 @@ export interface MissionStatus {
   estimatedRemainingCostUsd: number;
 }
 
+/** DB row types (internal) */
+interface ProjectRow { id: string; name: string; wish: string; status: string; workspace_path: string | null }
+interface FeatureStatsRow { total: number; passed: number; failed: number; in_progress: number; todo?: number }
+interface CostStatsRow { total_cost: number; total_tokens?: number }
+interface CheckpointRow {
+  id: number; project_id: string; label: string; project_status: string;
+  features_completed: number; features_total: number; total_tokens: number;
+  total_cost_usd: number; agent_snapshot: string; progress_summary: string; created_at: string;
+}
+interface IdRow { id: string }
+interface FeatureRow { id: string; title: string; status: string; completed_at: string | null }
+
 // ═══════════════════════════════════════
 // DB Schema
 // ═══════════════════════════════════════
@@ -104,7 +116,7 @@ export function ensureCheckpointTable(): void {
 export function createCheckpoint(projectId: string, label: string): Checkpoint | null {
   const db = getDb();
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
   if (!project) return null;
 
   const featureStats = db.prepare(`
@@ -113,13 +125,13 @@ export function createCheckpoint(projectId: string, label: string): Checkpoint |
            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
            SUM(CASE WHEN status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) as in_progress
     FROM features WHERE project_id = ?
-  `).get(projectId) as any;
+  `).get(projectId) as FeatureStatsRow;
 
   const costStats = db.prepare(`
     SELECT COALESCE(SUM(total_input_tokens + total_output_tokens), 0) as total_tokens,
            COALESCE(SUM(total_cost_usd), 0) as total_cost
     FROM agents WHERE project_id = ?
-  `).get(projectId) as any;
+  `).get(projectId) as CostStatsRow;
 
   const agents = db.prepare(
     'SELECT id, role, status, current_task FROM agents WHERE project_id = ?'
@@ -152,7 +164,7 @@ export function createCheckpoint(projectId: string, label: string): Checkpoint |
     projectStatus: project.status,
     featuresCompleted: featureStats.passed,
     featuresTotal: featureStats.total,
-    totalTokens: costStats.total_tokens,
+    totalTokens: costStats.total_tokens ?? 0,
     totalCostUsd: costStats.total_cost,
     agentSnapshot: JSON.stringify(agents),
     progressSummary,
@@ -167,7 +179,7 @@ export function getCheckpoints(projectId: string): Checkpoint[] {
   const db = getDb();
   const rows = db.prepare(
     'SELECT * FROM checkpoints WHERE project_id = ? ORDER BY created_at ASC'
-  ).all(projectId) as any[];
+  ).all(projectId) as CheckpointRow[];
 
   return rows.map(r => ({
     id: r.id,
@@ -191,7 +203,7 @@ export function getLatestCheckpoint(projectId: string): Checkpoint | null {
   const db = getDb();
   const row = db.prepare(
     'SELECT * FROM checkpoints WHERE project_id = ? ORDER BY id DESC LIMIT 1'
-  ).get(projectId) as any;
+  ).get(projectId) as CheckpointRow | undefined;
   if (!row) return null;
 
   return {
@@ -218,7 +230,7 @@ export function getLatestCheckpoint(projectId: string): Checkpoint | null {
  */
 export function getMissionStatus(projectId: string): MissionStatus | null {
   const db = getDb();
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectRow | undefined;
   if (!project) return null;
 
   const featureStats = db.prepare(`
@@ -228,23 +240,23 @@ export function getMissionStatus(projectId: string): MissionStatus | null {
            SUM(CASE WHEN status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) as in_progress,
            SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo
     FROM features WHERE project_id = ?
-  `).get(projectId) as any;
+  `).get(projectId) as FeatureStatsRow;
 
   const costStats = db.prepare(
     'SELECT COALESCE(SUM(total_cost_usd), 0) as total_cost FROM agents WHERE project_id = ?'
-  ).get(projectId) as any;
+  ).get(projectId) as CostStatsRow;
 
   const lastCheckpoint = getLatestCheckpoint(projectId);
 
   // 可续跑: 状态为 paused/developing/error 且还有未完成 feature
   const canResume = ['paused', 'developing', 'error'].includes(project.status) &&
-    (featureStats.todo > 0 || featureStats.in_progress > 0 || featureStats.failed > 0);
+    ((featureStats.todo ?? 0) > 0 || featureStats.in_progress > 0 || featureStats.failed > 0);
 
   // 预估剩余成本: 基于已完成 feature 的平均成本
   let estimatedRemainingCostUsd = 0;
   if (featureStats.passed > 0) {
     const avgCostPerFeature = costStats.total_cost / featureStats.passed;
-    const remaining = featureStats.todo + featureStats.in_progress + featureStats.failed;
+    const remaining = (featureStats.todo ?? 0) + featureStats.in_progress + featureStats.failed;
     estimatedRemainingCostUsd = avgCostPerFeature * remaining;
   }
 
@@ -271,7 +283,7 @@ export function detectResumableProjects(): MissionStatus[] {
   const db = getDb();
   const projects = db.prepare(
     "SELECT id FROM projects WHERE status IN ('paused', 'developing', 'error') ORDER BY updated_at DESC"
-  ).all() as any[];
+  ).all() as IdRow[];
 
   return projects
     .map(p => getMissionStatus(p.id))
@@ -288,7 +300,7 @@ export function generateProgressReport(projectId: string): string {
   const db = getDb();
   const features = db.prepare(
     'SELECT id, title, status, completed_at FROM features WHERE project_id = ? ORDER BY priority, id'
-  ).all(projectId) as any[];
+  ).all(projectId) as FeatureRow[];
 
   const checkpoints = getCheckpoints(projectId);
 

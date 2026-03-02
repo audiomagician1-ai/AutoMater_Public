@@ -30,6 +30,18 @@ import {
 const importAbortControllers = new Map<string, AbortController>();
 const log = createLogger('ipc:project');
 
+/** DB row types for typed queries */
+interface ProjectDbRow {
+  id: string; name: string; wish: string; status: string;
+  workspace_path: string | null; config: string;
+  git_mode: string; github_repo: string | null | undefined; github_token: string | null | undefined;
+  created_at: string; updated_at: string;
+}
+interface ChangeRequestRow {
+  id: string; project_id: string; description: string; status: string;
+  impact_analysis: string | null; affected_features: string; created_at: string; completed_at: string | null;
+}
+
 function generateId(): string {
   return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
@@ -270,7 +282,7 @@ export function setupProjectHandlers() {
 
     // 导入已有项目时不执行 git init（项目已有自己的 git）
     if (!isImport) {
-      await initRepo({ mode: gitMode as any, workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
+      await initRepo({ mode: gitMode as GitProviderConfig['mode'], workspacePath, githubRepo: githubRepo || undefined, githubToken: githubToken || undefined });
     }
 
     // 导入项目用 analyzing 状态; 新项目用 initializing
@@ -710,13 +722,13 @@ export function setupProjectHandlers() {
   // ── 导出项目为 zip ──
   ipcMain.handle('project:export', async (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path || !fs.existsSync(project.workspace_path)) {
       return { success: false, error: '工作区目录不存在' };
     }
 
     // 先 commit 最新状态
-    await gitCommit(getGitConfig(project), 'Export snapshot');
+    await gitCommit(getGitConfig({ ...project, workspace_path: project.workspace_path!, github_repo: project.github_repo ?? undefined, github_token: project.github_token ?? undefined }), 'Export snapshot');
 
     const win = BrowserWindow.getAllWindows()[0] ?? null;
     if (!win) return { success: false, error: '无窗口' };
@@ -737,9 +749,9 @@ export function setupProjectHandlers() {
   // ── Git commit ──
   ipcMain.handle('project:git-commit', async (_event, projectId: string, message: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { success: false };
-    const result = await gitCommit(getGitConfig(project), message);
+    const result = await gitCommit(getGitConfig({ ...project, workspace_path: project.workspace_path!, github_repo: project.github_repo ?? undefined, github_token: project.github_token ?? undefined }), message);
     return { success: result.success, hash: result.hash, pushed: result.pushed };
   });
 
@@ -810,7 +822,7 @@ export function setupProjectHandlers() {
   // ── v4.2: 获取 Feature 文档信息 ──
   ipcMain.handle('project:get-feature-docs', (_event, projectId: string, featureId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { requirement: null, testSpec: null };
 
     return {
@@ -822,7 +834,7 @@ export function setupProjectHandlers() {
   // ── v4.2: 获取设计文档 ──
   ipcMain.handle('project:get-design-doc', (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return null;
 
     return readDoc(project.workspace_path, 'design');
@@ -831,7 +843,7 @@ export function setupProjectHandlers() {
   // ── v4.2: 获取文档变更日志 ──
   ipcMain.handle('project:get-doc-changelog', (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return [];
 
     return getChangelog(project.workspace_path);
@@ -840,7 +852,7 @@ export function setupProjectHandlers() {
   // ── v4.4: 列出所有文档元信息 ──
   ipcMain.handle('project:list-all-docs', (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return { design: [], requirements: [], testSpecs: [] };
 
     return {
@@ -853,10 +865,10 @@ export function setupProjectHandlers() {
   // ── v4.4: 读取单个文档内容 ──
   ipcMain.handle('project:read-doc', (_event, projectId: string, type: string, id: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project?.workspace_path) return null;
 
-    return readDoc(project.workspace_path, type as any, id);
+    return readDoc(project.workspace_path, type as 'design' | 'requirement' | 'test_spec', id);
   });
 
   // ── v4.3: 提交需求变更 ──
@@ -888,7 +900,7 @@ export function setupProjectHandlers() {
   // ── v4.3: 获取影响分析 ──
   ipcMain.handle('project:get-impact-analysis', (_event, changeRequestId: string) => {
     const db = getDb();
-    const row = db.prepare("SELECT * FROM change_requests WHERE id = ?").get(changeRequestId) as any;
+    const row = db.prepare("SELECT * FROM change_requests WHERE id = ?").get(changeRequestId) as ChangeRequestRow | undefined;
     if (!row) return null;
     return {
       ...row,
@@ -900,7 +912,7 @@ export function setupProjectHandlers() {
   // ── 分析已有项目 (v5.1: Project Importer) ──
   ipcMain.handle('project:analyze-existing', async (_event, projectId: string) => {
     const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectDbRow | undefined;
     if (!project) return { success: false, error: 'Project not found' };
 
     const workspacePath = project.workspace_path;

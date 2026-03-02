@@ -64,6 +64,18 @@ function assertSafePath(filePath: string): { ok: true; normalized: string } | { 
   return { ok: true, normalized };
 }
 
+/**
+ * v16.0: 解析只读路径 — 支持绝对路径（仅用于 read_file / list_files / search_files 等只读操作）
+ * 如果传入的是绝对路径且存在，直接返回；否则拼接 workspacePath。
+ */
+function resolveReadPath(workspacePath: string, inputPath: string): string {
+  const normalized = path.normalize(inputPath || '');
+  if (path.isAbsolute(normalized) && fs.existsSync(normalized)) {
+    return normalized;
+  }
+  return path.join(workspacePath, normalized);
+}
+
 // ═══════════════════════════════════════
 // v6.0: 搜索结果智能排序
 // ═══════════════════════════════════════
@@ -174,7 +186,20 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
     switch (call.name) {
 
       case 'read_file': {
-        const content = readWorkspaceFile(ctx.workspacePath, call.arguments.path);
+        // v16.0: 支持绝对路径只读访问（PM 分析外部工程时需要）
+        const inputPath = call.arguments.path || '';
+        const normalizedInput = path.normalize(inputPath);
+        let content: string | null;
+        if (path.isAbsolute(normalizedInput) && fs.existsSync(normalizedInput) && fs.statSync(normalizedInput).isFile()) {
+          const stat = fs.statSync(normalizedInput);
+          if (stat.size > 1024 * 1024) {
+            content = `[文件过大: ${(stat.size / 1024).toFixed(0)} KB, 超过 1MB 限制]`;
+          } else {
+            content = fs.readFileSync(normalizedInput, 'utf-8');
+          }
+        } else {
+          content = readWorkspaceFile(ctx.workspacePath, inputPath);
+        }
         if (content === null) return { success: false, output: `文件不存在: ${call.arguments.path}`, action: 'read' };
         const lines = content.split('\n');
         const offset = Math.max(1, call.arguments.offset ?? 1);

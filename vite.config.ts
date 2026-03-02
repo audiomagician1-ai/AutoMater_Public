@@ -4,10 +4,12 @@ import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import path from 'path';
 
+const isRelease = process.env.RELEASE_BUILD === '1';
+
 export default defineConfig({
   build: {
-    sourcemap: true,
-    minify: false,
+    sourcemap: isRelease ? false : true,
+    minify: isRelease ? 'esbuild' : false,
   },
   plugins: [
     react(),
