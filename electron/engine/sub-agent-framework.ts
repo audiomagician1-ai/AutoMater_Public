@@ -218,7 +218,9 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
 
 ## 规则
 - 执行命令前先检查前置条件
-- 使用 http_request 验证服务状态
+- 使用 deploy_compose / deploy_pm2 进行自动化部署
+- 使用 generate_nginx_config / generate_dockerfile 生成配置
+- 部署后用 health_check 验证服务状态
 - 记录每一步操作和结果
 - 调用 task_complete 报告部署结果`,
     tools: [
@@ -228,6 +230,11 @@ const PRESETS: Record<SubAgentPresetId, PresetDef> = {
       'git_commit', 'git_diff', 'git_log',
       'memory_read', 'memory_append',
       'think', 'task_complete',
+      // v9.0: Deployment Tools
+      'deploy_compose', 'deploy_compose_down', 'deploy_pm2', 'deploy_pm2_status',
+      'generate_nginx_config', 'generate_dockerfile', 'health_check',
+      // v9.0: Docker Sandbox (infra testing)
+      'sandbox_init', 'sandbox_exec', 'sandbox_write', 'sandbox_read', 'sandbox_destroy',
     ],
     canWrite: true,
     maxIterations: 12,

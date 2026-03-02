@@ -37,6 +37,10 @@ export function isRetryableTool(toolName: string): boolean {
     'think',
     // 视觉分析 — 无副作用
     'analyze_image', 'compare_screenshots', 'visual_assert',
+    // 图像生成 — 幂等 (可重试)
+    'generate_image',
+    // 健康检查 — 无副作用
+    'health_check', 'deploy_pm2_status',
   ]);
   return RETRYABLE.has(toolName);
 }
