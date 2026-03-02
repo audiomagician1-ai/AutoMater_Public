@@ -25,7 +25,7 @@ describe('summarizeToolResult', () => {
   it('summarizes command output with errors first', () => {
     const output = [
       'Building...',
-      ...Array.from({ length: 200 }, (_, i) => `Compiling module ${i} with dependency resolution...`),
+      ...Array.from({ length: 200 }, (_, i) => `Compiling module ${i} with dependency resolution and additional verbose information that makes each line much longer`),
       'ERROR: Cannot find module "express"',
       'ERROR: TypeScript error at line 42',
       'Build failed with 2 errors',
@@ -50,7 +50,7 @@ describe('summarizeToolResult', () => {
       'https://example.com/react',
       'A different resource about React that has unique content and a different URL',
       '',
-      ...Array.from({ length: 50 }, (_, i) => `${i + 4}. Article ${i}\nhttps://site${i}.com/article\nDescription for article ${i} with detailed content\n`),
+      ...Array.from({ length: 100 }, (_, i) => `${i + 4}. Article ${i}\nhttps://site${i}.com/article\nDescription for article ${i} with lots of detailed content and extra verbose text to ensure total length exceeds limit\n`),
     ].join('\n');
     const result = summarizeToolResult('web_search', output);
     expect(result.text).toContain('结果');
@@ -66,13 +66,14 @@ describe('summarizeToolResult', () => {
   it('summarizes browser snapshot by extracting interactive elements', () => {
     const snapshot = [
       'heading "Welcome to the application"',
-      ...Array.from({ length: 100 }, (_, i) => `paragraph "Content block ${i} with lots of text that needs to be long enough to exceed the character limit for browser snapshots"`),
+      ...Array.from({ length: 100 }, (_, i) => `paragraph "Content block ${i} with lots of text that needs to be long enough to exceed the character limit for browser snapshots and force summarization to trigger"`),
       'button "Submit Form"',
       'link "Home Page"',
       'textbox "Email Address"',
       'button "Cancel Action"',
     ].join('\n');
     const result = summarizeToolResult('browser_snapshot', snapshot);
+    // browser_snapshot 基准限制 3000 chars, snapshot 超过后触发摘要
     expect(result.wasSummarized).toBe(true);
     expect(result.text).toContain('交互');
     expect(result.text).toContain('Submit');
