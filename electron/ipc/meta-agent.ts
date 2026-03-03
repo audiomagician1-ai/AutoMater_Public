@@ -266,7 +266,7 @@ function getMemoryStats(): { total: number; byCategory: Record<string, number> }
 const PRODUCT_KNOWLEDGE = `
 ## 产品概述
 
-你所服务的产品叫"智械母机 AutoMater"（也叫 AgentForge），是一个**本地运行的 AI 驱动软件开发平台**。
+你所服务的产品叫"智械母机 AutoMater"，是一个**本地运行的 AI 驱动软件开发平台**。
 用户通过自然语言描述需求，由一支虚拟 Agent 团队自动完成软件开发全流程。
 技术栈: Electron 33 + React 19 + TypeScript + Vite + Zustand + better-sqlite3，完全本地离线运行（仅调用 LLM API 需要网络）。
 

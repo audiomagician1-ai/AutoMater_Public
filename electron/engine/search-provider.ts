@@ -89,6 +89,287 @@ interface ISearchProvider {
 // Provider Implementations
 // ═══════════════════════════════════════
 
+// 通用 User-Agent 池 — 轮换降低被封概率
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+];
+let _uaIndex = 0;
+function rotateUA(): string {
+  return USER_AGENTS[_uaIndex++ % USER_AGENTS.length];
+}
+
+/** 通用 HTML entity 解码 */
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+// ─── Google HTML (零 Key, 主力) ───
+
+const googleProvider: ISearchProvider = {
+  name: 'google',
+  isConfigured: () => true, // 始终可用
+  async search(query, maxResults, cfg) {
+    const start = Date.now();
+    try {
+      // Google 搜索 — hl=en 保证 HTML 结构一致性, num 控制结果数
+      const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${Math.min(maxResults + 2, 20)}&hl=en`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': rotateUA(),
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
+          'Accept-Encoding': 'identity',
+        },
+        signal: AbortSignal.timeout(cfg.timeout || 12000),
+        redirect: 'follow',
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'google',
+          durationMs: Date.now() - start,
+          error: `Google HTTP ${res.status}`,
+        };
+      }
+
+      const html = await res.text();
+      const results = parseGoogleHtml(html, maxResults);
+
+      if (results.length === 0) {
+        // 可能被 CAPTCHA 拦截
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'google',
+          durationMs: Date.now() - start,
+          error: 'Google: no results (possible CAPTCHA)',
+        };
+      }
+
+      const content = formatResultsToMarkdown(results, query, 'Google');
+      return { success: true, results, content, provider: 'google', durationMs: Date.now() - start };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'google',
+        durationMs: Date.now() - start,
+        error: `Google: ${msg}`,
+      };
+    }
+  },
+};
+
+/** 解析 Google 搜索结果 HTML */
+function parseGoogleHtml(html: string, max: number): SearchResult[] {
+  const results: SearchResult[] = [];
+
+  // Google 结果在 <div class="g"> 块中 (有时嵌套)
+  // 核心 pattern: <a href="/url?q=REAL_URL&..."><h3>TITLE</h3></a> ... <span>SNIPPET</span>
+  // 也有直接 <a href="https://..."><h3>TITLE</h3></a> 的形式
+
+  // 策略1: 匹配 <a href="..."><h3...>TITLE</h3></a>
+  const linkH3Regex = /<a\s+href="([^"]*)"[^>]*><br\s*\/?>?<h3[^>]*>([\s\S]*?)<\/h3>/gi;
+  // 策略2: 更宽松的 <a ... href><h3>
+  const linkH3Regex2 = /<a\s[^>]*href="([^"]*)"[^>]*>[\s\S]*?<h3[^>]*>([\s\S]*?)<\/h3>/gi;
+
+  const seen = new Set<string>();
+
+  for (const regex of [linkH3Regex, linkH3Regex2]) {
+    let match;
+    while ((match = regex.exec(html)) !== null && results.length < max) {
+      let href = match[1];
+      const title = decodeHtmlEntities(match[2].replace(/<[^>]+>/g, '').trim());
+
+      if (!title || title.length < 3) continue;
+
+      // 解包 Google redirect
+      const qMatch = href.match(/[?&]q=([^&]+)/);
+      if (qMatch) {
+        try {
+          href = decodeURIComponent(qMatch[1]);
+        } catch {
+          /* keep */
+        }
+      }
+
+      // 过滤无效 URL
+      if (!href.startsWith('http') || href.includes('google.com/search') || href.includes('accounts.google')) continue;
+      if (seen.has(href)) continue;
+      seen.add(href);
+
+      // 尝试从 href 附近找 snippet
+      const afterMatch = html.slice(match.index + match[0].length, match.index + match[0].length + 2000);
+      let snippet = '';
+
+      // Google snippet 通常在后续的 <span> 或 <div class="..."> 中
+      // 简单策略: 找第一段纯文本
+      const spanSnippet = afterMatch.match(
+        /<span[^>]*class="[^"]*(?:st|IsZvec|VwiC3b|hgKElc)[^"]*"[^>]*>([\s\S]*?)<\/span>/i,
+      );
+      if (spanSnippet) {
+        snippet = decodeHtmlEntities(spanSnippet[1].replace(/<[^>]+>/g, '').trim());
+      }
+      if (!snippet) {
+        // fallback: <div class="VwiC3b ..."> or any data-sncf
+        const divSnippet =
+          afterMatch.match(/<(?:div|span)[^>]*data-sncf[^>]*>([\s\S]*?)<\/(?:div|span)>/i) ||
+          afterMatch.match(/<div[^>]*class="[^"]*VwiC3b[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        if (divSnippet) {
+          snippet = decodeHtmlEntities((divSnippet[1] || '').replace(/<[^>]+>/g, '').trim());
+        }
+      }
+      if (!snippet) {
+        // ultra-fallback: 取 200 字符清洗后的文本
+        snippet = decodeHtmlEntities(
+          afterMatch
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        ).slice(0, 200);
+      }
+
+      results.push({ title, url: href, snippet: snippet.slice(0, 500), source: 'google' });
+    }
+    if (results.length >= max) break;
+  }
+
+  return results;
+}
+
+// ─── Bing HTML (零 Key, 第二引擎) ───
+
+const bingProvider: ISearchProvider = {
+  name: 'bing',
+  isConfigured: () => true, // 始终可用
+  async search(query, maxResults, cfg) {
+    const start = Date.now();
+    try {
+      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${Math.min(maxResults + 2, 20)}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': rotateUA(),
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'identity',
+        },
+        signal: AbortSignal.timeout(cfg.timeout || 12000),
+        redirect: 'follow',
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'bing',
+          durationMs: Date.now() - start,
+          error: `Bing HTTP ${res.status}`,
+        };
+      }
+
+      const html = await res.text();
+      const results = parseBingHtml(html, maxResults);
+
+      if (results.length === 0) {
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'bing',
+          durationMs: Date.now() - start,
+          error: 'Bing: no results parsed',
+        };
+      }
+
+      const content = formatResultsToMarkdown(results, query, 'Bing');
+      return { success: true, results, content, provider: 'bing', durationMs: Date.now() - start };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'bing',
+        durationMs: Date.now() - start,
+        error: `Bing: ${msg}`,
+      };
+    }
+  },
+};
+
+/** 解析 Bing 搜索结果 HTML */
+function parseBingHtml(html: string, max: number): SearchResult[] {
+  const results: SearchResult[] = [];
+
+  // Bing 结果在 <li class="b_algo"> 块中
+  const blocks = html.split(/<li\s+class="b_algo"/gi);
+
+  for (let i = 1; i < blocks.length && results.length < max; i++) {
+    const block = blocks[i];
+
+    // 提取标题和 URL: <a href="URL" ...><h2>TITLE</h2></a>
+    // 或者 <h2><a href="URL">TITLE</a></h2>
+    const linkMatch = block.match(/<a\s+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+
+    const href = linkMatch[1];
+    // 标题可能在 <h2> 内, 也可能直接在 <a> 内
+    let title = '';
+    const h2Match = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+    if (h2Match) {
+      title = decodeHtmlEntities(h2Match[1].replace(/<[^>]+>/g, '').trim());
+    }
+    if (!title) {
+      title = decodeHtmlEntities(linkMatch[2].replace(/<[^>]+>/g, '').trim());
+    }
+    if (!title || !href.startsWith('http')) continue;
+
+    // 提取摘要: <p> 或 <div class="b_caption"><p>
+    let snippet = '';
+    const captionMatch = block.match(/<div\s+class="b_caption"[^>]*>([\s\S]*?)<\/div>/i);
+    if (captionMatch) {
+      const pMatch = captionMatch[1].match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+      if (pMatch) {
+        snippet = decodeHtmlEntities(pMatch[1].replace(/<[^>]+>/g, '').trim());
+      }
+    }
+    if (!snippet) {
+      // fallback: 找块内任意 <p>
+      const pMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+      if (pMatch) {
+        snippet = decodeHtmlEntities(pMatch[1].replace(/<[^>]+>/g, '').trim());
+      }
+    }
+
+    // 过滤 Bing 内部链接
+    if (href.includes('bing.com') || href.includes('microsoft.com/bing')) continue;
+
+    results.push({ title, url: href, snippet: snippet.slice(0, 500), source: 'bing' });
+  }
+
+  return results;
+}
+
 // ─── Brave Search ───
 
 const braveProvider: ISearchProvider = {
@@ -475,15 +756,30 @@ function parseJinaResults(text: string, max: number): SearchResult[] {
 // ═══════════════════════════════════════
 
 const ALL_PROVIDERS: ISearchProvider[] = [
+  // 零 Key 免费引擎 (HTML 爬取)
+  googleProvider,
+  bingProvider,
+  duckduckgoProvider,
+  // 付费 API 引擎 (需 Key, 更稳定)
   braveProvider,
   searxngProvider,
   tavilyProvider,
   serperProvider,
   jinaProvider,
-  duckduckgoProvider,
 ];
 
-const DEFAULT_FALLBACK_ORDER: ProviderName[] = ['brave', 'searxng', 'tavily', 'serper', 'jina', 'duckduckgo'];
+// 默认 fallback 顺序: 付费优先(如果配了) → 免费兜底
+// search() 函数会自动过滤未配置的引擎, 所以实际零配置时走 google → bing → ddg
+const DEFAULT_FALLBACK_ORDER: ProviderName[] = [
+  'brave',
+  'searxng',
+  'tavily',
+  'serper',
+  'jina', // 付费 (有 key 才会尝试)
+  'google',
+  'bing',
+  'duckduckgo', // 免费兜底 (始终可用)
+];
 
 // ═══════════════════════════════════════
 // Search Manager (singleton)
@@ -506,8 +802,9 @@ export function getAvailableProviders(): ProviderName[] {
 /**
  * 搜索 — Fallback Chain
  *
- * 按优先级依次尝试配置的引擎。第一个成功的返回结果。
- * Jina 作为最后 fallback 始终可用。
+ * 按优先级依次尝试已配置的引擎。第一个成功的返回结果。
+ * 零配置时自动走: Google → Bing → DuckDuckGo (全免费)
+ * 配了 API Key 时: 付费引擎优先 → 免费兜底
  */
 export async function search(
   query: string,
@@ -524,8 +821,10 @@ export async function search(
     return p && p.isConfigured(_config);
   });
 
-  // 确保 DuckDuckGo 兜底 (零 key, 始终可用)
-  if (!configuredOrder.includes('duckduckgo')) configuredOrder.push('duckduckgo');
+  // 确保免费引擎兜底 (零 key, 始终可用)
+  for (const freeEngine of ['google', 'bing', 'duckduckgo'] as ProviderName[]) {
+    if (!configuredOrder.includes(freeEngine)) configuredOrder.push(freeEngine);
+  }
 
   const errors: string[] = [];
 
@@ -659,84 +958,87 @@ export interface ReadUrlResponse {
 /**
  * 抓取 URL 内容 (增强版)
  *
- * 策略: Jina Reader → 原生 fetch + 简易 HTML 清洗
+ * 策略优先级:
+ *   1. 原生 fetch + 智能 HTML 清洗 (零依赖, 始终可用)
+ *   2. Jina Reader (如果配了 API Key, 质量更高, 擅长 JS 渲染页面)
+ *
  * 自动截断超长内容。
  */
 export async function readUrl(url: string, maxLength: number = 20000): Promise<ReadUrlResponse> {
-  // 策略 1: Jina Reader (需要 API Key)
-  try {
-    const jinaUrl = `https://r.jina.ai/${url}`;
-    const jinaHeaders: Record<string, string> = {
-      Accept: 'text/plain',
-      'User-Agent': 'agentforge/8.0',
-      'X-Retain-Images': 'none',
-      'X-Timeout': '15',
-    };
-    if (_config.jinaApiKey) {
-      jinaHeaders['Authorization'] = `Bearer ${_config.jinaApiKey}`;
-    }
-    const res = await fetch(jinaUrl, {
-      method: 'GET',
-      headers: jinaHeaders,
-      signal: AbortSignal.timeout(20000),
-    });
-
-    if (res.ok) {
-      const text = await res.text();
-      const titleMatch = text.match(/^Title:\s*(.+)/m);
-      const title = titleMatch ? titleMatch[1].trim() : '';
-      const content =
-        text.length > maxLength ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]` : text;
-      return { success: true, content, title, length: text.length };
-    }
-  } catch {
-    /* silent: fetch/解析失败,返回空结果 */
-    // Jina 失败, 继续 fallback
-  }
-
-  // 策略 2: 原生 fetch + HTML 清洗
+  // 策略 1: 原生 fetch + HTML 清洗 (零依赖, 优先)
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgentForge/8.0',
+        'User-Agent': rotateUA(),
         Accept: 'text/html,application/xhtml+xml,text/plain,application/json',
+        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
+        'Accept-Encoding': 'identity',
       },
       signal: AbortSignal.timeout(15000),
+      redirect: 'follow',
     });
 
-    if (!res.ok) {
-      return { success: false, content: '', title: '', length: 0, error: `HTTP ${res.status}` };
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      let text = await res.text();
+
+      // JSON → 直接返回
+      if (contentType.includes('json')) {
+        const truncated = text.length > maxLength ? text.slice(0, maxLength) + '\n...[截断]' : text;
+        return { success: true, content: truncated, title: url, length: text.length };
+      }
+
+      // 先提取 title (在 HTML 清洗之前)
+      const titleMatch = text.match(/<title>([^<]*)<\/title>/i);
+      const title = titleMatch ? decodeHtmlEntities(titleMatch[1].trim()) : '';
+
+      // HTML → 清洗
+      if (contentType.includes('html') || text.trimStart().startsWith('<')) {
+        text = stripHtml(text);
+      }
+
+      // 如果清洗后内容足够丰富, 直接返回
+      if (text.length > 200) {
+        const content =
+          text.length > maxLength ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]` : text;
+        return { success: true, content, title, length: text.length };
+      }
+      // 内容太短 (可能是 JS 渲染页面), 尝试 Jina fallback
     }
-
-    const contentType = res.headers.get('content-type') || '';
-    let text = await res.text();
-
-    // JSON → 直接返回
-    if (contentType.includes('json')) {
-      const truncated = text.length > maxLength ? text.slice(0, maxLength) + '\n...[截断]' : text;
-      return { success: true, content: truncated, title: url, length: text.length };
-    }
-
-    // 先提取 title (在 HTML 清洗之前, 否则标签已被删除)
-    const titleMatch = text.match(/<title>([^<]*)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-
-    // HTML → 简易清洗
-    if (contentType.includes('html')) {
-      text = stripHtml(text);
-    }
-
-    const content = text.length > maxLength ? text.slice(0, maxLength) + '\n...[截断]' : text;
-    return { success: true, content, title, length: text.length };
-  } catch (err: unknown) {
-    return {
-      success: false,
-      content: '',
-      title: '',
-      length: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
+  } catch {
+    /* silent: 原生 fetch 失败, 尝试 Jina */
   }
+
+  // 策略 2: Jina Reader (如果配了 Key, 擅长处理 JS 渲染页面)
+  if (_config.jinaApiKey) {
+    try {
+      const jinaUrl = `https://r.jina.ai/${url}`;
+      const res = await fetch(jinaUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/plain',
+          'User-Agent': 'agentforge/8.0',
+          'X-Retain-Images': 'none',
+          'X-Timeout': '15',
+          Authorization: `Bearer ${_config.jinaApiKey}`,
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (res.ok) {
+        const text = await res.text();
+        const titleMatch = text.match(/^Title:\s*(.+)/m);
+        const title = titleMatch ? titleMatch[1].trim() : '';
+        const content =
+          text.length > maxLength ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]` : text;
+        return { success: true, content, title, length: text.length };
+      }
+    } catch {
+      /* Jina 也失败 */
+    }
+  }
+
+  return { success: false, content: '', title: '', length: 0, error: `无法抓取: ${url}` };
 }
 
 /** 简易 HTML → 文本清洗 */

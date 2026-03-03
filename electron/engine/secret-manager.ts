@@ -17,7 +17,7 @@ const log = createLogger('secret-manager');
 // Encryption
 // ═══════════════════════════════════════
 
-/** 应用固定盐 — 与 machineId 一起派生加密密钥 */
+/** 应用固定盐 — 与 machineId 一起派生加密密钥。⚠️ 不可修改: 历史遗留标识,改动会导致已加密数据无法解密 */
 const APP_SALT = 'AgentForge:SecretManager:v1:a8f3b2c1';
 
 /** 缓存派生密钥 */
@@ -36,7 +36,8 @@ function getEncryptionKey(): Buffer {
     // Electron 环境: 使用进程 PID 文件夹路径作为 machine 标识 (跨重启稳定)
     const { app } = require('electron');
     machineId = app.getPath('userData');
-  } catch { /* silent: electron app路径获取失败,使用回退 */
+  } catch {
+    /* silent: electron app路径获取失败,使用回退 */
     // 非 Electron 环境 (测试): 使用 hostname
     const os = require('os');
     machineId = os.hostname();
@@ -45,9 +46,9 @@ function getEncryptionKey(): Buffer {
   derivedKey = crypto.pbkdf2Sync(
     machineId,
     APP_SALT,
-    100_000,  // iterations
-    32,       // key length (AES-256)
-    'sha256'
+    100_000, // iterations
+    32, // key length (AES-256)
+    'sha256',
   );
 
   return derivedKey;
@@ -56,7 +57,7 @@ function getEncryptionKey(): Buffer {
 /** AES-256-GCM 加密 */
 function encrypt(plaintext: string): string {
   const key = getEncryptionKey();
-  const iv = crypto.randomBytes(12);  // GCM 推荐 12 字节 IV
+  const iv = crypto.randomBytes(12); // GCM 推荐 12 字节 IV
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
   let encrypted = cipher.update(plaintext, 'utf-8', 'hex');
@@ -107,14 +108,16 @@ export function setSecret(projectId: string, key: string, value: string, provide
   const db = getDb();
   const encrypted = encrypt(value);
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO project_secrets (project_id, key, value, provider, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'))
     ON CONFLICT (project_id, key) DO UPDATE SET
       value = excluded.value,
       provider = excluded.provider,
       updated_at = datetime('now')
-  `).run(projectId, key, encrypted, provider);
+  `,
+  ).run(projectId, key, encrypted, provider);
 
   log.info(`Secret set: ${projectId}/${key} [${provider}]`);
 }
@@ -122,9 +125,9 @@ export function setSecret(projectId: string, key: string, value: string, provide
 /** 读取密钥 (明文) */
 export function getSecret(projectId: string, key: string): string | null {
   const db = getDb();
-  const row = db.prepare(
-    'SELECT value FROM project_secrets WHERE project_id = ? AND key = ?'
-  ).get(projectId, key) as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM project_secrets WHERE project_id = ? AND key = ?').get(projectId, key) as
+    | { value: string }
+    | undefined;
 
   if (!row) return null;
 
@@ -142,13 +145,15 @@ export function listSecrets(projectId: string, provider?: SecretProvider): Secre
   let rows: Array<{ key: string; value: string; provider: string; updated_at: string }>;
 
   if (provider) {
-    rows = db.prepare(
-      'SELECT key, value, provider, updated_at FROM project_secrets WHERE project_id = ? AND provider = ? ORDER BY key'
-    ).all(projectId, provider) as typeof rows;
+    rows = db
+      .prepare(
+        'SELECT key, value, provider, updated_at FROM project_secrets WHERE project_id = ? AND provider = ? ORDER BY key',
+      )
+      .all(projectId, provider) as typeof rows;
   } else {
-    rows = db.prepare(
-      'SELECT key, value, provider, updated_at FROM project_secrets WHERE project_id = ? ORDER BY key'
-    ).all(projectId) as typeof rows;
+    rows = db
+      .prepare('SELECT key, value, provider, updated_at FROM project_secrets WHERE project_id = ? ORDER BY key')
+      .all(projectId) as typeof rows;
   }
 
   return rows.map(r => {
@@ -160,7 +165,8 @@ export function listSecrets(projectId: string, provider?: SecretProvider): Secre
       } else {
         maskedValue = plain.slice(0, 4) + '…' + plain.slice(-4);
       }
-    } catch { /* silent: 解密失败,值不可用 */
+    } catch {
+      /* silent: 解密失败,值不可用 */
       maskedValue = '(解密失败)';
     }
 
@@ -176,18 +182,16 @@ export function listSecrets(projectId: string, provider?: SecretProvider): Secre
 /** 删除密钥 */
 export function deleteSecret(projectId: string, key: string): boolean {
   const db = getDb();
-  const result = db.prepare(
-    'DELETE FROM project_secrets WHERE project_id = ? AND key = ?'
-  ).run(projectId, key);
+  const result = db.prepare('DELETE FROM project_secrets WHERE project_id = ? AND key = ?').run(projectId, key);
   return result.changes > 0;
 }
 
 /** 批量获取某个 provider 的所有密钥 (明文 key-value 对) — 用于环境变量注入 */
 export function getProviderSecrets(projectId: string, provider: SecretProvider): Record<string, string> {
   const db = getDb();
-  const rows = db.prepare(
-    'SELECT key, value FROM project_secrets WHERE project_id = ? AND provider = ?'
-  ).all(projectId, provider) as Array<{ key: string; value: string }>;
+  const rows = db
+    .prepare('SELECT key, value FROM project_secrets WHERE project_id = ? AND provider = ?')
+    .all(projectId, provider) as Array<{ key: string; value: string }>;
 
   const result: Record<string, string> = {};
   for (const r of rows) {
@@ -203,9 +207,7 @@ export function getProviderSecrets(projectId: string, provider: SecretProvider):
 /** 检查某个密钥是否存在 */
 export function hasSecret(projectId: string, key: string): boolean {
   const db = getDb();
-  const row = db.prepare(
-    'SELECT 1 FROM project_secrets WHERE project_id = ? AND key = ?'
-  ).get(projectId, key);
+  const row = db.prepare('SELECT 1 FROM project_secrets WHERE project_id = ? AND key = ?').get(projectId, key);
   return !!row;
 }
 
@@ -219,9 +221,9 @@ export function hasSecret(projectId: string, key: string): boolean {
  */
 export function migrateGitHubTokensFromProjects(): number {
   const db = getDb();
-  const rows = db.prepare(
-    "SELECT id, github_token, github_repo FROM projects WHERE github_token IS NOT NULL AND github_token != ''"
-  ).all() as Array<{ id: string; github_token: string; github_repo: string | null }>;
+  const rows = db
+    .prepare("SELECT id, github_token, github_repo FROM projects WHERE github_token IS NOT NULL AND github_token != ''")
+    .all() as Array<{ id: string; github_token: string; github_repo: string | null }>;
 
   let migrated = 0;
   for (const row of rows) {
@@ -254,16 +256,19 @@ export function migrateGitHubTokensFromProjects(): number {
  * 构建 GitProviderConfig，优先从 project_secrets 读取 token，
  * 回退到 projects 表的旧字段 (向后兼容)。
  */
-export function getGitConfigFromSecrets(projectId: string, workspacePath: string): {
+export function getGitConfigFromSecrets(
+  projectId: string,
+  workspacePath: string,
+): {
   mode: 'local' | 'github';
   workspacePath: string;
   githubRepo?: string;
   githubToken?: string;
 } {
   const db = getDb();
-  const project = db.prepare(
-    'SELECT git_mode, github_repo, github_token FROM projects WHERE id = ?'
-  ).get(projectId) as { git_mode: string; github_repo: string | null; github_token: string | null } | undefined;
+  const project = db.prepare('SELECT git_mode, github_repo, github_token FROM projects WHERE id = ?').get(projectId) as
+    | { git_mode: string; github_repo: string | null; github_token: string | null }
+    | undefined;
 
   if (!project) {
     return { mode: 'local', workspacePath };

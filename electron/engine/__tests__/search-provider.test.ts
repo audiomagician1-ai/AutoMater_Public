@@ -19,19 +19,24 @@ beforeEach(() => {
 });
 
 describe('getAvailableProviders', () => {
-  it('returns only duckduckgo when nothing configured', () => {
-    // DuckDuckGo needs no API key, so it's always "configured"
+  it('returns free engines when nothing configured', () => {
+    // Google, Bing, DuckDuckGo need no API key — always "configured"
     const providers = getAvailableProviders();
+    expect(providers).toContain('google');
+    expect(providers).toContain('bing');
     expect(providers).toContain('duckduckgo');
-    // Jina now requires API key, so should NOT appear
+    // Paid engines should NOT appear without keys
+    expect(providers).not.toContain('brave');
     expect(providers).not.toContain('jina');
+    expect(providers).not.toContain('serper');
+    expect(providers).not.toContain('tavily');
   });
 
   it('includes brave when API key set', () => {
     configureSearch({ braveApiKey: 'test-key-123' });
     const providers = getAvailableProviders();
     expect(providers).toContain('brave');
-    expect(providers).toContain('duckduckgo');
+    expect(providers).toContain('google'); // free engines still present
   });
 
   it('includes searxng when URL set', () => {
@@ -64,8 +69,18 @@ describe('getAvailableProviders', () => {
       jinaApiKey: 'j',
     });
     const providers = getAvailableProviders();
-    expect(providers.length).toBe(6);
-    for (const name of ['brave', 'searxng', 'tavily', 'serper', 'jina', 'duckduckgo'] as ProviderName[]) {
+    // 3 free + 5 paid = 8
+    expect(providers.length).toBe(8);
+    for (const name of [
+      'google',
+      'bing',
+      'duckduckgo',
+      'brave',
+      'searxng',
+      'tavily',
+      'serper',
+      'jina',
+    ] as ProviderName[]) {
       expect(providers).toContain(name);
     }
   });
@@ -81,5 +96,13 @@ describe('configureSearch', () => {
     // Both should now be available
     expect(getAvailableProviders()).toContain('brave');
     expect(getAvailableProviders()).toContain('serper');
+  });
+
+  it('free engines always available regardless of config', () => {
+    const providers = getAvailableProviders();
+    expect(providers).toContain('google');
+    expect(providers).toContain('bing');
+    expect(providers).toContain('duckduckgo');
+    expect(providers.filter(p => ['google', 'bing', 'duckduckgo'].includes(p)).length).toBe(3);
   });
 });

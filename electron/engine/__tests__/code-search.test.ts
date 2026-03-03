@@ -17,7 +17,7 @@ import {
   queryCodeGraph,
 } from '../code-search';
 
-// 使用 AgentForge 项目自身作为测试工作区
+// 使用 AutoMater 项目自身作为测试工作区
 const WORKSPACE = path.resolve(__dirname, '../../..');
 
 describe('codeSearch (ripgrep)', () => {
@@ -106,7 +106,7 @@ describe('streamReadFile', () => {
   it('应读取已知文件', async () => {
     const testFile = path.join(WORKSPACE, 'package.json');
     const result = await streamReadFile(testFile, 1, 10);
-    expect(result.content).toContain('|');  // 行号格式
+    expect(result.content).toContain('|'); // 行号格式
     expect(result.startLine).toBe(1);
     expect(result.endLine).toBeLessThanOrEqual(10);
     expect(result.fileSize).toBeGreaterThan(0);
