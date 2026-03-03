@@ -143,7 +143,7 @@ export function getLocksSummary(): string {
     if (!byWorker.has(wk)) byWorker.set(wk, []);
     // 只取文件名部分，避免日志过长
     const shortPath = key.split('/').slice(-2).join('/');
-    byWorker.get(wk)!.push(shortPath);
+    byWorker.get(wk)?.push(shortPath);
   }
   const lines: string[] = [];
   for (const [wk, files] of byWorker) {

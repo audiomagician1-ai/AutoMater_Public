@@ -590,7 +590,7 @@ export function ContextPage() {
       .then(data => {
         const store = useAppStore.getState();
         for (const [, snap] of Object.entries(data)) {
-          store.updateContextSnapshot(currentProjectId!, snap as ContextSnapshot);
+          store.updateContextSnapshot(currentProjectId, snap as ContextSnapshot);
         }
       })
       .catch(() => {})
@@ -613,9 +613,9 @@ export function ContextPage() {
   const selectedSnapshot = useMemo(() => {
     if (!selected) return null;
     // 1. 精确匹配 member.id
-    if (contextSnapshots.has(selected.id)) return contextSnapshots.get(selected.id)!;
+    if (contextSnapshots.has(selected.id)) return contextSnapshots.get(selected.id);
     // 2. 按名称匹配
-    if (contextSnapshots.has(selected.name)) return contextSnapshots.get(selected.name)!;
+    if (contextSnapshots.has(selected.name)) return contextSnapshots.get(selected.name);
     // 3. 模糊匹配: 遍历所有快照找 agentId 含有成员名
     for (const [aid, snap] of contextSnapshots) {
       if (aid.includes(selected.name) || aid.includes(selected.role)) return snap;
@@ -705,8 +705,8 @@ export function ContextPage() {
           {sortedMembers.map(member => {
             // 查找匹配快照
             let snap: ContextSnapshot | null = null;
-            if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id)!;
-            else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name)!;
+            if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id);
+            else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name);
             else {
               for (const [aid, s] of contextSnapshots) {
                 if (aid.includes(member.name) || aid.includes(member.role)) {
@@ -802,7 +802,7 @@ export function ContextPage() {
             )}
           </div>
         ) : selected ? (
-          <BaselinePanel member={selected} projectId={currentProjectId!} />
+          <BaselinePanel member={selected} projectId={currentProjectId} />
         ) : null}
       </div>
     </div>

@@ -225,7 +225,7 @@ export class McpConnection {
       }
 
       const env = { ...process.env, ...(this.config.env || {}) };
-      const child = spawn(this.config.command!, this.config.args || [], {
+      const child = spawn(this.config.command, this.config.args || [], {
         cwd: this.config.cwd || undefined,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -401,7 +401,8 @@ export class McpConnection {
   }
 
   private async sendHttpRaw(json: string): Promise<Response> {
-    const url = this.sessionUrl || this.config.url!;
+    const url = this.sessionUrl || this.config.url;
+    if (!url) throw new Error('MCP: no URL configured');
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(this.config.headers || {}),

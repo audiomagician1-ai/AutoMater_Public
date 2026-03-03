@@ -104,7 +104,7 @@ export function aggregateModules(features: Feature[]) {
   for (const f of features) {
     const key = f.group_name || f.category || 'other';
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(f);
+    groups.get(key)?.push(f);
   }
   return groups;
 }
@@ -114,7 +114,7 @@ export function aggregateSubModules(features: Feature[]) {
   for (const f of features) {
     const key = f.sub_group || f.title || f.id;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(f);
+    groups.get(key)?.push(f);
   }
   return groups;
 }

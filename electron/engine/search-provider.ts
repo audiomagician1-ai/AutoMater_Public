@@ -94,7 +94,7 @@ const braveProvider: ISearchProvider = {
       headers: {
         'Accept': 'application/json',
         'Accept-Encoding': 'gzip',
-        'X-Subscription-Token': cfg.braveApiKey!,
+        'X-Subscription-Token': cfg.braveApiKey || '',
       },
       signal: AbortSignal.timeout(cfg.timeout || 15000),
     });
@@ -124,7 +124,7 @@ const searxngProvider: ISearchProvider = {
   isConfigured: (cfg) => !!cfg.searxngUrl,
   async search(query, maxResults, cfg) {
     const start = Date.now();
-    const baseUrl = cfg.searxngUrl!.replace(/\/$/, '');
+    const baseUrl = cfg.searxngUrl?.replace(/\/$/, '');
     const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&engines=google,duckduckgo,bing&safesearch=0&pageno=1`;
 
     const res = await fetch(url, {
@@ -163,7 +163,7 @@ const tavilyProvider: ISearchProvider = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        api_key: cfg.tavilyApiKey!,
+        api_key: cfg.tavilyApiKey,
         query,
         max_results: maxResults,
         include_answer: true,
@@ -205,7 +205,7 @@ const serperProvider: ISearchProvider = {
     const res = await fetch('https://google.serper.dev/search', {
       method: 'POST',
       headers: {
-        'X-API-KEY': cfg.serperApiKey!,
+        'X-API-KEY': cfg.serperApiKey || '',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ q: query, num: maxResults }),

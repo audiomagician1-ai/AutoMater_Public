@@ -77,7 +77,7 @@ export function TeamPage() {
       .then(data => {
         const store = useAppStore.getState();
         for (const [, state] of Object.entries(data)) {
-          store.updateAgentReactState(currentProjectId!, state as Parameters<typeof store.updateAgentReactState>[1]);
+          store.updateAgentReactState(currentProjectId, state as Parameters<typeof store.updateAgentReactState>[1]);
         }
       })
       .catch(() => {
@@ -88,7 +88,7 @@ export function TeamPage() {
       .then(data => {
         const store = useAppStore.getState();
         for (const [, snap] of Object.entries(data)) {
-          store.updateContextSnapshot(currentProjectId!, snap as ContextSnapshot);
+          store.updateContextSnapshot(currentProjectId, snap as ContextSnapshot);
         }
       })
       .catch(() => {

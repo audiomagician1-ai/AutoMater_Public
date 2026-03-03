@@ -112,7 +112,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         let rfTarget: string;
         if (path.isAbsolute(rfNorm)) {
           const perm = checkExternalReadPermission(rfInput, ctx);
-          if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+          if (!perm.allowed) return { success: false, output: perm.error ?? 'Permission denied', action: 'read' };
           rfTarget = rfNorm;
         } else {
           if (rfNorm.startsWith('..')) return { success: false, output: `路径不安全: ${rfInput}`, action: 'read' };
@@ -152,7 +152,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           if (!lock.acquired) {
             return {
               success: false,
-              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`,
+              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder?.workerId} (${lock.holder?.featureId}) 修改。请稍后重试或选择其他文件。`,
               action: 'write',
             };
           }
@@ -173,7 +173,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           if (!lock.acquired) {
             return {
               success: false,
-              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试或选择其他文件。`,
+              output: `🔒 文件被锁定: ${check.normalized} 正在被 ${lock.holder?.workerId} (${lock.holder?.featureId}) 修改。请稍后重试或选择其他文件。`,
               action: 'edit',
             };
           }
@@ -238,7 +238,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (path.isAbsolute(normalizedDir)) {
           // v16.0: 绝对路径 — 需要 externalRead 权限
           const perm = checkExternalReadPermission(dir, ctx);
-          if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+          if (!perm.allowed) return { success: false, output: perm.error ?? 'Permission denied', action: 'read' };
           tree = readDirectoryTree(normalizedDir, '', maxDepth);
         } else {
           tree = readDirectoryTree(ctx.workspacePath, dir, maxDepth);
@@ -502,7 +502,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
             if (!lock.acquired) {
               return {
                 success: false,
-                output: `🔒 文件被锁定: ${call.arguments.path} 正在被 ${lock.holder!.workerId} (${lock.holder!.featureId}) 修改。请稍后重试。`,
+                output: `🔒 文件被锁定: ${call.arguments.path} 正在被 ${lock.holder?.workerId} (${lock.holder?.featureId}) 修改。请稍后重试。`,
                 action: 'edit',
               };
             }

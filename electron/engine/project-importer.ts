@@ -1095,7 +1095,7 @@ function groupProbesByType(reports: ProbeReport[]): Map<string, ProbeReport[]> {
   const groups = new Map<string, ProbeReport[]>();
   for (const report of reports) {
     if (!groups.has(report.type)) groups.set(report.type, []);
-    groups.get(report.type)!.push(report);
+    groups.get(report.type)?.push(report);
   }
   return groups;
 }
@@ -1132,7 +1132,7 @@ export function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: 
   for (const node of mg.nodes) {
     const domainKey = TYPE_TO_DOMAIN[node.type] || '业务逻辑层';
     if (!domainGroups.has(domainKey)) domainGroups.set(domainKey, []);
-    domainGroups.get(domainKey)!.push(node);
+    domainGroups.get(domainKey)?.push(node);
   }
 
   const archNodes: ArchNode[] = [];
@@ -1200,7 +1200,7 @@ export function deriveArchTreeFromModuleGraph(mg: ModuleGraph, detectedModules: 
         const baseParts = mgNode.path ? mgNode.path.split('/') : [];
         const subDir = parts.length > baseParts.length + 1 ? parts.slice(0, baseParts.length + 1).join('/') : file;
         if (!subDirs.has(subDir)) subDirs.set(subDir, []);
-        subDirs.get(subDir)!.push(file);
+        subDirs.get(subDir)?.push(file);
       }
 
       let ci = 0;
@@ -1618,7 +1618,7 @@ function detectModules(
       moduleRoot = '.';
     }
     if (!groups.has(moduleRoot)) groups.set(moduleRoot, []);
-    groups.get(moduleRoot)!.push(file);
+    groups.get(moduleRoot)?.push(file);
   }
 
   const misc: string[] = [];

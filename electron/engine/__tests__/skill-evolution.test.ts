@@ -174,8 +174,8 @@ describe('skillEvolution (manager)', () => {
     // Check via loadSkill (the full definition includes stats)
     const loaded = skillEvolution.loadSkill(skill.id);
     expect(loaded).toBeDefined();
-    expect(loaded!.stats.usedCount).toBe(3);
-    expect(loaded!.stats.successCount).toBe(2);
+    expect(loaded?.stats.usedCount).toBe(3);
+    expect(loaded?.stats.successCount).toBe(2);
   });
 
   it('getIndex returns index entries', () => {

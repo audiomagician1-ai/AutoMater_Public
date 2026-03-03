@@ -1,7 +1,7 @@
 ﻿/**
  * Research Engine — 深度研究分析引擎
  *
- * 类似 echoagent 的 WebResearchAgent 子代理能力:
+ * 深度研究引擎能力:
  *   1. Query Decomposition — 将复杂问题拆解为多个可搜索的子查询
  *   2. Parallel Search     — 并行搜索多个子查询 (使用 search-provider)
  *   3. Source Extraction   — 对高价值结果深度提取 (readUrl)

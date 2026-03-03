@@ -499,7 +499,7 @@ export function checkSemanticLoop(
   if (!state.semanticFailures.has(toolName)) {
     state.semanticFailures.set(toolName, []);
   }
-  const entries = state.semanticFailures.get(toolName)!;
+  const entries = state.semanticFailures.get(toolName) ?? [];
   const existing = entries.find(e => e.file === targetFile);
   if (existing) {
     existing.count++;

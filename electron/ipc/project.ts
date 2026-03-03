@@ -1261,7 +1261,7 @@ export function setupProjectHandlers() {
     await gitCommit(
       getGitConfig({
         ...project,
-        workspace_path: project.workspace_path!,
+        workspace_path: project.workspace_path,
         github_repo: project.github_repo ?? undefined,
         github_token: project.github_token ?? undefined,
       }),
@@ -1294,7 +1294,7 @@ export function setupProjectHandlers() {
     const result = await gitCommit(
       getGitConfig({
         ...project,
-        workspace_path: project.workspace_path!,
+        workspace_path: project.workspace_path,
         github_repo: project.github_repo ?? undefined,
         github_token: project.github_token ?? undefined,
       }),
@@ -1791,7 +1791,7 @@ export function setupProjectHandlers() {
   // ── 文件夹选择对话框 (v5.1) ──
   ipcMain.handle('dialog:open-directory', async (_event, title?: string) => {
     const win = BrowserWindow.getFocusedWindow();
-    const result = await dialog.showOpenDialog(win!, {
+    const result = await dialog.showOpenDialog(win, {
       title: title || '选择文件夹',
       properties: ['openDirectory'],
     });

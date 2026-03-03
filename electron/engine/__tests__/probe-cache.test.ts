@@ -99,7 +99,7 @@ describe('probe-cache', () => {
       saveProbeCache('/workspace', cache);
       const loaded = loadProbeCache('/workspace');
       expect(loaded).toBeDefined();
-      expect(loaded!.version).toBe(1);
+      expect(loaded?.version).toBe(1);
     });
 
     it('returns null for wrong version', () => {
@@ -137,7 +137,7 @@ describe('probe-cache', () => {
       updateProbeCache('/workspace', [config], [report]);
       const cache = loadProbeCache('/workspace');
       expect(cache).toBeDefined();
-      expect(cache!.probes).toHaveLength(1);
+      expect(cache?.probes).toHaveLength(1);
     });
 
     it('merges new results with existing cache', () => {
@@ -149,7 +149,7 @@ describe('probe-cache', () => {
       updateProbeCache('/workspace', [config1], [report1]);
       updateProbeCache('/workspace', [config2], [report2]);
       const cache = loadProbeCache('/workspace');
-      expect(cache!.probes.length).toBeGreaterThanOrEqual(2);
+      expect(cache?.probes.length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -168,7 +168,7 @@ describe('probe-cache', () => {
         oldValue: 'Core engine', newValue: 'Orchestrator engine',
       });
       expect(result).toBeDefined();
-      expect(result!.nodes.find(n => n.id === 'engine')!.responsibility).toBe('Orchestrator engine');
+      expect(result?.nodes.find(n => n.id === 'engine')?.responsibility).toBe('Orchestrator engine');
     });
 
     it('merges two modules', () => {
@@ -177,8 +177,8 @@ describe('probe-cache', () => {
         moduleId: 'api', field: 'merge', oldValue: 'api', newValue: 'engine',
       });
       expect(result).toBeDefined();
-      expect(result!.nodes).toHaveLength(1);
-      expect(result!.nodes[0].publicAPI).toContain('handleRequest');
+      expect(result?.nodes).toHaveLength(1);
+      expect(result?.nodes[0].publicAPI).toContain('handleRequest');
     });
 
     it('records correction in cache', () => {

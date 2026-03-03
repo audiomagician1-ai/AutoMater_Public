@@ -699,7 +699,7 @@ export function batchGetFeatureSessionSummaries(projectId: string): Map<string, 
   const map = new Map<string, { entries: Array<{ work_type: string; agent_id: string }> }>();
   for (const row of rows) {
     if (!map.has(row.feature_id)) map.set(row.feature_id, { entries: [] });
-    map.get(row.feature_id)!.entries.push({ work_type: row.work_type, agent_id: row.agent_id });
+    map.get(row.feature_id)?.entries.push({ work_type: row.work_type, agent_id: row.agent_id });
   }
 
   const result = new Map<string, { totalSessions: number; workTypes: string[]; lastWorkType: string | null; lastAgent: string | null }>();

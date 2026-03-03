@@ -1,7 +1,7 @@
 ﻿/**
  * Code Search — 高性能代码搜索引擎
  *
- * 基于 ripgrep (rg) 实现，对标 EchoAgent 的 code-search_grep / code-search_read_many_files。
+ * 基于 ripgrep (rg) 实现，提供高性能代码搜索能力。
  * 当 ripgrep 不可用时自动降级到 PowerShell Select-String (Windows) 或 grep (Unix)。
  *
  * 工具:
@@ -247,9 +247,9 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
       };
 
       if (!pendingByFile.has(match.file)) pendingByFile.set(match.file, []);
-      pendingByFile.get(match.file)!.push(match);
+      pendingByFile.get(match.file)?.push(match);
       _currentFile = match.file;
-      _lastMatchIdx = pendingByFile.get(match.file)!.length - 1;
+      _lastMatchIdx = (pendingByFile.get(match.file)?.length ?? 1) - 1;
     } else if (parsed.type === 'context' && parsed.data && totalMatches <= maxResults) {
       const file = (parsed.data.path?.text || '').replace(/\\/g, '/');
       const lineNum = parsed.data.line_number || 0;
@@ -474,7 +474,7 @@ export function formatSearchResult(result: SearchResult): string {
   const byFile = new Map<string, SearchMatch[]>();
   for (const m of result.matches) {
     if (!byFile.has(m.file)) byFile.set(m.file, []);
-    byFile.get(m.file)!.push(m);
+    byFile.get(m.file)?.push(m);
   }
 
   for (const [file, fileMatches] of byFile) {

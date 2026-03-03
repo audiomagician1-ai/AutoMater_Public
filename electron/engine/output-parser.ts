@@ -108,7 +108,7 @@ function validateAndRepair(data: unknown, schema: SchemaSpec): { data: unknown; 
           warnings.push(`Item[${i}] is not an object, skipped`);
           return null;
         }
-        return repairObject(item as Record<string, unknown>, schema.arrayItemFields!, warnings, `[${i}]`);
+        return repairObject(item as Record<string, unknown>, schema.arrayItemFields ?? {}, warnings, `[${i}]`);
       }).filter((x: unknown) => x !== null);
       return { data: repaired, warnings, valid: true };
     }

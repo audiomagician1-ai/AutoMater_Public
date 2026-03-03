@@ -34,3 +34,21 @@ check-db.js
 
 # Backup
 .bak
+
+# Internal dev docs — keep out of release
+# (Only CLAUDE.md, CONTRIBUTING.md, docs/RELEASE-BUILD.md, prompts/ are public)
+DESIGN.md
+EVOLUTION-ROADMAP.md
+REVIEW-*.md
+TOOL-EXPANSION-PLAN.md
+docs/*.md
+!docs/RELEASE-BUILD.md
+!docs/EVOLUTION-PLAN-2026.md
+docs/testing/
+
+# Runtime data — per-user, never commit
+.automater/
+*.db
+*.db-journal
+*.db-wal
+global-memory.md

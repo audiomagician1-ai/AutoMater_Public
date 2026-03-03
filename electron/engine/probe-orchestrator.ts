@@ -373,7 +373,8 @@ export async function executeProbes(
 
     // Fill up to concurrency limit
     while (queue.length > 0 && running.size < concurrency) {
-      const config = queue.shift()!;
+      const config = queue.shift();
+      if (!config) break;
       const id = config.id;
       const promise = runProbe(config).then(() => { running.delete(id); });
       running.set(id, promise);

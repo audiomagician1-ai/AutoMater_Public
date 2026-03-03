@@ -169,7 +169,7 @@ describeDb('event-store (in-memory SQLite)', () => {
     it('returns events sorted by id ASC', () => {
       const events = queryEvents({ projectId: 'proj-1' });
       for (let i = 1; i < events.length; i++) {
-        expect(events[i].id!).toBeGreaterThan(events[i - 1].id!);
+        expect(events[i].id).toBeGreaterThan(events[i - 1].id);
       }
     });
 
@@ -240,9 +240,9 @@ describeDb('event-store (in-memory SQLite)', () => {
       expect(stats.featureStats.length).toBeGreaterThanOrEqual(1);
       const f1 = stats.featureStats.find(f => f.featureId === 'f1');
       expect(f1).toBeDefined();
-      expect(f1!.events).toBe(3);
-      expect(f1!.toolCalls).toBe(2);
-      expect(f1!.llmCalls).toBe(1);
+      expect(f1?.events).toBe(3);
+      expect(f1?.toolCalls).toBe(2);
+      expect(f1?.llmCalls).toBe(1);
     });
 
     it('aggregates tool stats', () => {
@@ -250,7 +250,7 @@ describeDb('event-store (in-memory SQLite)', () => {
       expect(stats.toolStats.length).toBeGreaterThanOrEqual(1);
       const readFile = stats.toolStats.find(t => t.toolName === 'read_file');
       expect(readFile).toBeDefined();
-      expect(readFile!.calls).toBe(2);
+      expect(readFile?.calls).toBe(2);
     });
   });
 

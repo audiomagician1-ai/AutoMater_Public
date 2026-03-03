@@ -349,7 +349,7 @@ function groupMatchesByFile(matches: SearchMatchItem[]): Array<[string, SearchMa
   const map = new Map<string, SearchMatchItem[]>();
   for (const m of matches) {
     if (!map.has(m.file)) map.set(m.file, []);
-    map.get(m.file)!.push(m);
+    map.get(m.file)?.push(m);
   }
   return Array.from(map.entries());
 }

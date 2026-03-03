@@ -4,8 +4,7 @@
  * 根据项目类型、当前任务阶段、和历史调用效果，动态调整推荐给 Agent 的工具子集。
  * 核心思想: 减少工具列表噪声 → 提高 Agent 工具选择准确率 → 减少无效 token 消耗。
  *
- * EchoAgent 对比: EA 每次给 Agent 全量工具 (50+)，无自适应。
- * AgentForge 优势: 按 project profile + task phase 裁剪，减少 30-50% 工具描述 token。
+ * 按 project profile + task phase 裁剪工具集，减少 30-50% 工具描述 token。
  *
  * v1.0 — 2026-03-02
  */

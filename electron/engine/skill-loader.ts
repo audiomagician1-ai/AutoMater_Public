@@ -290,7 +290,7 @@ async function executeCommandSkill(
   args: Record<string, unknown>,
   timeout: number,
 ): Promise<{ success: boolean; output: string }> {
-  const command = exec.command!;
+  const command = exec.command;
   const cmdArgs = (exec.args || []).map(a => interpolate(a, args));
   const fullCommand = [command, ...cmdArgs].join(' ');
 
@@ -320,7 +320,7 @@ async function executeHttpSkill(
   args: Record<string, unknown>,
   timeout: number,
 ): Promise<{ success: boolean; output: string }> {
-  const url = interpolate(exec.url!, args);
+  const url = interpolate(exec.url ?? '', args);
   const method = exec.method || 'POST';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -367,7 +367,7 @@ function executeScriptSkill(
     // 创建沙盒化的函数 (不能访问 require/import, 只接收 args)
     const fn = new Function('args', `
       'use strict';
-      ${exec.code!}
+      ${exec.code}
     `);
     const result = fn(args);
     const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);

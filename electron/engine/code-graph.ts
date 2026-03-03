@@ -109,7 +109,8 @@ export async function buildCodeGraph(workspacePath: string, maxFiles: number = 5
       .map(raw => resolveImport(file, raw, fileSet, ext))
       .filter((r): r is string => r !== null);
 
-    const node = nodes.get(file)!;
+    const node = nodes.get(file);
+    if (!node) continue;
     node.imports = [...new Set(resolvedImports)];
     edgeCount += node.imports.length;
 
@@ -157,19 +158,19 @@ export function traverseGraph(
     if (graph.nodes.has(seed)) {
       visited.set(seed, { distance: 0, direction: new Set(['seed']) });
       // Forward: files this seed imports
-      for (const imp of graph.nodes.get(seed)!.imports) {
+      for (const imp of graph.nodes.get(seed)?.imports ?? []) {
         queue.push({ file: imp, distance: 1, dir: 'forward' });
       }
       // Backward: files that import this seed
-      for (const dep of graph.nodes.get(seed)!.importedBy) {
+      for (const dep of graph.nodes.get(seed)?.importedBy ?? []) {
         queue.push({ file: dep, distance: 1, dir: 'backward' });
       }
     }
   }
 
   while (queue.length > 0) {
-    const item = queue.shift()!;
-    if (item.distance > maxHops) continue;
+    const item = queue.shift();
+    if (!item || item.distance > maxHops) continue;
 
     const existing = visited.get(item.file);
     if (existing) {
@@ -183,18 +184,18 @@ export function traverseGraph(
 
     visited.set(item.file, { distance: item.distance, direction: new Set([item.dir]) });
 
-    const node = graph.nodes.get(item.file);
-    if (!node || item.distance >= maxHops) continue;
+    const gNode = graph.nodes.get(item.file);
+    if (!gNode || item.distance >= maxHops) continue;
 
     // Continue BFS in the same direction
     if (item.dir === 'forward') {
-      for (const imp of node.imports) {
+      for (const imp of gNode.imports) {
         if (!visited.has(imp)) {
           queue.push({ file: imp, distance: item.distance + 1, dir: 'forward' });
         }
       }
     } else {
-      for (const dep of node.importedBy) {
+      for (const dep of gNode.importedBy) {
         if (!visited.has(dep)) {
           queue.push({ file: dep, distance: item.distance + 1, dir: 'backward' });
         }
@@ -261,9 +262,9 @@ export function inferSeedFiles(
     const byImportedBy = allFiles
       .filter(f => !seeds.has(f))
       .sort((a, b) => {
-        const nodeA = graph.nodes.get(a)!;
-        const nodeB = graph.nodes.get(b)!;
-        return nodeB.importedBy.length - nodeA.importedBy.length;
+        const nodeA = graph.nodes.get(a);
+        const nodeB = graph.nodes.get(b);
+        return (nodeB?.importedBy.length ?? 0) - (nodeA?.importedBy.length ?? 0);
       });
 
     for (const f of byImportedBy) {
@@ -354,8 +355,8 @@ export function detectCommunities(graph: CodeGraph, maxIterations = 10): Communi
       if (labelCounts.size === 0) continue;
 
       // Pick most frequent label (tie-break: keep current)
-      const currentLabel = fileToCommunity.get(file)!;
-      let bestLabel = currentLabel;
+      const currentLabel = fileToCommunity.get(file) ?? file;
+      let bestLabel: string = currentLabel;
       let bestCount = labelCounts.get(currentLabel) || 0;
       for (const [lbl, cnt] of labelCounts) {
         if (cnt > bestCount) { bestLabel = lbl; bestCount = cnt; }
@@ -372,7 +373,7 @@ export function detectCommunities(graph: CodeGraph, maxIterations = 10): Communi
   const communities = new Map<string, string[]>();
   for (const [file, label] of fileToCommunity) {
     if (!communities.has(label)) communities.set(label, []);
-    communities.get(label)!.push(file);
+    communities.get(label)?.push(file);
   }
 
   return { communities, fileToCommunity, count: communities.size };

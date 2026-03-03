@@ -110,8 +110,8 @@ function expandModuleFiles(
   for (const edge of graph.edges) {
     if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
     if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
-    adjacency.get(edge.source)!.add(edge.target);
-    adjacency.get(edge.target)!.add(edge.source);
+    adjacency.get(edge.source)?.add(edge.target);
+    adjacency.get(edge.target)?.add(edge.source);
   }
 
   const nodeMap = new Map(graph.nodes.map(n => [n.id, n]));

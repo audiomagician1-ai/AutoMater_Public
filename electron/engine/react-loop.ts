@@ -144,7 +144,7 @@ function cacheAgentReactState(projectId: string, state: AgentReactState) {
   if (!agentReactStateCache.has(projectId)) {
     agentReactStateCache.set(projectId, new Map());
   }
-  agentReactStateCache.get(projectId)!.set(state.agentId, state);
+  agentReactStateCache.get(projectId)?.set(state.agentId, state);
 }
 
 // ═══════════════════════════════════════
@@ -161,7 +161,7 @@ function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
   if (!contextSnapshotCache.has(projectId)) {
     contextSnapshotCache.set(projectId, new Map());
   }
-  contextSnapshotCache.get(projectId)!.set(snapshot.agentId, snapshot);
+  contextSnapshotCache.get(projectId)?.set(snapshot.agentId, snapshot);
 }
 
 // ═══════════════════════════════════════
@@ -1725,7 +1725,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         const batchResults = await Promise.all(
           batch.map(async tcInfo => {
             // 找到原始 tool_call (保留 id)
-            const tc = msg.tool_calls!.find((t: LLMToolCall) => t.id === tcInfo.id)!;
+            const tc = msg.tool_calls?.find((t: LLMToolCall) => t.id === tcInfo.id);
             const toolArgs = tcInfo.arguments as Record<string, any>; // accepted: ToolCall.arguments type
             const toolCall: ToolCall = { name: tcInfo.name, arguments: toolArgs };
 
@@ -1794,6 +1794,7 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
 
         // 将批次结果按原始顺序加入 messages
         for (const { tc, toolArgs, result, guardReason, special } of batchResults) {
+          if (!tc) continue;
           if (guardReason) {
             messages.push({ role: 'tool', tool_call_id: tc.id, content: `拦截: ${guardReason}` });
             continue;

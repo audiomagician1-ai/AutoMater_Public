@@ -176,8 +176,8 @@ export function ModuleArchGraph({ projectId }: { projectId: string }) {
   for (const edge of graph.edges) {
     if (!nodeEdges.has(edge.source)) nodeEdges.set(edge.source, new Set());
     if (!nodeEdges.has(edge.target)) nodeEdges.set(edge.target, new Set());
-    nodeEdges.get(edge.source)!.add(edge.target);
-    nodeEdges.get(edge.target)!.add(edge.source);
+    nodeEdges.get(edge.source)?.add(edge.target);
+    nodeEdges.get(edge.target)?.add(edge.source);
   }
 
   const nodeMap = new Map(layout.nodes.map(n => [n.id, n]));

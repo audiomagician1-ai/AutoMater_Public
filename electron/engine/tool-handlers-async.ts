@@ -319,7 +319,7 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     let targetPath: string;
     if (path.isAbsolute(normalizedInput)) {
       const perm = checkExternalReadPermission(inputPath, ctx);
-      if (!perm.allowed) return { success: false, output: perm.error!, action: 'read' };
+      if (!perm.allowed) return { success: false, output: perm.error ?? 'Permission denied', action: 'read' };
       targetPath = normalizedInput;
     } else {
       const check = path.normalize(inputPath);

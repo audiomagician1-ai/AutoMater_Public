@@ -212,7 +212,7 @@ describe('base-probe: extractJSON', () => {
   it('prefers labeled fence over generic json fence', () => {
     const text = '```findings\n{"source": "labeled"}\n```\n```json\n{"source": "generic"}\n```';
     const result = extractJSON<{ source: string }>(text, 'findings');
-    expect(result!.source).toBe('labeled');
+    expect(result?.source).toBe('labeled');
   });
 });
 

@@ -228,7 +228,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     const modelsToCheck = [...new Set([settings.strongModel, settings.workerModel, settings.fastModel].filter((m): m is string => Boolean(m)))];
     const errors: string[] = [];
     for (const m of modelsToCheck) {
-      const err = await validateModel(settings, m!);
+      const err = await validateModel(settings, m);
       if (err) errors.push(err);
     }
     if (errors.length > 0) {

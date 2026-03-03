@@ -145,8 +145,8 @@ describe('loadModuleGraph', () => {
     setupModuleGraph(SAMPLE_GRAPH);
     const graph = loadModuleGraph('/workspace');
     expect(graph).toBeDefined();
-    expect(graph!.nodes).toHaveLength(4);
-    expect(graph!.edges).toHaveLength(3);
+    expect(graph?.nodes).toHaveLength(4);
+    expect(graph?.edges).toHaveLength(3);
   });
 
   it('returns null for invalid JSON', () => {

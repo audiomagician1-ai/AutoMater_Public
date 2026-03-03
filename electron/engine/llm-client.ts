@@ -368,7 +368,8 @@ async function _callOpenAI(
   let inputTokens = 0;
   let outputTokens = 0;
 
-  const reader = res.body!.getReader();
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Response body is null');
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -440,7 +441,8 @@ async function _callAnthropic(
   let inputTokens = 0;
   let outputTokens = 0;
 
-  const reader = res.body!.getReader();
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Response body is null');
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -546,7 +548,8 @@ async function _callOpenAIWithTools(
   let outputTokens = 0;
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
 
-  const reader = res.body!.getReader();
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Response body is null');
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -578,10 +581,12 @@ async function _callOpenAIWithTools(
                   arguments: tc.function?.arguments ?? '',
                 });
               } else {
-                const existing = toolCallMap.get(idx)!;
-                if (tc.id) existing.id = tc.id;
-                if (tc.function?.name) existing.name += tc.function.name;
-                if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                const existing = toolCallMap.get(idx);
+                if (existing) {
+                  if (tc.id) existing.id = tc.id;
+                  if (tc.function?.name) existing.name += tc.function.name;
+                  if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                }
               }
             }
           }

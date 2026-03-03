@@ -1,7 +1,7 @@
 /**
  * Planner — 任务规划器
  * 
- * 参考 EchoAgent 的 todo-plus 系统和 agent-swarm 的三阶段工作流:
+ * 任务规划三层架构:
  * - Feature 级别: PM 拆解大粒度 Feature
  * - 子任务级别: Planner 将 Feature 拆解为具体 steps
  * - 动态重规划: 失败后根据错误信息调整计划

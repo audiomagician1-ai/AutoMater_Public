@@ -90,8 +90,8 @@ export const PORT = 3000;
       const graph = await buildCodeGraph(tmpDir);
       const indexNode = graph.nodes.get('src/index.ts');
       expect(indexNode).toBeDefined();
-      expect(indexNode!.imports).toContain('src/utils.ts');
-      expect(indexNode!.imports).toContain('src/api/handler.ts');
+      expect(indexNode?.imports).toContain('src/utils.ts');
+      expect(indexNode?.imports).toContain('src/api/handler.ts');
     });
 
     test('反向边正确', async () => {
@@ -99,16 +99,16 @@ export const PORT = 3000;
       const utilsNode = graph.nodes.get('src/utils.ts');
       expect(utilsNode).toBeDefined();
       // utils 被 index 和 handler 引用
-      expect(utilsNode!.importedBy).toContain('src/index.ts');
-      expect(utilsNode!.importedBy).toContain('src/api/handler.ts');
+      expect(utilsNode?.importedBy).toContain('src/index.ts');
+      expect(utilsNode?.importedBy).toContain('src/api/handler.ts');
     });
 
     test('孤立文件无边', async () => {
       const graph = await buildCodeGraph(tmpDir);
       const config = graph.nodes.get('src/config.ts');
       expect(config).toBeDefined();
-      expect(config!.imports).toHaveLength(0);
-      expect(config!.importedBy).toHaveLength(0);
+      expect(config?.imports).toHaveLength(0);
+      expect(config?.importedBy).toHaveLength(0);
     });
 
     test('maxFiles 限制', async () => {
@@ -274,7 +274,7 @@ def helper(): pass
       const mainNode = graph.nodes.get('app/main.py');
       expect(mainNode).toBeDefined();
       // from .models import → 应解析到 app/models.py
-      expect(mainNode!.imports).toContain('app/models.py');
+      expect(mainNode?.imports).toContain('app/models.py');
     });
   });
 });

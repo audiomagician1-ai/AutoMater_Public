@@ -355,7 +355,7 @@ export async function spawnSubAgent(
     task,
     startedAt: startTime,
     abortController,
-    promise: null!, // 临时占位, 下面立即赋值
+    promise: null as unknown as Promise<SubAgentResult>, // 临时占位, 下面立即赋值
   };
   activeAgents.set(agentId, activeEntry);
 

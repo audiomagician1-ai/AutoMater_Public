@@ -307,7 +307,7 @@ export async function browserNetwork(
 }
 
 // ═══════════════════════════════════════
-// v7.0: 新增浏览器 API — 补齐与 EchoAgent 的差距
+// v7.0: 新增浏览器 API — 扩展浏览器交互能力
 // ═══════════════════════════════════════
 
 // ── browser_hover ──
@@ -435,7 +435,7 @@ export async function browserTabs(
     }
 
     if (action === 'close') {
-      const idx = opts?.index ?? pages.indexOf(_page!);
+      const idx = opts?.index ?? (_page ? pages.indexOf(_page) : -1);
       if (idx >= 0 && idx < pages.length) {
         await pages[idx].close();
         _page = _context.pages()[0] || null;

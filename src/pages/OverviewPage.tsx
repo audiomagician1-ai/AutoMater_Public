@@ -510,7 +510,7 @@ export function OverviewPage() {
               <StatCard icon="✅" label="已完成" value={String(passed)} />
               <StatCard icon="❌" label="失败" value={String(failed)} />
             </div>
-            <DocCompletionBar features={enriched} projectId={currentProjectId!} />
+            <DocCompletionBar features={enriched} projectId={currentProjectId} />
           </div>
         </section>
 

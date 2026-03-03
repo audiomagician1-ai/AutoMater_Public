@@ -145,7 +145,7 @@ export function claimFiles(
     if (claim && claim.workerId !== workerId) {
       const key = `${claim.workerId}:${claim.featureId}`;
       if (!conflictMap.has(key)) conflictMap.set(key, []);
-      conflictMap.get(key)!.push(file);
+      conflictMap.get(key)?.push(file);
     }
   }
 
@@ -204,7 +204,7 @@ export function getClaimsSummary(workspacePath: string, excludeWorkerId?: string
     if (excludeWorkerId && workerId === excludeWorkerId) continue;
     const key = `${workerId}:${featureId}`;
     if (!byWorker.has(key)) byWorker.set(key, { featureId, files: [] });
-    byWorker.get(key)!.files.push(file);
+    byWorker.get(key)?.files.push(file);
   }
 
   if (byWorker.size === 0) return '';
@@ -340,7 +340,7 @@ export function formatBroadcastContext(recentWork: WorkerBroadcast[]): string {
   for (const b of recentWork) {
     const key = `${b.workerId}:${b.featureId}`;
     if (!byWorker.has(key)) byWorker.set(key, { featureId: b.featureId, files: [] });
-    byWorker.get(key)!.files.push(b.detail);
+    byWorker.get(key)?.files.push(b.detail);
   }
 
   const lines = ['## 其他开发者最近的工作成果 (可直接 import 使用)'];

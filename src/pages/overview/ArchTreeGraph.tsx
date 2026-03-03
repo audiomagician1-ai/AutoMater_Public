@@ -220,12 +220,12 @@ export function ArchTreeGraph({ projectId }: { projectId: string }) {
                 const targetNode = tree.nodes.find(n => n.id === e.target);
                 const sd =
                   sourceNode?.level === 'module'
-                    ? sourceNode.parentId!
-                    : tree.nodes.find(n => n.id === sourceNode?.parentId)?.parentId!;
+                    ? sourceNode.parentId
+                    : tree.nodes.find(n => n.id === sourceNode?.parentId)?.parentId;
                 const td =
                   targetNode?.level === 'module'
-                    ? targetNode.parentId!
-                    : tree.nodes.find(n => n.id === targetNode?.parentId)?.parentId!;
+                    ? targetNode.parentId
+                    : tree.nodes.find(n => n.id === targetNode?.parentId)?.parentId;
                 if (sd && td && sd !== td) {
                   const key = `${sd}-${td}`;
                   if (!domainEdgeSet.has(key)) {

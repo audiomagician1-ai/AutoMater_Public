@@ -120,8 +120,8 @@ describeDb('conversation-backup (in-memory SQLite)', () => {
       createSession('proj-1', 'dev-1', 'developer');
       const session = getActiveSession('proj-1', 'dev-1');
       expect(session).not.toBeNull();
-      expect(session!.agentId).toBe('dev-1');
-      expect(session!.status).toBe('active');
+      expect(session?.agentId).toBe('dev-1');
+      expect(session?.status).toBe('active');
     });
   });
 
@@ -154,8 +154,8 @@ describeDb('conversation-backup (in-memory SQLite)', () => {
       // Now switch back to s1
       const switched = switchSession(s1.id);
       expect(switched).not.toBeNull();
-      expect(switched!.id).toBe(s1.id);
-      expect(switched!.status).toBe('active');
+      expect(switched?.id).toBe(s1.id);
+      expect(switched?.status).toBe('active');
     });
   });
 
@@ -331,7 +331,7 @@ describeDb('conversation-backup (in-memory SQLite)', () => {
 
       const map = batchGetFeatureSessionSummaries('proj-1');
       expect(map.size).toBe(2);
-      expect(map.get('f1')!.totalSessions).toBe(1);
+      expect(map.get('f1')?.totalSessions).toBe(1);
     });
   });
 

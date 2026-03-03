@@ -1,5 +1,5 @@
 /**
- * Experience Library — 分层经验知识库 (迁移自 EchoAgent 记忆系统)
+ * Experience Library — 分层经验知识库
  *
  * 三层金字塔:
  *   1. Principles (≤8条) — 不可违反的元准则，跨项目跨角色通用
@@ -21,7 +21,7 @@
  * 存储: {workspace}/.automater/experience-library.json
  * 全局: %APPDATA%/automater/global-experience.json (跨项目)
  *
- * 设计来源: EchoAgent agent-memory/core/lessons_learned.json 三层架构
+ * 设计来源: 三层金字塔经验知识架构 (principles → patterns → instances)
  *
  * @module experience-library
  * @since v22.0
@@ -85,7 +85,7 @@ export interface ExperienceLibrary {
 }
 
 // ═══════════════════════════════════════
-// Capacity Limits (from EchoAgent config)
+// Capacity Limits
 // ═══════════════════════════════════════
 
 const DEFAULT_MAX_PRINCIPLES = 8;

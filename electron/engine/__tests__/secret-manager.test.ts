@@ -88,7 +88,7 @@ describe('secret-manager', () => {
     setSecret('p1', 'tiny', 'ab', 'custom');
     const list = listSecrets('p1');
     expect(list).toHaveLength(2);
-    expect(list.find(s => s.key === 'tiny')!.maskedValue).toBe('****');
+    expect(list.find(s => s.key === 'tiny')?.maskedValue).toBe('****');
   });
 
   it('getProviderSecrets returns decrypted pairs', () => {

@@ -97,8 +97,8 @@ describe('advancePlan', () => {
     expect(plan.steps[0].status).toBe('done');
     expect(plan.steps[0].result).toBe('completed first');
     expect(next).not.toBeNull();
-    expect(next!.id).toBe('S1');
-    expect(next!.status).toBe('in_progress');
+    expect(next?.id).toBe('S1');
+    expect(next?.status).toBe('in_progress');
     expect(plan.currentStepIndex).toBe(1);
   });
 

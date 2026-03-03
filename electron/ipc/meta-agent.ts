@@ -5,7 +5,7 @@
  * v7.0: 管理页面支持 — 可配置名字/称呼/提示词/上下文限制 + 独立记忆系统
  * v6.1: ReAct 模式升级 — callLLMWithTools, 具备只读工具集(读文件/搜索/web_search/git_log)
  *
- * 记忆系统参考 EchoAgent agent-memory 架构:
+ * 记忆系统架构:
  *   - identity: 管家自我认知 (名字/角色/性格)
  *   - user_profile: 对用户的了解 (偏好/称呼/习惯)
  *   - lessons: 经验教训 (自动积累, 大容量, 支持100+条)

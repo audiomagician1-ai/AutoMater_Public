@@ -141,7 +141,7 @@ export function SessionManager({ projectId, agentId, visible = true, onClose }: 
   for (const s of filteredSessions) {
     const key = `${s.agentRole}:${s.agentId}`;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(s);
+    grouped.get(key)?.push(s);
   }
 
   if (!visible) return null;

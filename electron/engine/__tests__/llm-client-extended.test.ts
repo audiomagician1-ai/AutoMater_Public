@@ -344,7 +344,7 @@ describe('callLLMWithTools', () => {
 
     const result = await callLLMWithTools(mockSettings, 'gpt-4o', [{ role: 'user', content: 'read test.ts' }], tools);
     expect(result.message.tool_calls).toHaveLength(1);
-    expect(result.message.tool_calls![0].function.name).toBe('read_file');
+    expect(result.message.tool_calls?.[0].function.name).toBe('read_file');
     expect(result.inputTokens).toBe(20);
     expect(result.outputTokens).toBe(15);
   });
@@ -372,7 +372,7 @@ describe('callLLMWithTools', () => {
       [{ role: 'user', content: 'read test.ts' }], tools);
     expect(result.message.content).toBe('I will read the file.');
     expect(result.message.tool_calls).toHaveLength(1);
-    expect(result.message.tool_calls![0].function.name).toBe('read_file');
+    expect(result.message.tool_calls?.[0].function.name).toBe('read_file');
     expect(result.inputTokens).toBe(18);
   });
 });

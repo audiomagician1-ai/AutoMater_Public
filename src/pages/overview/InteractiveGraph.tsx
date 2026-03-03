@@ -299,7 +299,7 @@ export function InteractiveGraph({
     for (const f of enriched) {
       const key = f.group_name || f.category || 'other';
       if (!m.has(key)) m.set(key, new Set());
-      m.get(key)!.add(f.id);
+      m.get(key)?.add(f.id);
     }
     return m;
   }, [enriched]);
