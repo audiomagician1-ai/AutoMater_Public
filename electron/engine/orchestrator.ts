@@ -44,28 +44,32 @@ import {
   phaseFinalize,
   phaseEnvironmentBootstrap,
 } from './phases';
+import { WorkflowEngine, PRESET_FULL_DEVELOPMENT } from './workflow-engine';
+import type { PMPhaseResult } from './types';
 
 // ═══════════════════════════════════════
 // Workflow Preset Resolver
 // ═══════════════════════════════════════
 
-/** 获取项目当前激活的工作流阶段列表。没有选择时回退到完整开发流程。 */
-function getActiveWorkflowStages(projectId: string): WorkflowStageId[] {
+/** 获取项目当前激活的工作流阶段配置。没有选择时回退到完整开发流程。 */
+function getActiveWorkflow(projectId: string): WorkflowStage[] {
   const db = getDb();
   const row = db.prepare('SELECT stages FROM workflow_presets WHERE project_id = ? AND is_active = 1')
     .get(projectId) as { stages: string } | undefined;
 
-  if (!row) {
-    // 默认: 完整开发流程
-    return ['pm_analysis', 'architect', 'docs_gen', 'dev_implement', 'qa_review', 'pm_acceptance', 'devops_build', 'incremental_doc_sync', 'finalize'];
-  }
+  if (!row) return PRESET_FULL_DEVELOPMENT;
 
   try {
     const stages: WorkflowStage[] = JSON.parse(row.stages);
-    return stages.map(s => s.id as WorkflowStageId);
+    return stages;
   } catch { /* silent: stages JSON parse — use default pipeline */
-    return ['pm_analysis', 'architect', 'docs_gen', 'dev_implement', 'qa_review', 'finalize'];
+    return PRESET_FULL_DEVELOPMENT;
   }
+}
+
+/** 获取项目当前激活的工作流阶段 ID 列表 (兼容层) */
+function getActiveWorkflowStages(projectId: string): WorkflowStageId[] {
+  return getActiveWorkflow(projectId).map(s => s.id);
 }
 
 /** 检查工作流是否包含指定阶段 */
@@ -593,34 +597,48 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (signal.aborted) { unregisterOrchestrator(projectId); return; }
 
   // ═══════════════════════════════════════
-  // Phase 4b: PM 批量验收审查 (v12.0: 按工作流控制)
+  // Post-dev 阶段: WorkflowEngine 驱动 (v25.0)
+  // PM验收 → 文档同步 → DevOps部署 → 汇总
   // ═══════════════════════════════════════
-  if (workspacePath && hasStage(workflowStages, 'pm_acceptance')) {
-    await phasePMAcceptance(projectId, settings, win, signal, workspacePath);
-    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-  }
+  const postDevStages = getActiveWorkflow(projectId).filter(s =>
+    ['pm_acceptance', 'incremental_doc_sync', 'devops_build', 'finalize'].includes(s.id),
+  );
 
-  // ═══════════════════════════════════════
-  // Phase 4c: 增量文档同步 (v12.0: 按工作流控制)
-  // ═══════════════════════════════════════
-  if (workspacePath && hasStage(workflowStages, 'incremental_doc_sync')) {
-    await phaseIncrementalDocSync(projectId, win, signal, workspacePath);
-    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-  }
+  if (postDevStages.length > 0) {
+    const postDevEngine = new WorkflowEngine(postDevStages, signal);
 
-  // ═══════════════════════════════════════
-  // Phase 4d: DevOps 全自动部署 Pipeline (v15.0: 按工作流控制)
-  // ═══════════════════════════════════════
-  if (workspacePath && hasStage(workflowStages, 'devops_build')) {
-    await phaseDeployPipeline(projectId, settings, win, signal, workspacePath, gitConfig);
-    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-  }
+    /** Post-dev 阶段执行器: 将 stageId 路由到对应的 phase 函数 */
+    const postDevExecutor = async (stageId: WorkflowStageId): Promise<PhaseResult | null> => {
+      if (signal.aborted) return null;
+      switch (stageId) {
+        case 'pm_acceptance':
+          if (!workspacePath) return { stageId, status: 'skipped', summary: '无工作区', durationMs: 0, costUsd: 0 };
+          return phasePMAcceptance(projectId, settings, win, signal, workspacePath);
+        case 'incremental_doc_sync':
+          if (!workspacePath) return { stageId, status: 'skipped', summary: '无工作区', durationMs: 0, costUsd: 0 };
+          return phaseIncrementalDocSync(projectId, win, signal, workspacePath);
+        case 'devops_build':
+          if (!workspacePath) return { stageId, status: 'skipped', summary: '无工作区', durationMs: 0, costUsd: 0 };
+          return phaseDeployPipeline(projectId, settings, win, signal, workspacePath, gitConfig);
+        case 'finalize':
+          return phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
+        default:
+          log.warn(`[post-dev] Unknown stage: ${stageId}, skipping`);
+          return { stageId, status: 'skipped', summary: `未知阶段 ${stageId}`, durationMs: 0, costUsd: 0 };
+      }
+    };
 
-  // ═══════════════════════════════════════
-  // Phase 5: 汇总 + 用户验收等待
-  // ═══════════════════════════════════════
-  if (hasStage(workflowStages, 'finalize')) {
-    await phaseFinalize(projectId, settings, win, signal, workspacePath, project.name);
+    const postDevResult = await postDevEngine.run(postDevExecutor, (result, nextStageId) => {
+      const icon = result.status === 'success' ? '✅' : result.status === 'skipped' ? '⏭️' : '❌';
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: `${icon} ${result.stageId}: ${result.summary} (${(result.durationMs / 1000).toFixed(1)}s)${nextStageId ? ` → ${nextStageId}` : ''}`,
+      });
+    });
+
+    if (!postDevResult.completed && postDevResult.terminationReason !== 'aborted') {
+      log.warn(`[post-dev] Workflow incomplete: ${postDevResult.terminationReason}`);
+    }
   }
 
   unregisterOrchestrator(projectId);
