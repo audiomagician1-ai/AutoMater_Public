@@ -988,31 +988,31 @@ export async function reactDeveloperLoop(
         break;
       }
 
-      // ── v19.0 消息窗口智能压缩 (Observation Masking + Scratchpad Anchor) ──
-      // 基于 token 预算检查 (优先于简单的消息数量检查)
+      // ── v10.2 渐进式上下文压缩 (Proactive Compaction) ──
+      // 不再等到 overflow 才压缩，而是基于 token 预算主动分级处理：
+      //   ok (< 50%)      → 无操作
+      //   warning (50-75%) → 仅 Observation Masking (轻量，不丢信息)
+      //   critical (75-90%) → Masking + Tool 输出截断 + LLM 摘要压缩
+      //   overflow (> 90%)  → 全面压缩 + 激进截断
       const budget = checkContextBudget(contextTokens, model);
-      const needsCompression =
-        budget.status === 'overflow' ||
-        budget.status === 'critical' ||
-        (budget.status === 'warning' && messages.length > 30) ||
-        messages.length > 30;
 
-      if (needsCompression) {
-        // Step 1: Observation Masking — 将旧 tool 输出替换为结构化摘要
-        const maskResult = maskOldToolOutputs(messages, 10);
+      if (budget.status !== 'ok') {
+        // Step 1: Observation Masking — 所有非 ok 状态都执行 (成本: 0, 纯字符串替换)
+        const keepRecentCount = budget.status === 'overflow' ? 6 : budget.status === 'critical' ? 8 : 10;
+        const maskResult = maskOldToolOutputs(messages, keepRecentCount);
         if (maskResult.maskedCount > 0) {
           log.info(
-            `Observation masking: ${maskResult.maskedCount} outputs masked, ~${maskResult.estimatedTokensSaved} tokens saved`,
+            `[${budget.status}] Observation masking: ${maskResult.maskedCount} outputs masked, ~${maskResult.estimatedTokensSaved} tokens saved`,
           );
         }
 
-        // Step 2: 传统压缩 (如果 mask 后仍然超预算)
+        // Step 2: 深度压缩 — 仅 critical/overflow 或消息数过多时执行
         if (budget.status === 'overflow' || budget.status === 'critical') {
           compressToolOutputs(messages, budget.status);
           await compressMessageHistorySmart(messages, settings, signal);
-        } else if (messages.length > 20) {
+        } else if (messages.length > 25) {
+          // warning + 消息数较多 → 轻度截断
           compressToolOutputs(messages, 'warning');
-          await compressMessageHistorySmart(messages, settings, signal);
         }
 
         // Step 3: 注入 Scratchpad 锚点 — 确保关键信息存活于压缩
@@ -1714,20 +1714,22 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         break;
       }
 
-      // v19.0: Token 预算感知压缩 (Observation Masking + Scratchpad Anchor)
+      // ── v10.2 渐进式上下文压缩 (Proactive Compaction) ──
       const { total: ctxTokens } = computeMessageBreakdown(messages);
       const budget = checkContextBudget(ctxTokens, model);
-      const needsCompress = budget.status === 'overflow' || budget.status === 'critical' || messages.length > 20;
 
-      if (needsCompress) {
-        // Step 1: Observation Masking
-        maskOldToolOutputs(messages, 10);
+      if (budget.status !== 'ok') {
+        // Step 1: Observation Masking — 所有非 ok 状态都执行
+        const keepRecentCount = budget.status === 'overflow' ? 6 : budget.status === 'critical' ? 8 : 10;
+        maskOldToolOutputs(messages, keepRecentCount);
 
-        // Step 2: 传统压缩
+        // Step 2: 深度压缩 — 仅 critical/overflow 时
         if (budget.status === 'overflow' || budget.status === 'critical') {
           compressToolOutputs(messages, budget.status);
+          await compressMessageHistorySmart(messages, settings, signal);
+        } else if (messages.length > 25) {
+          compressToolOutputs(messages, 'warning');
         }
-        await compressMessageHistorySmart(messages, settings, signal);
 
         // Step 3: 注入 Scratchpad 锚点
         if (workspacePath) {
