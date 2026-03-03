@@ -479,12 +479,16 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const messagesMap = useAppStore(s => s.metaAgentMessages);
   const addMessage = useAppStore(s => s.addMetaAgentMessage);
   const updateLastAssistant = useAppStore(s => s.updateLastAssistantMessage);
+  const attachWorkMsgs = useAppStore(s => s.attachWorkMessagesToLast);
   const currentSessionId = useAppStore(s => s.currentMetaSessionId);
   const setCurrentSessionId = useAppStore(s => s.setCurrentMetaSessionId);
   const sessionList = useAppStore(s => s.metaSessionList);
 
   const chatKey = currentSessionId || currentProjectId || '_global';
   const messages = messagesMap.get(chatKey) || [];
+
+  // v26.0: 全局开关 — 显示工作过程细节
+  const [showWorkDetails, setShowWorkDetails] = useState(false);
 
   // ── 模式管理 ──
   // pendingMode: 无 session 时本地保持的待定模式 (React state → 即时刷新 UI)
