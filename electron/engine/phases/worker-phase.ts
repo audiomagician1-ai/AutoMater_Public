@@ -21,6 +21,7 @@ import {
   linkFeatureSession, completeFeatureSessionLink, getOrCreateSession, type WorkType,
   resolveMemberModel,
   type AppSettings, type CountResult, type EnrichedFeature, type FeatureRow, type GitProviderConfig,
+  type PhaseResult, makePhaseResult,
 } from './shared';
 import {
   createBranch, switchBranch, gitPush, createPR, addIssueComment, getCurrentBranch,
@@ -39,7 +40,11 @@ export async function workerLoop(
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, gitConfig: GitProviderConfig,
   permissions?: import('../tool-registry').AgentPermissions,
-) {
+): Promise<PhaseResult> {
+  const startTime = Date.now();
+  let featuresProcessed = 0;
+  let featuresPassed = 0;
+  let featuresFailed = 0;
   const db = getDb();
   const maxQARetries = 3;
 
@@ -299,6 +304,8 @@ export async function workerLoop(
     releaseFeatureLocks(workerId, feature.id);
 
     const newStatus = passed ? 'qa_passed' : 'failed';
+    featuresProcessed++;
+    if (passed) featuresPassed++; else featuresFailed++;
     db.prepare("UPDATE features SET status = ?, locked_by = NULL, last_error = ?, last_error_at = CASE WHEN ? = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
       .run(newStatus, passed ? null : lastErrorMsg, newStatus, feature.id, projectId);
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
@@ -388,6 +395,12 @@ export async function workerLoop(
 
     await sleep(500);
   }
+
+  const workerSummary = `Worker ${workerId}: ${featuresProcessed} features 处理 (${featuresPassed} passed, ${featuresFailed} failed)`;
+  const workerStatus = signal.aborted ? 'failure' : (featuresFailed > 0 ? 'partial' : 'success');
+  return makePhaseResult('dev_implement', workerStatus, workerSummary, startTime, {
+    artifacts: { testResults: { passed: featuresPassed, failed: featuresFailed } },
+  });
 }
 
 // ═══════════════════════════════════════

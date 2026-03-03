@@ -50,6 +50,8 @@ export interface MetaAgentMessage {
     data: string;
     mimeType: string;
   }>;
+  /** v26.0: 关联的工作过程消息 (思维链/工具调用等), 对话完成后附加 */
+  workMessages?: AgentWorkMessage[];
 }
 
 type AppState = NavigationSlice & LogSlice & AgentSlice & MetaAgentSlice;

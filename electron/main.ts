@@ -139,29 +139,44 @@ app.whenReady().then(async () => {
     });
   });
 
-  // 初始化数据库
-  await initDatabase();
-
-  // 注册 IPC 处理器
-  setupSettingsHandlers();
-  setupLLMHandlers();
-  setupProjectHandlers();
-  setupWorkspaceHandlers();
-  setupEventHandlers();
-  setupMcpHandlers();
-  setupMetaAgentHandlers();
-  setupMissionHandlers();
-  setupSessionHandlers();
-  setupMonitorHandlers();
-  registerWorkflowHandlers();
-
-  // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
-  initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });
-
-  // v7.0: 启动管家守护进程 (心跳/事件钩子/定时任务)
-  startDaemon();
-
+  // ── 先创建窗口，确保用户能看到界面 ──
   createWindow();
+
+  try {
+    // 初始化数据库
+    await initDatabase();
+
+    // 注册 IPC 处理器
+    setupSettingsHandlers();
+    setupLLMHandlers();
+    setupProjectHandlers();
+    setupWorkspaceHandlers();
+    setupEventHandlers();
+    setupMcpHandlers();
+    setupMetaAgentHandlers();
+    setupMissionHandlers();
+    setupSessionHandlers();
+    setupMonitorHandlers();
+    registerWorkflowHandlers();
+
+    // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
+    initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });
+
+    // v7.0: 启动管家守护进程 (心跳/事件钩子/定时任务)
+    startDaemon();
+  } catch (err) {
+    // 初始化失败时显示错误对话框，而不是静默卡死
+    const { dialog } = await import('electron');
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[FATAL] Startup initialization failed:', msg);
+    dialog.showErrorBox(
+      '启动失败 — 智械母机 AutoMater',
+      `应用初始化时发生错误，请截图反馈：\n\n${msg}\n\n` +
+      '可尝试的修复方式：\n' +
+      '1. 完全退出后重新打开\n' +
+      '2. 删除 %APPDATA%/automater/data/automater.db 后重试（会丢失历史数据）'
+    );
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

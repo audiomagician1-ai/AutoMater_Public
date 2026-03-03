@@ -322,8 +322,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     // PM 分析 (pm_analysis or pm_triage)
     if (hasStage(workflowStages, 'pm_analysis')) {
-      const features = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
-      if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+      const pmResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
+      if (!pmResult?.features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+      const features = pmResult.features;
 
       // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
       db.prepare(
@@ -343,8 +344,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       }
     } else if (hasStage(workflowStages, 'pm_triage')) {
       // 快速迭代模式: 只做分诊, 跳过架构和文档
-      const features = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
-      if (!features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+      const pmTriageResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
+      if (!pmTriageResult?.features || signal.aborted) { unregisterOrchestrator(projectId); return; }
 
       // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
       db.prepare(
@@ -496,13 +497,14 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         content: `🆕 检测到 ${triage.newCapabilities.length} 个新功能, 启动增量 PM 分析...`,
       });
 
-      const incrementalFeatures = await phaseIncrementalPM(
+      const incResult = await phaseIncrementalPM(
         projectId, project, triage.newCapabilities, settings, win, signal, workspacePath,
       );
       if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      const incrementalFeatures = incResult?.features ?? [];
 
       // 为新 Feature 生成子需求 + 测试规格
-      if (incrementalFeatures && incrementalFeatures.length > 0 && workspacePath) {
+      if (incrementalFeatures.length > 0 && workspacePath) {
         await phaseReqsAndTestSpecs(projectId, incrementalFeatures, settings, win, signal, workspacePath);
         if (signal.aborted) { unregisterOrchestrator(projectId); return; }
       }

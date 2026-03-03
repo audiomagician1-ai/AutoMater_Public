@@ -14,7 +14,7 @@
 import {
   BrowserWindow, createLogger, execAsync, fs, path,
   sendToUI, addLog,
-  type AppSettings,
+  type AppSettings, type PhaseResult, makePhaseResult,
 } from './shared';
 import { getGitConfigFromSecrets, getProviderSecrets, listSecrets, getSecret, hasSecret } from '../secret-manager';
 import { initRepo, testGitHubConnection } from '../git-provider';
@@ -34,7 +34,8 @@ export async function phaseEnvironmentBootstrap(
   win: BrowserWindow | null,
   signal: AbortSignal,
   workspacePath: string,
-): Promise<BootstrapResult> {
+): Promise<PhaseResult> {
+  const startTime = Date.now();
   const result: BootstrapResult = {
     dependenciesInstalled: false,
     envInjected: false,
@@ -42,7 +43,7 @@ export async function phaseEnvironmentBootstrap(
     credentialsValid: {},
   };
 
-  if (signal.aborted) return result;
+  if (signal.aborted) return makePhaseResult('bootstrap', 'skipped', '中止', startTime);
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '🔧 Phase 0: 环境初始化...' });
 
   // ═══════════════════════════════════════
@@ -113,7 +114,7 @@ export async function phaseEnvironmentBootstrap(
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ℹ️ 无已知包管理器，跳过依赖安装' });
   }
 
-  if (signal.aborted) return result;
+  if (signal.aborted) return makePhaseResult('bootstrap', 'skipped', '中止', startTime, { artifacts: { ...result } });
 
   // ═══════════════════════════════════════
   // Step 2: 密钥注入到 .env.local
@@ -161,7 +162,7 @@ export async function phaseEnvironmentBootstrap(
     }
   }
 
-  if (signal.aborted) return result;
+  if (signal.aborted) return makePhaseResult('bootstrap', 'skipped', '中止', startTime, { artifacts: { ...result } });
 
   // ═══════════════════════════════════════
   // Step 3: Git 远程设置
@@ -177,7 +178,7 @@ export async function phaseEnvironmentBootstrap(
     }
   }
 
-  if (signal.aborted) return result;
+  if (signal.aborted) return makePhaseResult('bootstrap', 'skipped', '中止', startTime, { artifacts: { ...result } });
 
   // ═══════════════════════════════════════
   // Step 4: 平台凭证验证
@@ -244,5 +245,5 @@ export async function phaseEnvironmentBootstrap(
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🔧 Phase 0 完成: ${summary}` });
   addLog(projectId, 'system', 'log', `Phase 0 环境初始化: ${summary}`);
 
-  return result;
+  return makePhaseResult('bootstrap', 'success', summary, startTime, { artifacts: { ...result } });
 }

@@ -8,7 +8,7 @@
  *   - 无会话时: chatKey = projectId || '_global' (向后兼容)
  */
 import type { StateCreator } from 'zustand';
-import type { MetaAgentMessage } from '../app-store';
+import type { MetaAgentMessage, AgentWorkMessage } from '../app-store';
 
 export type ChatMode = 'work' | 'chat' | 'deep' | 'admin';
 
@@ -54,6 +54,8 @@ export interface MetaAgentSlice {
   clearMetaAgentMessages: (chatKey: string) => void;
   setMetaAgentMessages: (chatKey: string, messages: MetaAgentMessage[]) => void;
   updateLastAssistantMessage: (chatKey: string, content: string) => void;
+  /** v26.0: 将工作过程消息附加到最后一条 assistant 消息 */
+  attachWorkMessagesToLast: (chatKey: string, workMessages: AgentWorkMessage[]) => void;
 }
 
 export const createMetaAgentSlice: StateCreator<MetaAgentSlice, [], [], MetaAgentSlice> = (set) => ({
@@ -95,6 +97,19 @@ export const createMetaAgentSlice: StateCreator<MetaAgentSlice, [], [], MetaAgen
     for (let i = list.length - 1; i >= 0; i--) {
       if (list[i].role === 'assistant') {
         list[i] = { ...list[i], content };
+        break;
+      }
+    }
+    next.set(chatKey, list);
+    return { metaAgentMessages: next };
+  }),
+  attachWorkMessagesToLast: (chatKey, workMessages) => set((s) => {
+    if (!workMessages.length) return s;
+    const next = new Map(s.metaAgentMessages);
+    const list = [...(next.get(chatKey) || [])];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].role === 'assistant') {
+        list[i] = { ...list[i], workMessages };
         break;
       }
     }

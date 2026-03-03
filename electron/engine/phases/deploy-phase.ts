@@ -420,7 +420,7 @@ async function quickBuildVerify(
     });
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
     sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
-    return;
+    return makePhaseResult('devops_build', 'skipped', '未检测到已知构建系统', startTime);
   }
 
   let allPassed = true;

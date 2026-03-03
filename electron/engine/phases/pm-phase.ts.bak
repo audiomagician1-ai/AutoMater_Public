@@ -40,9 +40,6 @@ import {
   type ProjectRow,
   type FeatureRow,
   type ParsedFeature,
-  type PMPhaseResult,
-  type PhaseResult,
-  makePhaseResult,
 } from './shared';
 import fs from 'fs';
 import path from 'path';
@@ -63,9 +60,7 @@ export async function phasePMAnalysis(
   win: BrowserWindow | null,
   signal: AbortSignal,
   permissions?: import('../tool-registry').AgentPermissions,
-): Promise<PMPhaseResult> {
-  const startTime = Date.now();
-  const _fail = (msg: string): PMPhaseResult => ({ ...makePhaseResult('pm_analysis', 'failure', msg, startTime), features: null });
+): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = 'pm-0'; // 固定 ID: 复用同一 Agent 行
   spawnAgent(projectId, pmId, 'pm', win);
@@ -83,7 +78,7 @@ export async function phasePMAnalysis(
 
   let features: ParsedFeature[] = [];
   try {
-    if (signal.aborted) return _fail('中止');
+    if (signal.aborted) return null;
     const pmPrompt = getTeamPrompt(projectId, 'pm') ?? PM_SYSTEM_PROMPT;
     const workspacePath = project.workspace_path || '';
     const gitConfig = {
@@ -226,7 +221,7 @@ export async function phasePMAnalysis(
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
       sendToUI(win, 'project:status', { projectId, status: 'paused' });
       notify('⚠️ AutoMater 需要你的帮助', `PM 分析遇到阻塞: ${pmReactResult.blockReason}`);
-      return { ...makePhaseResult('pm_analysis', 'failure', `PM 被阻塞: ${(pmReactResult.blockReason || '').slice(0, 80)}`, startTime), features: null };
+      return null;
     }
 
     const textToParse = pmReactResult.finalText || '';
@@ -260,20 +255,20 @@ export async function phasePMAnalysis(
       "UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?",
     ).run(pmReactResult.totalInputTokens, pmReactResult.totalOutputTokens, pmReactResult.totalCost, pmId, projectId);
   } catch (err: unknown) {
-    if (signal.aborted) return _fail('中止');
+    if (signal.aborted) return null;
     const errMsg = err instanceof Error ? err.message : String(err);
     addLog(projectId, pmId, 'error', errMsg);
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ PM 分析失败: ${errMsg}` });
     db.prepare("UPDATE agents SET status = 'error' WHERE id = ? AND project_id = ?").run(pmId, projectId);
     db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
     sendToUI(win, 'project:status', { projectId, status: 'error' });
-    return _fail(`PM 分析失败: ${errMsg.slice(0, 100)}`);
+    return null;
   }
 
   if (features.length === 0) {
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ PM 未能生成有效的 Feature 清单' });
     db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
-    return _fail('PM 未能生成有效的 Feature 清单');
+    return null;
   }
 
   const pmGate = gatePMToArchitect(features);
@@ -281,7 +276,7 @@ export async function phasePMAnalysis(
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `🚫 PM→Architect 门控未通过: ${pmGate.reason}` });
     addLog(projectId, pmId, 'error', `Pipeline gate blocked: ${pmGate.reason}`);
     db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?").run(projectId);
-    return _fail(`PM→Architect 门控未通过: ${pmGate.reason}`);
+    return null;
   }
 
   const insertFeature = db.prepare(
@@ -314,13 +309,7 @@ export async function phasePMAnalysis(
   emitEvent({ projectId, agentId: pmId, type: 'phase:pm:end', data: { featureCount: features.length } });
   createCheckpoint(projectId, `PM 分析完成 (${features.length} Features)`);
 
-  const pmResult: PMPhaseResult = {
-    ...makePhaseResult('pm_analysis', 'success', `PM 分析完成 (${features.length} Features)`, startTime, {
-      artifacts: { featureIds: features.map(f => f.id) },
-    }),
-    features,
-  };
-  return pmResult;
+  return features;
 }
 
 // ═══════════════════════════════════════
@@ -335,9 +324,7 @@ export async function phaseIncrementalPM(
   win: BrowserWindow | null,
   signal: AbortSignal,
   _workspacePath: string | null,
-): Promise<PMPhaseResult> {
-  const startTime = Date.now();
-  const _failInc = (msg: string): PMPhaseResult => ({ ...makePhaseResult('pm_analysis', 'failure', msg, startTime), features: null });
+): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = 'pm-0'; // 固定 ID: 增量分析复用 PM Agent
   spawnAgent(projectId, pmId, 'pm', win);
@@ -400,12 +387,12 @@ export async function phaseIncrementalPM(
         agentId: pmId,
         content: `❌ 增量分析输出解析失败: ${parseResult.error}`,
       });
-      return _failInc('增量分析输出解析失败');
+      return null;
     }
     const newFeatures = parseResult.data;
     if (newFeatures.length === 0) {
       sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: '⚠️ 增量分析未产生新 Feature' });
-      return _failInc('增量分析未产生新 Feature');
+      return null;
     }
 
     const insertFeature = db.prepare(
@@ -440,16 +427,12 @@ export async function phaseIncrementalPM(
       content: `✅ 新增 ${newFeatures.length} 个 Feature ($${cost.toFixed(4)})`,
     });
     emitEvent({ projectId, agentId: pmId, type: 'phase:incremental-pm:end', data: { newCount: newFeatures.length } });
-    const incResult: PMPhaseResult = {
-      ...makePhaseResult('pm_analysis', 'success', `增量分析完成 (${newFeatures.length} 新 Features)`, startTime),
-      features: newFeatures,
-    };
-    return incResult;
+    return newFeatures;
   } catch (err: unknown) {
-    if (signal.aborted) return _failInc('中止');
+    if (signal.aborted) return null;
     const errMsg = err instanceof Error ? err.message : String(err);
     sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `❌ 增量分析失败: ${errMsg}` });
-    return _failInc(`增量分析失败: ${errMsg.slice(0, 100)}`);
+    return null;
   }
 }
 
@@ -463,15 +446,14 @@ export async function phasePMAcceptance(
   win: BrowserWindow | null,
   signal: AbortSignal,
   workspacePath: string,
-): Promise<PhaseResult> {
-  const startTime = Date.now();
+): Promise<void> {
   const db = getDb();
   const qaPassed = db
     .prepare("SELECT * FROM features WHERE project_id = ? AND status = 'qa_passed'")
     .all(projectId) as FeatureRow[];
   if (qaPassed.length === 0) {
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '⏭️ Phase 4: 没有 Feature 需要 PM 验收' });
-    return makePhaseResult('pm_acceptance', 'skipped', '没有 Feature 需要 PM 验收', startTime);
+    return;
   }
 
   const pmAccId = 'pm-0'; // 固定 ID: 验收复用 PM Agent
@@ -489,7 +471,7 @@ export async function phasePMAcceptance(
   }
 
   for (let bi = 0; bi < accBatches.length; bi++) {
-    if (signal.aborted) return makePhaseResult('pm_acceptance', 'failure', '中止', startTime);
+    if (signal.aborted) return;
     const batch = accBatches[bi];
     try {
       const batchInfo = batch
@@ -615,7 +597,7 @@ export async function phasePMAcceptance(
         content: `  📋 批次 ${bi + 1}/${accBatches.length} 验收完成 ($${accCost.toFixed(4)})`,
       });
     } catch (err: unknown) {
-      if (signal.aborted) return makePhaseResult('pm_acceptance', 'failure', '中止', startTime);
+      if (signal.aborted) return;
       const errMsg = err instanceof Error ? err.message : String(err);
       sendToUI(win, 'agent:log', {
         projectId,
@@ -633,5 +615,4 @@ export async function phasePMAcceptance(
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(pmAccId, projectId);
   emitEvent({ projectId, agentId: pmAccId, type: 'phase:pm-acceptance:end', data: { reviewed: qaPassed.length } });
   createCheckpoint(projectId, `PM 验收完成 (${qaPassed.length} features)`);
-  return makePhaseResult('pm_acceptance', 'success', `PM 验收完成 (${qaPassed.length} features)`, startTime);
 }

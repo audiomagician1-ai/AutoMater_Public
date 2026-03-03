@@ -209,6 +209,7 @@ export const CODE_EXTENSIONS = new Set([
 
 /** 工作流阶段标识 — 与 orchestrator 的实际 phase 函数一一对应 */
 export type WorkflowStageId =
+  | 'bootstrap'
   | 'pm_analysis'
   | 'pm_triage'
   | 'architect'
@@ -301,6 +302,12 @@ export interface PhaseResult {
     filesCreated?: string[];
     testResults?: { passed: number; failed: number };
     reviewScore?: number;
+    /** bootstrap 阶段产物 */
+    dependenciesInstalled?: boolean;
+    envInjected?: boolean;
+    gitConfigured?: boolean;
+    credentialsValid?: Record<string, boolean>;
+    [key: string]: unknown;
   };
   /** 耗时 ms */
   durationMs: number;

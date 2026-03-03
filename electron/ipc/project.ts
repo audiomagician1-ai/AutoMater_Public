@@ -1791,6 +1791,7 @@ export function setupProjectHandlers() {
   // ── 文件夹选择对话框 (v5.1) ──
   ipcMain.handle('dialog:open-directory', async (_event, title?: string) => {
     const win = BrowserWindow.getFocusedWindow();
+    if (!win) return { canceled: true, filePaths: [] };
     const result = await dialog.showOpenDialog(win, {
       title: title || '选择文件夹',
       properties: ['openDirectory'],
