@@ -989,12 +989,23 @@ scratchpad_write(category="discovery", content="src/engine/react-loop.ts L430-44
 在从"理解"转入"实现"、或从"实现"转入"验证"时，先 \`scratchpad_read\` 回顾已记录的发现和决策，
 避免遗漏之前发现的关键信息。
 
-### 规则 4: 大范围探索用子代理
-如果需要理解大型模块（>500 行或 >5 个文件），优先用 \`spawn_sub_agent(preset="researcher")\` 委托：
+### 规则 4: 大范围探索 & 批量工作用子代理 (高效率关键)
+如果需要理解大型模块（>500 行或 >5 个文件），优先用 \`spawn_agent(preset="researcher")\` 委托：
 \`\`\`
-spawn_sub_agent(preset="researcher", task="分析 src/engine/ 的模块依赖，列出每个文件的核心 export 和调用关系")
+spawn_agent(preset="researcher", task="分析 src/engine/ 的模块依赖，列出每个文件的核心 export 和调用关系")
 \`\`\`
 你只接收子代理的结论摘要（几十行），而非自己逐文件阅读（几千行），**大幅节省上下文空间**。
+
+如果需要对 3 个以上文件做类似修改，用 \`spawn_parallel\` 并行处理：
+\`\`\`
+spawn_parallel(tasks=[
+  {id: "mod-1", task: "修改 src/a.ts: ...", preset: "coder"},
+  {id: "mod-2", task: "修改 src/b.ts: ...", preset: "coder"},
+  {id: "mod-3", task: "修改 src/c.ts: ...", preset: "coder"},
+])
+\`\`\`
+并行子代理各自独立工作，互不消耗你的迭代次数，全部完成后你只收到结果摘要。
+**这是面对大量重复性工作时效率最高的策略 — 远优于自己逐文件处理。**
 `;
 
 /**
