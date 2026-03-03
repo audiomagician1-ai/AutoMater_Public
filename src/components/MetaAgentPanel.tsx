@@ -290,6 +290,7 @@ export function MetaAgentPanel() {
   const messagesMap = useAppStore(s => s.metaAgentMessages);
   const addMessage = useAppStore(s => s.addMetaAgentMessage);
   const updateLastAssistant = useAppStore(s => s.updateLastAssistantMessage);
+  const attachWorkMsgs = useAppStore(s => s.attachWorkMessagesToLast);
   const settingsOpen = useAppStore(s => s.metaAgentSettingsOpen);
   const setSettingsOpen = useAppStore(s => s.setMetaAgentSettingsOpen);
   const currentSessionId = useAppStore(s => s.currentMetaSessionId);
@@ -490,6 +491,11 @@ export function MetaAgentPanel() {
           .catch(() => {});
       }
     } finally {
+      // v28.1: 把本轮工作消息持久绑定到最后一条 assistant 消息
+      const roundWorkMsgs = metaAgentWorkMsgs.slice(sendingStartMsgIndexRef.current);
+      if (roundWorkMsgs.length > 0) {
+        attachWorkMsgs(activeChatKey, [...roundWorkMsgs]);
+      }
       setSending(false);
     }
   };
@@ -690,6 +696,10 @@ export function MetaAgentPanel() {
                         ))}
                       </div>
                     )}
+                  {/* v28.1: 已完成的消息 — 折叠式工作过程回顾 */}
+                  {!sending && msg.role === 'assistant' && msg.workMessages && msg.workMessages.length > 0 && (
+                    <CollapsibleWorkBlockMini workMessages={msg.workMessages} />
+                  )}
                 </div>
               ))}
               <div ref={chatEndRef} />

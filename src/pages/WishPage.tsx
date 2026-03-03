@@ -607,6 +607,38 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
 }
 
 // ═══════════════════════════════════════
+// CollapsibleWorkBlock — 已完成对话的工作过程折叠区
+// ═══════════════════════════════════════
+
+function CollapsibleWorkBlock({ workMessages }: { workMessages: AgentWorkMessage[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const thinkCount = workMessages.filter(m => m.type === 'think').length;
+  const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
+
+  return (
+    <div className="mt-1.5 max-w-[85%]">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors py-0.5 group"
+      >
+        <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+        <span className="w-1 h-1 rounded-full bg-slate-600 group-hover:bg-slate-400 shrink-0" />
+        <span>工作过程 · {workMessages.length} 步</span>
+        {thinkCount > 0 && <span className="text-blue-500/60">💭{thinkCount}</span>}
+        {toolCount > 0 && <span className="text-emerald-500/60">🔧{toolCount}</span>}
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1 pl-1.5 border-l border-slate-800/50">
+          {workMessages.map(wm => (
+            <InlineWorkMessage key={wm.id} msg={wm} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
 // MetaAgentChat — 对话区 (含会话持久化)
 // ═══════════════════════════════════════
 
@@ -900,6 +932,11 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           .catch(() => {});
       }
     } finally {
+      // v28.1: 把本轮工作消息持久绑定到最后一条 assistant 消息, 防止消失
+      const roundWorkMsgs = metaAgentWorkMsgs.slice(sendingStartMsgIndexRef.current);
+      if (roundWorkMsgs.length > 0) {
+        attachWorkMsgs(activeChatKey, [...roundWorkMsgs]);
+      }
       setSending(false);
     }
   };
@@ -1043,7 +1080,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                 </div>
               </div>
 
-              {/* 思维过程 / 工具调用 — 在最后一条 assistant 消息后内联展示 */}
+              {/* 思维过程 / 工具调用 — 实时展示(sending) 或 已完成回顾(workMessages) */}
               {sending &&
                 idx === displayMessages.length - 1 &&
                 msg.role === 'assistant' &&
@@ -1061,6 +1098,10 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                     </div>
                   ) : null;
                 })()}
+              {/* v28.1: 已完成的消息 — 折叠式工作过程回顾 */}
+              {!sending && msg.role === 'assistant' && msg.workMessages && msg.workMessages.length > 0 && (
+                <CollapsibleWorkBlock workMessages={msg.workMessages} />
+              )}
             </div>
           ))}
           <div ref={chatEndRef} />
