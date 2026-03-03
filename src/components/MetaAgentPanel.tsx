@@ -82,7 +82,7 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
 // ═══════════════════════════════════════
 
 function CollapsibleWorkBlockMini({ workMessages }: { workMessages: AgentWorkMessage[] }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const thinkCount = workMessages.filter(m => m.type === 'think').length;
   const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
 

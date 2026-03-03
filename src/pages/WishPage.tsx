@@ -110,8 +110,8 @@ function ModeSwitchBadge({
       // 更新 DB 中的 session chat_mode
       await window.automater.session.updateChatMode(sessionId, mode);
       onRefresh();
-    } catch {
-      /* silent */
+    } catch (err) {
+      console.error('[ModeSwitchBadge] updateChatMode failed:', err);
     }
     setOpen(false);
   };
@@ -254,14 +254,22 @@ function SessionListPanel() {
   const [showHidden, setShowHidden] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ sessId: string; current: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1800);
+  };
 
   const handleTogglePin = async () => {
     if (!ctxMenu) return;
+    const sess = sessionList.find(s => s.id === ctxMenu.sessId);
     try {
-      await window.automater.session.togglePin(ctxMenu.sessId);
+      const res = await window.automater.session.togglePin(ctxMenu.sessId);
       await loadSessions();
-    } catch {
-      /* silent */
+      showToast(res.pinned ? '📌 已置顶' : '已取消置顶');
+    } catch (err) {
+      console.error('[WishPage] togglePin failed:', err);
+      showToast('❌ 置顶失败');
     }
     closeCtx();
   };
@@ -281,8 +289,10 @@ function SessionListPanel() {
     try {
       await window.automater.session.rename(renameTarget.sessId, renameValue.trim() || null);
       await loadSessions();
-    } catch {
-      /* silent */
+      showToast('✏️ 已重命名');
+    } catch (err) {
+      console.error('[WishPage] rename failed:', err);
+      showToast('❌ 重命名失败');
     }
     setRenameTarget(null);
   };
@@ -290,10 +300,12 @@ function SessionListPanel() {
   const handleToggleHidden = async () => {
     if (!ctxMenu) return;
     try {
-      await window.automater.session.toggleHidden(ctxMenu.sessId);
+      const res = await window.automater.session.toggleHidden(ctxMenu.sessId);
       await loadSessions();
-    } catch {
-      /* silent */
+      showToast(res.hidden ? '🙈 已隐藏' : '👁️ 已取消隐藏');
+    } catch (err) {
+      console.error('[WishPage] toggleHidden failed:', err);
+      showToast('❌ 隐藏操作失败');
     }
     closeCtx();
   };
@@ -335,7 +347,13 @@ function SessionListPanel() {
   };
 
   return (
-    <div className="w-56 shrink-0 border-r border-slate-800 flex flex-col bg-slate-950/60" onClick={closeCtx}>
+    <div className="w-56 shrink-0 border-r border-slate-800 flex flex-col bg-slate-950/60 relative" onClick={closeCtx}>
+      {/* Toast 提示 */}
+      {toast && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[80] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl text-[11px] text-slate-200 whitespace-nowrap animate-fade-in">
+          {toast}
+        </div>
+      )}
       {/* 右键菜单 */}
       {ctxMenu && (
         <div
@@ -611,7 +629,7 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
 // ═══════════════════════════════════════
 
 function CollapsibleWorkBlock({ workMessages }: { workMessages: AgentWorkMessage[] }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const thinkCount = workMessages.filter(m => m.type === 'think').length;
   const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
 
@@ -657,6 +675,11 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
   // v26.0: 全局开关 — 显示工作过程细节
   const [showWorkDetails, setShowWorkDetails] = useState(false);
+  const [modeToast, setModeToast] = useState<string | null>(null);
+  const showModeToast = (msg: string) => {
+    setModeToast(msg);
+    setTimeout(() => setModeToast(null), 1800);
+  };
 
   // ── 模式管理 ──
   // pendingMode: 无 session 时本地保持的待定模式 (React state → 即时刷新 UI)
@@ -699,14 +722,17 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       try {
         await window.automater.session.updateChatMode(currentSessionId, mode);
         // 刷新 session 列表以反映新模式
-        const list = await window.automater.metaAgent.listChatSessions(currentProjectId);
+        const list = await window.automater.metaAgent.listChatSessions(currentProjectId, undefined, true);
         if (list) {
           useAppStore
             .getState()
             .setMetaSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
         }
-      } catch {
-        /* silent */
+        const mi = CHAT_MODE_INFO[mode];
+        showModeToast(`${mi.icon} 已切换为${mi.label}模式`);
+      } catch (err) {
+        console.error('[WishPage] handleModeSwitch refresh failed:', err);
+        showModeToast('❌ 模式切换失败');
       }
     } else {
       // 无 session → 更新本地 pendingMode + window 临时变量
@@ -952,7 +978,13 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       {!compact && <SessionListPanel />}
 
       {/* 右侧: 对话区 */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        {/* 模式切换 Toast */}
+        {modeToast && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[80] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl text-[11px] text-slate-200 whitespace-nowrap animate-fade-in">
+            {modeToast}
+          </div>
+        )}
         {!compact && (
           <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2 shrink-0">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-forge-500 to-indigo-600 flex items-center justify-center text-sm">
