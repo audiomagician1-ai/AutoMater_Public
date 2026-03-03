@@ -16,6 +16,7 @@ import { COMPUTER_TOOLS } from './computer-tools';
 import { AGENT_TOOLS } from './agent-tools';
 import { DEPLOY_TOOLS } from './deploy-tools';
 import { ADMIN_TOOLS } from './admin-tools';
+import { SESSION_TOOLS } from './session-tools';
 
 export const TOOL_DEFINITIONS = [
   ...FS_TOOLS,
@@ -27,6 +28,7 @@ export const TOOL_DEFINITIONS = [
   ...AGENT_TOOLS,
   ...DEPLOY_TOOLS,
   ...ADMIN_TOOLS,
+  ...SESSION_TOOLS,
 ] as const;
 
 // Re-export category arrays for selective use
@@ -40,4 +42,5 @@ export {
   AGENT_TOOLS,
   DEPLOY_TOOLS,
   ADMIN_TOOLS,
+  SESSION_TOOLS,
 };

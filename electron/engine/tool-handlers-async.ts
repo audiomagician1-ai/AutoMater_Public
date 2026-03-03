@@ -1463,6 +1463,106 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
     };
   }
 
+  // ── v27.0: Conversation History ──
+  if (call.name === 'list_conversation_sessions') {
+    const { listSessions, listAllSessions } = await import('./conversation-backup');
+    const projectId = call.arguments.project_id ?? ctx.projectId ?? null;
+    const agentId = call.arguments.agent_id as string | undefined;
+    const limit = Math.min(100, Math.max(1, call.arguments.limit ?? 30));
+
+    const sessions = projectId ? listSessions(projectId, agentId).slice(0, limit) : listAllSessions(limit);
+
+    if (sessions.length === 0) {
+      return { success: true, output: '暂无对话历史记录。', action: 'session' };
+    }
+
+    const lines = sessions.map(
+      s =>
+        `[${s.id}] ${s.agentRole}(${s.agentId}) | ${s.status} | mode=${s.chatMode} | msgs=${s.messageCount} | tokens=${s.totalTokens} | created=${s.createdAt}${s.completedAt ? ' | ended=' + s.completedAt : ''}`,
+    );
+    return {
+      success: true,
+      output: `共 ${sessions.length} 个会话:\n\n${lines.join('\n')}`,
+      action: 'session',
+    };
+  }
+
+  if (call.name === 'read_conversation_history') {
+    const { readSessionBackup } = await import('./conversation-backup');
+    const sessionId = call.arguments.session_id;
+    if (!sessionId) {
+      return { success: false, output: '缺少 session_id 参数', action: 'session' };
+    }
+
+    const backup = readSessionBackup(sessionId);
+    if (!backup) {
+      return { success: false, output: `Session ${sessionId} 不存在或无备份文件`, action: 'session' };
+    }
+
+    const maxMessages = Math.min(200, Math.max(0, call.arguments.max_messages ?? 50));
+    const includeToolResults = call.arguments.include_tool_results ?? false;
+
+    // 元信息头
+    const header = [
+      `Session: ${backup.sessionId}`,
+      `Agent: ${backup.agentRole} (${backup.agentId})`,
+      `Project: ${backup.projectId ?? 'global'}`,
+      `Model: ${backup.model ?? 'unknown'}`,
+      `Time: ${backup.startedAt} → ${backup.endedAt}`,
+      `Messages: ${backup.messageCount}${backup.reactIterations != null ? `, ReAct iterations: ${backup.reactIterations}` : ''}`,
+      `Tokens: input=${backup.totalInputTokens} output=${backup.totalOutputTokens} cost=$${backup.totalCost.toFixed(4)}`,
+      `Completed: ${backup.completed}`,
+    ].join('\n');
+
+    if (maxMessages === 0) {
+      return {
+        success: true,
+        output: `--- 会话元信息 ---\n${header}\n\n(仅元信息，未包含消息内容)`,
+        action: 'session',
+      };
+    }
+
+    // 过滤 + 截取消息
+    let messages = backup.messages;
+    if (!includeToolResults) {
+      messages = messages.filter(m => m.role !== 'tool');
+    }
+    // 取最后 N 条
+    if (messages.length > maxMessages) {
+      messages = messages.slice(-maxMessages);
+    }
+
+    const formatMsg = (m: (typeof messages)[number], i: number): string => {
+      const role = m.role.toUpperCase();
+      let content = '';
+      if (typeof m.content === 'string') {
+        content = m.content ?? '';
+      } else if (Array.isArray(m.content)) {
+        content = JSON.stringify(m.content).slice(0, 500);
+      }
+      // 截断过长的单条消息
+      if (content.length > 1500) {
+        content = content.slice(0, 1500) + '\n... (truncated)';
+      }
+      let extra = '';
+      if (m.tool_calls?.length) {
+        extra = `\n  [tool_calls: ${m.tool_calls.map(tc => tc.function.name).join(', ')}]`;
+      }
+      if (m.tool_call_id) {
+        extra += `\n  [tool_call_id: ${m.tool_call_id}]`;
+      }
+      return `--- #${i + 1} [${role}] ---\n${content}${extra}`;
+    };
+
+    const formatted = messages.map(formatMsg).join('\n\n');
+
+    return {
+      success: true,
+      output: `--- 会话元信息 ---\n${header}\n\n--- 消息历史 (${messages.length}/${backup.messageCount} 条) ---\n\n${formatted}`,
+      action: 'session',
+    };
+  }
+
   // Fallback to sync
   return executeTool(call, ctx);
 }

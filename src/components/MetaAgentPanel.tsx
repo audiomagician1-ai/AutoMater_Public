@@ -695,31 +695,8 @@ export function MetaAgentPanel() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Input — 所有会话均可继续对话 */}
-            <div className="shrink-0 px-2 py-1.5 border-t border-slate-800">
-              <div className="flex gap-1">
-                <input
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="发消息..."
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
-                  disabled={sending}
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() || sending}
-                  className="px-2 py-1.5 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-xs transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
-                >
-                  {sending ? '·' : '↑'}
-                </button>
-              </div>
-            </div>
+            {/* Input — v28.0: 支持附件上传 (紧凑版) */}
+            <ChatInput onSend={handleSend} sending={sending} placeholder="发消息..." compact />
           </>
         )}
       </div>

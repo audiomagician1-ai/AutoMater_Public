@@ -46,7 +46,8 @@ export interface ToolResult {
     | 'plan'
     | 'computer'
     | 'complete'
-    | 'blocked';
+    | 'blocked'
+    | 'session'; // v27.0: 对话历史浏览
   /** 附带图片 Base64 (截图/浏览器截图等) */
   _imageBase64?: string;
 }

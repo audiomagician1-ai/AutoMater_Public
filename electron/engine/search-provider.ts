@@ -1,24 +1,29 @@
 ﻿/**
  * Search Provider System — 可插拔多引擎搜索 + 自动 Fallback
  *
- * 支持的搜索引擎:
- *   1. Brave Search API  — 免费 2000 次/月, 质量高, 结构化结果
- *   2. SearXNG           — 自建, 完全离线, LAN 友好
- *   3. Tavily            — 专门为 AI 优化的搜索 API
- *   4. Serper.dev        — Google 搜索 API 代理, 2500 次/月免费
- *   5. Jina AI           — 零 API Key, 免费 fallback
+ * 零 Key 即可用的搜索引擎 (HTML 爬取):
+ *   1. Google HTML       — 主力, 直接解析 google.com/search HTML
+ *   2. Bing HTML         — 第二, 直接解析 bing.com/search HTML
+ *   3. DuckDuckGo HTML   — 第三, html.duckduckgo.com
+ *
+ * 可选付费引擎 (需 API Key, 质量更高):
+ *   4. Brave Search API  — 免费 2000 次/月
+ *   5. SearXNG           — 自建, 完全离线
+ *   6. Tavily            — AI 优化搜索
+ *   7. Serper.dev        — Google API 代理
+ *   8. Jina AI           — 搜索 + URL 抓取
  *
  * 设计原则:
- *   - 自动 fallback chain: Brave → SearXNG → Serper → Jina
- *   - 每个 Provider 独立配置 API key
+ *   - 零配置即可用: Google → Bing → DDG 三重免费兜底
+ *   - 付费引擎优先: 如果配了 Key 则优先走 API (更稳定)
  *   - 统一 SearchResult 输出格式
  *   - 并行搜索多引擎 + 结果去重合并 (boost 模式)
- *   - 速率限制友好: 自动退避
+ *   - 速率限制友好: 自动退避 + 多引擎分散压力
  *
  * 零 npm 依赖 — 全部使用 Node.js 原生 fetch。
  *
  * @module search-provider
- * @since v8.0.0
+ * @since v8.0.0 / v24.1 — zero-key overhaul
  */
 
 import { createLogger } from './logger';
@@ -68,7 +73,7 @@ export interface SearchProviderConfig {
   timeout?: number;
 }
 
-export type ProviderName = 'brave' | 'searxng' | 'tavily' | 'serper' | 'jina' | 'duckduckgo';
+export type ProviderName = 'google' | 'bing' | 'duckduckgo' | 'brave' | 'searxng' | 'tavily' | 'serper' | 'jina';
 
 // ═══════════════════════════════════════
 // Provider Interface
