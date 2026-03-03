@@ -49,7 +49,7 @@
 | 4 | P2 | 前端 lazy loading + Suspense | ✅ | `81d5af1` (13 pages + 3 panels) |
 | 5 | P2 | Zustand store 拆分 | ✅ 已有 | 4 slices (agent/log/meta-agent/navigation) |
 | 6 | P2 | visibilityState 节流 | ✅ | `81d5af1` |
-| 7 | P3 | 清理 unused vars | 🔶 进行中 | 406→383 warnings (`ccf49c2`, `adcebc5`) |
+| 7 | P3 | 清理 unused vars + lint | ✅ 大幅完成 | `bb0c936` 批量清理: 406→288 (-118, -29%) |
 
 ## 额外完成项
 
@@ -60,6 +60,7 @@
 | Budget Tracker + Stuck Detector (guards.ts) | `adcebc5` |
 | project.ts 注释未实现的 consolidateOnProjectEnd | `5f368f3` |
 | 清理 3 个过时 git stash | `adcebc5` 后 |
+| 批量 unused-vars 自动修复 (78 imports + 14 catch + 19 args) | `bb0c936` |
 
 ---
 
@@ -67,7 +68,7 @@
 
 | 维度 | 审计前 | 当前 | 变化 |
 |------|--------|------|------|
-| D1 代码规范 | 6.0 | 6.5 | +0.5 |
+| D1 代码规范 | 6.0 | 7.0 | +1.0 |
 | D2 安全 | 6.0 | 7.0 | +1.0 |
 | D3 架构 | 5.5 | 6.0 | +0.5 |
 | D4 健壮性 | 6.5 | 6.8 | +0.3 |
@@ -75,7 +76,15 @@
 | D6 前端 | 5.5 | 6.5 | +1.0 |
 | D7 DevOps | 3.0 | 6.0 | +3.0 |
 | D8 文档 | 7.0 | 7.5 | +0.5 |
-| **加权总分** | **5.61** | **~6.5** | **+0.9** |
+| **加权总分** | **5.61** | **~6.7** | **+1.1** |
+
+## Lint 趋势
+
+| 阶段 | 总 warnings | unused-vars | non-null | any | 其他 |
+|------|-------------|-------------|----------|-----|------|
+| 审计前 | ~406 | 267 | 120 | 67 | 52 |
+| Sprint 1-4 后 | 383 | 184 | 120 | 67 | 12 |
+| 批量清理后 | **288** | **77** | 120 | 67 | 24 |
 
 ## 未完成项 & 下一步
 
@@ -84,4 +93,4 @@
 3. **coverage 门禁** — 等 vitest v4 修复 Windows/Node v24 coverage bug
 4. **50 skipped tests** — 等 better-sqlite3 兼容 Node v24 (或降级 Node)
 5. **前端测试** — 快照测试 + E2E
-6. **剩余 383 lint warnings** — 逐步清理 (120 non-null-assertion, 67 explicit-any)
+6. **剩余 288 lint warnings** — 77 unused local vars (需手动), 120 non-null-assertion (低 ROI), 67 explicit-any, 14 react-hooks, 10 no-console

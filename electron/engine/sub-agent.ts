@@ -16,6 +16,7 @@ import { readMemoryForRole } from './memory-system';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { maskOldToolOutputs } from './scratchpad';
+import { withContextDiscipline } from './prompts';
 
 const execAsync = promisify(exec);
 import type { ToolContext } from './tool-system';
@@ -204,7 +205,7 @@ export async function runResearcher(
   let totalOut = 0;
 
   const messages: Array<{ role: string; content: string | null | Array<Record<string, unknown>>; tool_calls?: LLMToolCall[]; tool_call_id?: string }> = [
-    { role: 'system', content: RESEARCHER_SYSTEM_PROMPT },
+    { role: 'system', content: withContextDiscipline(RESEARCHER_SYSTEM_PROMPT) },
     { role: 'user', content: `请研究以下问题:\n\n${question}` },
   ];
 
