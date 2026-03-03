@@ -11,6 +11,12 @@ const AGENT_ROLE_TAB_INFO: Record<string, { icon: string; label: string }> = {
   meta: { icon: '🤖', label: '管家' },
 };
 
+/** 从复合键 `projectId:agentId` 中解出 agentId */
+function agentIdFromKey(key: string): string {
+  const idx = key.indexOf(':');
+  return idx >= 0 ? key.slice(idx + 1) : key;
+}
+
 function getAgentTabInfo(agentId: string): { icon: string; label: string } {
   const prefix = agentId.split('-')[0];
   return AGENT_ROLE_TAB_INFO[prefix] || { icon: '🤖', label: agentId };
@@ -19,30 +25,36 @@ function getAgentTabInfo(agentId: string): { icon: string; label: string } {
 export function AgentActivityPanel() {
   const agentStatuses = useAppStore(s => s.agentStatuses);
   const agentWorkMessages = useAppStore(s => s.agentWorkMessages);
+  const currentProjectId = useAppStore(s => s.currentProjectId);
   const [expanded, setExpanded] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
   const activeAgents = useMemo(() => {
-    const agents: Array<{ id: string; isWorking: boolean; msgCount: number }> = [];
+    const agents: Array<{ id: string; compKey: string; isWorking: boolean; msgCount: number }> = [];
     const seen = new Set<string>();
 
-    for (const [agentId, status] of agentStatuses.entries()) {
+    // 只显示当前项目的 agent
+    for (const [ck, status] of agentStatuses.entries()) {
+      if (currentProjectId && !ck.startsWith(currentProjectId + ':')) continue;
+      const aid = agentIdFromKey(ck);
       if (status.status === 'working') {
-        agents.push({ id: agentId, isWorking: true, msgCount: (agentWorkMessages.get(agentId) || []).length });
-        seen.add(agentId);
+        agents.push({ id: aid, compKey: ck, isWorking: true, msgCount: (agentWorkMessages.get(ck) || []).length });
+        seen.add(ck);
       }
     }
 
-    for (const [agentId, msgs] of agentWorkMessages.entries()) {
-      if (!seen.has(agentId) && msgs.length > 0) {
-        const status = agentStatuses.get(agentId);
-        agents.push({ id: agentId, isWorking: status?.status === 'working', msgCount: msgs.length });
-        seen.add(agentId);
+    for (const [ck, msgs] of agentWorkMessages.entries()) {
+      if (currentProjectId && !ck.startsWith(currentProjectId + ':')) continue;
+      if (!seen.has(ck) && msgs.length > 0) {
+        const aid = agentIdFromKey(ck);
+        const status = agentStatuses.get(ck);
+        agents.push({ id: aid, compKey: ck, isWorking: status?.status === 'working', msgCount: msgs.length });
+        seen.add(ck);
       }
     }
 
     return agents;
-  }, [agentStatuses, agentWorkMessages]);
+  }, [agentStatuses, agentWorkMessages, currentProjectId]);
 
   // 稳定化 activeAgents 的 id 列表，避免引用变化触发无限循环
   const agentIdsKey = activeAgents.map(a => a.id).join(',');
