@@ -1,11 +1,11 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-02 | 版本: v21.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-03 | 版本: v28.1 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v21.0 — 元Agent 管家4模式系统 + 管理员模式 + 守护进程 + 导入详细进度
-**最高优先级**: 管家智能体验优化 (模式切换, 自主行为, 团队管理对话化)
+**当前阶段**: v28.1 — DAG工作流引擎 + 搜索引擎大修 + 思维链可视化 + 管家上下文管理 + 附件支持
+**最高优先级**: 实际运行时全链路验证 (PM→Dev→QA 全流程) + 竞争力 5.61→7.0 路线图执行
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
 ## 2. PROJECT IDENTITY
@@ -25,7 +25,7 @@
 | LLM | 统一适配层: OpenAI 兼容 + Anthropic 原生双协议 |
 | Database | SQLite (better-sqlite3, 同步 API, **22 张表**, 15 版迁移) |
 | Build | pnpm + Vite (renderer) + tsc (main/preload) + electron-builder |
-| Test | Vitest 4 + @vitest/coverage-v8 (43 测试文件, 817 tests) |
+| Test | Vitest 4 + @vitest/coverage-v8 (50 测试文件, 918 tests) |
 | Lint | ESLint 10 + Prettier 3 |
 | Package | ~355MB Windows installer (win:dir) |
 
@@ -198,7 +198,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | DevOps | devops-* | 10 | 自动构建验证 (install→lint→test→build) |
 | Researcher | researcher-* | 6 | 只读子 Agent, 8 轮上限 |
 
-### 元 Agent (v5.4 → v21.0 管家4模式系统)
+### 元 Agent (v5.4 → v28.1 管家4模式系统 + 上下文管理 + 附件)
 
 - **位置**: 全局右侧可收起面板 + WishPage 右侧
 - **职责**: 跨项目路由, 需求接收转发, 工作流管理, 查询项目技术/设计细节, **团队/项目直接管理 (admin模式)**
@@ -323,7 +323,7 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 
 ## 4. CURRENT STATE
 
-**版本**: v21.0 (元Agent 4模式系统 + 管理员模式 + 守护进程 + 导入详细进度 + 流式修复)
+**版本**: v28.1 (DAG工作流引擎 + 搜索引擎大修 + 思维链可视化 + 管家上下文管理 + 附件支持)
 
 ### 版本演进总览
 
@@ -346,6 +346,12 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | v19 | 多模态交互 (图片/文件上传 + 网络图片搜索), 大文件拆分 (tool-registry/executor) |
 | v20 | Agent 能力差距15项改进 (验证门控/语义死循环/纯文本容忍/自适应Prompt/架构裁剪/经验提取) |
 | v21 | 元Agent 4模式系统 (work/chat/deep/admin) + 9管理工具 + per-mode配置 + 守护进程 + 流式通信修复 + 导入详细进度 |
+| v22 | CI/CD(Husky+lint-staged) + CSP安全头 + PS注入转义 + JSON.parse修复 + 859 tests |
+| v23 | Meta-agent路径安全防护 + Git访问权限用户可配置化 + Lazy Loading(13页面+3面板) |
+| v24 | 搜索引擎大修(DuckDuckGo/Bing/Google HTML scraping) + Zero-key search + Agent资源上限自动终结 + 上下文主动压缩 |
+| v25 | DAG WorkflowEngine(状态机驱动阶段执行+transitions+12测试) + WorkflowPreview DAG可视化 + 内置工作流升级 + 错误经验主动检索 |
+| v26 | Echo风格思维链展示 + 完整工具调用可视化(diff/终端样式/Markdown代码块可复制) |
+| v28 | MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示 + 管家上下文管理 |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
@@ -372,6 +378,13 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 - [x] **v21.0 LLM 流式通信修复** — _callOpenAIWithTools() 强制 stream:true + SSE 解析
 - [x] **v21.0 导入分析详细进度** — ImportLogCallback + 每个探针实时流式日志 + 5分钟超时保护
 - [x] **v21.0 模式切换 UI** — ModeSwitchBadge 组件 + session.updateChatMode IPC
+- [x] **v22.0 CI/CD Pipeline** — Husky pre-commit hooks + lint-staged + CSP安全头 + 42 tests新增
+- [x] **v23.0 安全加固** — meta-agent路径安全防护 + git访问权限可配置 + 13页面Lazy Loading
+- [x] **v24.0 搜索引擎大修** — DuckDuckGo/Bing/Google HTML scraping + Zero-key search (v24.1) + Agent资源终结总结
+- [x] **v25.0 DAG 工作流引擎** — transition-driven阶段执行 + dev_implement失败重试 + WorkflowPreview DAG可视化 + 错误经验主动检索
+- [x] **v26.0 思维链可视化** — Echo风格思考过程展示 + 工具调用diff/终端样式/Markdown代码块可复制
+- [x] **v28.0 多模态补全** — MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示
+- [x] **v28.1 上下文管理升级** — ContextPage支持管家Agent + 管家配置概览面板 + snapshot缓存
 - [x] 技能进化系统 + 跨项目经验迁移
 - [x] MCP 协议动态工具加载 + 成员级 MCP 配置
 - [x] 会话备份/恢复 + Feature-Session 关联追踪
@@ -442,8 +455,8 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 |------|-----|------|
 | tsc --noEmit 错误 | **0** | 全量通过 |
 | `any` 使用量 | **2** | 从 389 → 2 (99.5% 消除) |
-| 测试文件/用例 | 43 / 817 | 50 skipped (native SQLite) |
+| 测试文件/用例 | 50 / 918 | 50 skipped (native SQLite) |
 | IPC 输入校验 | 50+ 断言 | 覆盖关键 handlers |
 | 空 catch 块 | ~5 (标注意图) | 42 个 catch 已加注释 |
 | 主进程 main.js | 617 KB | Vite tree-shaking 后 |
-| 质量门禁 | pre-commit hook | tsc + vitest 自动运行 |
+| 质量门禁 | pre-commit hook (Husky + lint-staged) | tsc + eslint + prettier 自动运行 |
