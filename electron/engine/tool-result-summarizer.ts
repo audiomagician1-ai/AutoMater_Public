@@ -309,7 +309,6 @@ function summarizeCommandOutput(output: string, maxChars: number, success?: bool
   const otherLines: string[] = [];
 
   for (const line of lines) {
-    const lower = line.toLowerCase();
     if (/error|fail|❌|✗|✘|panic|fatal|exception/i.test(line)) {
       errorLines.push(line);
     } else if (/warn|⚠|deprecat/i.test(line)) {
@@ -571,7 +570,7 @@ function summarizeWebPage(output: string, maxChars: number): string {
   // 预算分配: 标题 20%, 代码块 30%, 正文 50%
   const headingBudget = Math.floor(maxChars * 0.15);
   const codeBudget = Math.floor(maxChars * 0.35);
-  const textBudget = maxChars - headingBudget - codeBudget;
+  const _textBudget = maxChars - headingBudget - codeBudget;
 
   const parts: string[] = [];
   let totalChars = 0;

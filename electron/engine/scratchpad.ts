@@ -365,10 +365,10 @@ export function todoReadPersist(workspacePath: string, agentId: string): string 
   const lines = todos.map((t, i) =>
     `${icons[t.status] || '⬜'} [${i}] ${t.content}${t.priority === 'high' ? ' 🔴' : t.priority === 'low' ? ' 🟢' : ''}`
   );
-  const pending = todos.filter(t => t.status === 'pending').length;
   const inProgress = todos.filter(t => t.status === 'in_progress').length;
   const completed = todos.filter(t => t.status === 'completed').length;
-  return `任务列表 (${completed}/${todos.length} 完成, ${inProgress} 进行中):\n${lines.join('\n')}`;
+  const pending = todos.length - inProgress - completed;
+  return `任务列表 (${completed}/${todos.length} 完成, ${inProgress} 进行中, ${pending} 待办):\n${lines.join('\n')}`;
 }
 
 // ═══════════════════════════════════════
@@ -521,8 +521,6 @@ function generateObservationMask(content: string): string {
 function maskFileContent(content: string): string {
   const lines = content.split('\n');
   const totalLines = lines.length;
-  // 提取文件名 (如果在首行)
-  const firstLine = lines[0] || '';
   // 保留前 5 行 + 后 3 行
   const head = lines.slice(0, 5).join('\n');
   const tail = lines.slice(-3).join('\n');

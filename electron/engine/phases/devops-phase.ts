@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DevOps Phase — 自动构建验证 (G8)
  * Extracted from orchestrator.ts for maintainability.
  * @module phases/devops-phase
@@ -14,7 +14,7 @@ import {
 } from './shared';
 import { safeJsonParse } from '../safe-json';
 
-const log = createLogger('phase:devops');
+const _log = createLogger('phase:devops');
 
 export async function phaseDevOpsBuild(
   projectId: string, settings: AppSettings,

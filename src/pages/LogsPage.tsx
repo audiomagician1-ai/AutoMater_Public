@@ -162,7 +162,7 @@ function FormatLogContent({ content }: { content: string }) {
   const jsonMatch = content.match(/^\s*[\[{]/);
   if (jsonMatch && content.length > 300) {
     // 截取前 500 字符做预览
-    const preview = content.slice(0, 500);
+    const _preview = content.slice(0, 500);
     return (
       <details className="inline group">
         <summary className="cursor-pointer text-slate-400 hover:text-slate-200 transition-colors">

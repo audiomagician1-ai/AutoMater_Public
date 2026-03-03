@@ -9,7 +9,7 @@
 
 import { createLogger } from './logger';
 
-const log = createLogger('visual-tools');
+const _log = createLogger('visual-tools');
 
 // ═══════════════════════════════════════
 // 类型定义

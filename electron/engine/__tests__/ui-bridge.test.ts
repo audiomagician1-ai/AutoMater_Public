@@ -138,7 +138,7 @@ describe('createStreamCallback', () => {
 
   it('flushes immediately on newline', () => {
     const win = mockWin();
-    const [onChunk, getAccumulated] = createStreamCallback(win, 'proj-1', 'dev-1');
+    const [onChunk, _getAccumulated] = createStreamCallback(win, 'proj-1', 'dev-1');
     onChunk('line1\n');
     // Should have flushed to UI immediately
     expect(mockSend).toHaveBeenCalledWith('agent:stream', expect.objectContaining({

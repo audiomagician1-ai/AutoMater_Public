@@ -9,7 +9,7 @@ import { createLogger } from './logger';
 import { skillEvolution } from './skill-evolution';
 import type { ToolCall, ToolResult, ToolContext } from './tool-registry';
 
-const log = createLogger('tool-handlers-external');
+const _log = createLogger('tool-handlers-external');
 
 // ═══════════════════════════════════════
 // MCP & Skill Proxy Execution

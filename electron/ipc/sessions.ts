@@ -67,7 +67,7 @@ export function setupSessionHandlers() {
   /** 打开 Session 备份文件夹 (资源管理器) */
   ipcMain.handle('session:open-backup-folder', async (_event, sessionId: string) => {
     assertNonEmptyString('session:open-backup-folder', 'sessionId', sessionId);
-    const backup = readSessionBackup(sessionId);
+    const _backup = readSessionBackup(sessionId);
     // 尝试从 DB 获取 backup_path
     try {
       const { getDb } = await import('../db');

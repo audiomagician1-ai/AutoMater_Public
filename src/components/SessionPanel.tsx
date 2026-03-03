@@ -189,7 +189,7 @@ export function SessionPanel({ agentId, projectId }: SessionPanelProps) {
   }, [liveMessages.length, activeStream?.content, showLive]);
 
   // active session (第一个 status=active 的)
-  const activeSession = sessions.find(s => s.status === 'active');
+  const _activeSession = sessions.find(s => s.status === 'active');
 
   return (
     <div className="flex h-full">

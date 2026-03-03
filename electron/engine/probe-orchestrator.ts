@@ -62,7 +62,7 @@ export function planProbes(scan: ScanResult): ExplorationPlan {
   let idCounter = 0;
   const nextId = (prefix: string) => `${prefix}-${++idCounter}`;
 
-  const { profile, hubFiles, communities, snapshot } = scan;
+  const { profile, hubFiles, communities, snapshot: _snapshot } = scan;
   const scale = profile.scale;
 
   const budgets = SCALE_BUDGETS[scale] || SCALE_BUDGETS.medium;

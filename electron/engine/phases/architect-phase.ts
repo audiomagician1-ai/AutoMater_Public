@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Architect Phase — 技术架构 + 产品设计 (v5.0: 合并原 Phase 2+3)
  * Extracted from orchestrator.ts for maintainability.
  * @module phases/architect-phase
@@ -16,7 +16,7 @@ import {
   type AppSettings, type ProjectRow, type ParsedFeature,
 } from './shared';
 
-const log = createLogger('phase:architect');
+const _log = createLogger('phase:architect');
 
 export async function phaseArchitect(
   projectId: string, project: ProjectRow, features: ParsedFeature[], settings: AppSettings,

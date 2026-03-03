@@ -20,7 +20,7 @@ import { callLLM } from './llm-client';
 import { createLogger } from './logger';
 import type { AppSettings } from './types';
 
-const log = createLogger('research-engine');
+const _log = createLogger('research-engine');
 
 // ═══════════════════════════════════════
 // Types

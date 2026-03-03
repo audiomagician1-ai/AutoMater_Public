@@ -493,7 +493,7 @@ function renderGuideMarkdown(md: string): string {
   let inList: 'ul' | 'ol' | null = null;
   let inTable = false;
   let tableRows: string[][] = [];
-  let tableHeader = false;
+    let _tableHeader = false;
 
   const closeList = () => { if (inList) { html.push(inList === 'ul' ? '</ul>' : '</ol>'); inList = null; } };
   const closeTable = () => {
@@ -509,7 +509,7 @@ function renderGuideMarkdown(md: string): string {
       html.push('</table>');
       tableRows = [];
       inTable = false;
-      tableHeader = false;
+      _tableHeader = false;
     }
   };
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -548,7 +548,7 @@ function renderGuideMarkdown(md: string): string {
     if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
       closeList();
       const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
-      if (cells.every(c => /^[-:]+$/.test(c))) { tableHeader = true; continue; }
+      if (cells.every(c => /^[-:]+$/.test(c))) { _tableHeader = true; continue; }
       if (!inTable) inTable = true;
       tableRows.push(cells);
       continue;

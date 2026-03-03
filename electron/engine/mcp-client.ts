@@ -147,7 +147,7 @@ export class McpConnection {
     this.tools = [];
 
     // 清理所有 pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
       pending.reject(new Error('Connection closed'));
     }
@@ -291,7 +291,7 @@ export class McpConnection {
 
   // ── SSE (Streamable HTTP) 传输 ──
 
-  private async connectSse(timeoutMs: number): Promise<void> {
+  private async connectSse(_timeoutMs: number): Promise<void> {
     if (!this.config.url) {
       throw new Error('SSE transport requires "url"');
     }

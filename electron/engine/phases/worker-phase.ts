@@ -28,7 +28,7 @@ import {
 import { harvestPostFeature } from '../experience-harvester';
 import { addInstance, compactProjectMemory } from '../experience-library';
 
-const log = createLogger('phase:worker');
+const _log = createLogger('phase:worker');
 
 // ═══════════════════════════════════════
 // Worker Loop (Dev + QA per Feature)

@@ -15,7 +15,6 @@ import {
   readUrl,
   configureSearch,
   getAvailableProviders,
-  type SearchResult as ProviderSearchResult,
   type SearchProviderConfig,
 } from './search-provider';
 

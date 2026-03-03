@@ -572,7 +572,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   // 切换项目时恢复最近活跃会话
   useEffect(() => {
     // 不再无条件清除 sessionId — 仅当项目变化时才重置
-    const prevProjectId = useAppStore.getState().currentMetaSessionId
+    const _prevProjectId = useAppStore.getState().currentMetaSessionId
       ? undefined // 有活跃 session 时不轻易清除
       : null;
 
@@ -1354,7 +1354,7 @@ export function WishPage() {
   const currentProjectId = useAppStore(s => s.currentProjectId);
   const addLog = useAppStore(s => s.addLog);
   const settingsConfigured = useAppStore(s => s.settingsConfigured);
-  const setGlobalPage = useAppStore(s => s.setGlobalPage);
+  const _setGlobalPage = useAppStore(s => s.setGlobalPage);
   const setProjectPage = useAppStore(s => s.setProjectPage);
 
   // ── State ──

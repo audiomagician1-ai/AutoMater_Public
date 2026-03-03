@@ -29,7 +29,7 @@ import { callLLM } from './llm-client';
 import { createLogger } from './logger';
 import type { AppSettings } from './types';
 
-const log = createLogger('blackbox-test');
+const _log = createLogger('blackbox-test');
 
 // ═══════════════════════════════════════
 // Types

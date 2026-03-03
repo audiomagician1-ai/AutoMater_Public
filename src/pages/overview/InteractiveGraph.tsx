@@ -185,8 +185,8 @@ export function InteractiveGraph({
   }, [viewLevel, enriched, filterGroup, filterSubGroup]);
 
   // Canvas bounds
-  const maxX = graphNodes.length > 0 ? Math.max(...graphNodes.map(n => n.x + n.width)) + 40 : 600;
-  const maxY = graphNodes.length > 0 ? Math.max(...graphNodes.map(n => n.y + n.height)) + 40 : 400;
+  const _maxX = graphNodes.length > 0 ? Math.max(...graphNodes.map(n => n.x + n.width)) + 40 : 600;
+  const _maxY = graphNodes.length > 0 ? Math.max(...graphNodes.map(n => n.y + n.height)) + 40 : 400;
 
   // Edges
   const edges = useMemo(() => {

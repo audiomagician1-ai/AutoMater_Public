@@ -25,9 +25,6 @@ import {
   callLLM,
   callLLMWithTools,
   validateModel,
-  type LLMResult,
-  type LLMWithToolsResult,
-  type ToolCallMessage,
 } from '../llm-client';
 import { NetworkError, type AppSettings } from '../types';
 

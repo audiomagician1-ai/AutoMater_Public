@@ -19,7 +19,7 @@ import { createLogger } from '../utils/logger';
 import { toast } from '../stores/toast-store';
 import { renderMarkdown } from '../utils/markdown';
 
-const log = createLogger('DocsPage');
+const _log = createLogger('DocsPage');
 
 // ═══════════════════════════════════════
 // Types
@@ -150,7 +150,7 @@ function DocTreeSection({
 // Changelog Entry Component
 // ═══════════════════════════════════════
 
-function ChangelogEntry({ entry }: { entry: DocChangeEntry }) {
+function _ChangelogEntry({ entry }: { entry: DocChangeEntry }) {
   const typeInfo = DOC_TYPE_LABELS[entry.type] || { icon: '📄', label: entry.type, color: 'text-slate-400' };
   const actionInfo = DOC_ACTION_LABELS[entry.action] || { text: entry.action, color: 'bg-slate-700 text-slate-400' };
   const date = new Date(entry.timestamp);
@@ -188,8 +188,8 @@ export function DocsPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [docContent, setDocContent] = useState<string | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('document');
-  const [changelogFilter, setChangelogFilter] = useState<string>('all');
+  const [_viewMode, setViewMode] = useState<ViewMode>('document');
+  const [_changelogFilter, _setChangelogFilter] = useState<string>('all');
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: DocTreeItem } | null>(null);
   const [versionModal, setVersionModal] = useState<{ item: DocTreeItem; versions: Array<{ version: number; date: string; summary: string; action?: string; agent?: string }> } | null>(null);
   // v9.1: 导入分析产物
@@ -297,10 +297,10 @@ export function DocsPage() {
   }, [selectedKey, docList, importDocs]);
 
   // ── Filter changelog ──
-  const filteredChangelog = useMemo(() => {
-    if (changelogFilter === 'all') return changelog;
-    return changelog.filter(e => e.type === changelogFilter);
-  }, [changelog, changelogFilter]);
+  const _filteredChangelog = useMemo(() => {
+    if (_changelogFilter === 'all') return changelog;
+    return changelog.filter(e => e.type === _changelogFilter);
+  }, [changelog, _changelogFilter]);
 
   // ── Version history for selected doc ──
   const selectedDocHistory = useMemo(() => {

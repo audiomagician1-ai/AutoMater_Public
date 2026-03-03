@@ -435,7 +435,6 @@ export async function runMission(
     } else if (archivePolicy === 'keep-conclusion') {
       // 删除任务明细, 保留 conclusion 文件
       db.prepare('DELETE FROM mission_tasks WHERE mission_id = ?').run(missionId);
-      const patchesFile = path.join(missionDir, 'patches.json');
       // 保留 conclusion.md 和 patches.json, 删除其他
     }
     // 'keep-all' — 不做任何清理

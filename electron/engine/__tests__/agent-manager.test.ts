@@ -44,7 +44,6 @@ import {
   getTeamMemberLLMConfig,
   getTeamMemberMcpServers,
   getTeamMemberSkills,
-  lockNextFeature,
   getFeatureGroupSummary,
 } from '../agent-manager';
 import type { AppSettings } from '../types';

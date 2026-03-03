@@ -51,7 +51,6 @@ import {
   cleanupOldBackups,
   getBackupStats,
   type ConversationMessage,
-  type ConversationBackup,
   type SessionInfo,
   type WorkType,
   type FeatureSessionLink,
@@ -150,7 +149,7 @@ describeDb('conversation-backup (in-memory SQLite)', () => {
       const s1 = createSession('proj-1', 'dev-1', 'developer');
       const db = getDb();
       db.prepare("UPDATE sessions SET status = 'completed' WHERE id = ?").run(s1.id);
-      const s2 = createSession('proj-1', 'dev-1', 'developer');
+      const _s2 = createSession('proj-1', 'dev-1', 'developer');
 
       // Now switch back to s1
       const switched = switchSession(s1.id);

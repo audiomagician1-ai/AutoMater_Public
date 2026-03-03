@@ -5,7 +5,7 @@ import { createLogger } from '../utils/logger';
 import { toast } from '../stores/toast-store';
 import { EmptyState } from '../components/EmptyState';
 
-const log = createLogger('OutputPage');
+const _log = createLogger('OutputPage');
 
 // ── Types ──
 interface FileNode {

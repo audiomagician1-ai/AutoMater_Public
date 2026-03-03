@@ -68,11 +68,11 @@ export function todoRead(agentId: string): string {
     `${icons[t.status] || '⬜'} [${i}] ${t.content}${t.priority === 'high' ? ' 🔴' : t.priority === 'low' ? ' 🟢' : ''}`
   );
 
-  const pending = todos.filter(t => t.status === 'pending').length;
   const inProgress = todos.filter(t => t.status === 'in_progress').length;
   const completed = todos.filter(t => t.status === 'completed').length;
+  const pending = todos.length - inProgress - completed;
 
-  return `任务列表 (${completed}/${todos.length} 完成, ${inProgress} 进行中):\n${lines.join('\n')}`;
+  return `任务列表 (${completed}/${todos.length} 完成, ${inProgress} 进行中, ${pending} 待办):\n${lines.join('\n')}`;
 }
 
 /** 清理指定 Agent 的 todo */

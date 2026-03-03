@@ -23,7 +23,7 @@ import {
   PM_FEATURE_SCHEMA,
   PM_ACCEPTANCE_SCHEMA,
   gatePMToArchitect,
-  writeDoc,
+  writeDoc as _writeDoc,
   buildDesignContext,
   buildFeatureDocContext,
   backupConversation,
@@ -45,7 +45,7 @@ import fs from 'fs';
 import path from 'path';
 import { harvestPostFeature } from '../experience-harvester';
 
-const log = createLogger('phase:pm');
+const _log = createLogger('phase:pm');
 
 const BATCH_ACCEPT_SIZE = 4;
 

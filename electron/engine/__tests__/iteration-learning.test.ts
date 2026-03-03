@@ -57,7 +57,7 @@ describe('recordFailure', () => {
     const state = createLearningState();
     recordFailure(state, { toolName: 'run_command', errorOutput: 'error 1', arguments: {}, timestamp: 1 });
     recordFailure(state, { toolName: 'run_command', errorOutput: 'error 2', arguments: {}, timestamp: 2 });
-    const lesson = recordFailure(state, { toolName: 'run_command', errorOutput: 'error 3', arguments: {}, timestamp: 3 });
+    const _lesson = recordFailure(state, { toolName: 'run_command', errorOutput: 'error 3', arguments: {}, timestamp: 3 });
     // Should detect repeated failure
     expect(state.lessons.length).toBeGreaterThanOrEqual(1);
   });

@@ -9,11 +9,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-interface MetricHistory {
-  /** 最近 N 次采样的值 (0~100) */
-  values: number[];
-}
-
 const MAX_POINTS = 60; // 2 分钟 @ 2s interval
 const POLL_INTERVAL = 2000;
 

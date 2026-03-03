@@ -102,7 +102,7 @@ describe('compactMessages', () => {
       })),
     ];
     let llmCalled = false;
-    const mockSummarize = async (text: string) => {
+    const mockSummarize = async (_text: string) => {
       llmCalled = true;
       return 'LLM summary';
     };

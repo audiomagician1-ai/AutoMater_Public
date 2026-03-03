@@ -88,8 +88,8 @@ let _prevCpuTimes: Array<{ idle: number; total: number }> = [];
 function sampleCpuUsage(): { usage: number; cores: number; perCore: number[] } {
   const cpus = os.cpus();
   const perCore: number[] = [];
-  let totalIdle = 0;
-  let totalTick = 0;
+  let _totalIdle = 0;
+  let _totalTick = 0;
 
   for (let i = 0; i < cpus.length; i++) {
     const cpu = cpus[i];
@@ -105,8 +105,8 @@ function sampleCpuUsage(): { usage: number; cores: number; perCore: number[] } {
       perCore.push(0);
     }
 
-    totalIdle += idle;
-    totalTick += total;
+    _totalIdle += idle;
+    _totalTick += total;
   }
 
   // 更新上次快照
@@ -115,8 +115,8 @@ function sampleCpuUsage(): { usage: number; cores: number; perCore: number[] } {
     total: cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.idle,
   }));
 
-  const prevTotalIdle = _prevCpuTimes.reduce((a, b) => a + b.idle, 0);
-  const prevTotalTick = _prevCpuTimes.reduce((a, b) => a + b.total, 0);
+  const _prevTotalIdle = _prevCpuTimes.reduce((a, b) => a + b.idle, 0);
+  const _prevTotalTick = _prevCpuTimes.reduce((a, b) => a + b.total, 0);
 
   // 总体使用率 = 全核心平均
   const avgUsage = perCore.length > 0 ? Math.round(perCore.reduce((a, b) => a + b, 0) / perCore.length) : 0;
@@ -174,7 +174,7 @@ const _prevNet = { rx: 0, tx: 0, ts: Date.now() };
 const _prevDisk = { read: 0, write: 0, ts: Date.now() };
 
 function sampleNetwork(): { rxBytesPerSec: number; txBytesPerSec: number } {
-  const interfaces = os.networkInterfaces();
+  const _interfaces = os.networkInterfaces();
   // 这里无法精确获取流量，用 Node 级别 fallback
   // 返回 0 — 精确网络需要 perf counter / WMI，复杂度高
   // 后续可接入 systeminformation 库

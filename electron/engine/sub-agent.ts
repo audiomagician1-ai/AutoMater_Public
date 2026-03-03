@@ -11,7 +11,6 @@
  */
 
 import { readWorkspaceFile, readDirectoryTree } from './file-writer';
-import { type SandboxConfig } from './sandbox-executor';
 import { readMemoryForRole } from './memory-system';
 import { exec } from 'child_process';
 import { promisify } from 'util';

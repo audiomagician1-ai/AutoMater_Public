@@ -204,7 +204,7 @@ interface RgJsonLine {
 
 function parseRipgrepJson(stdout: string, maxResults: number, startTime: number): SearchResult {
   const matches: SearchMatch[] = [];
-  const contextBuffer = new Map<string, { before: string[]; after: string[] }>();
+  const _contextBuffer = new Map<string, { before: string[]; after: string[] }>();
   let totalMatches = 0;
 
   const lines = stdout.split('\n').filter(l => l.trim());
@@ -219,8 +219,8 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
   };
 
   const pendingByFile = new Map<string, PendingMatch[]>();
-  let currentFile = '';
-  let lastMatchIdx = -1;
+  let _currentFile = '';
+  let _lastMatchIdx = -1;
 
   for (const raw of lines) {
     let parsed: RgJsonLine;
@@ -248,8 +248,8 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
 
       if (!pendingByFile.has(match.file)) pendingByFile.set(match.file, []);
       pendingByFile.get(match.file)!.push(match);
-      currentFile = match.file;
-      lastMatchIdx = pendingByFile.get(match.file)!.length - 1;
+      _currentFile = match.file;
+      _lastMatchIdx = pendingByFile.get(match.file)!.length - 1;
     } else if (parsed.type === 'context' && parsed.data && totalMatches <= maxResults) {
       const file = (parsed.data.path?.text || '').replace(/\\/g, '/');
       const lineNum = parsed.data.line_number || 0;

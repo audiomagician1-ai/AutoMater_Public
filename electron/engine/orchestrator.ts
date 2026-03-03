@@ -74,7 +74,7 @@ function hasStage(stages: WorkflowStageId[], stageId: WorkflowStageId): boolean 
 }
 
 /** 模块级成员模型解析器 — 按角色返回该成员实际使用的 LLM 模型名 (供 standalone phase 函数使用) */
-function resolveMemberModel(projectId: string, role: string, settings: AppSettings, agentIndex: number = 0): string {
+function _resolveMemberModel(projectId: string, role: string, settings: AppSettings, agentIndex: number = 0): string {
   return getTeamMemberLLMConfig(projectId, role, agentIndex, settings).model;
 }
 
@@ -294,7 +294,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // v11.0: 成员级模型解析器 — 按角色返回该成员实际使用的 LLM 模型名
-  const memberModel = (role: string, agentIndex: number = 0): string => {
+  const _memberModel = (role: string, agentIndex: number = 0): string => {
     return getTeamMemberLLMConfig(projectId, role, agentIndex, settings).model;
   };
 

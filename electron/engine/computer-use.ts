@@ -14,7 +14,7 @@ import fs from 'fs';
 import os from 'os';
 import { createLogger } from './logger';
 
-const log = createLogger('computer-use');
+const _log = createLogger('computer-use');
 
 // ═══════════════════════════════════════
 // PowerShell Parameter Sanitization

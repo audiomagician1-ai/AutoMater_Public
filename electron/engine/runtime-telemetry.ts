@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Runtime Telemetry — Agent 运行时遥测与可观测性 (v1.0)
  *
  * 提供 Agent 运行期间的细粒度观测数据:
@@ -13,7 +13,7 @@
 
 import { createLogger } from './logger';
 
-const log = createLogger('telemetry');
+const _log = createLogger('telemetry');
 
 // ═══════════════════════════════════════
 // Types

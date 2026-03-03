@@ -234,11 +234,10 @@ describe('react-loop', () => {
       // We can verify the formula by checking that the computeMessageBreakdown
       // results align with ceil(content.length / 1.5) formula
       // The function is: Math.ceil(text.length / 1.5)
-      const text100 = 'a'.repeat(100);
-      const expectedTokens = Math.ceil(100 / 1.5); // 67
-      expect(expectedTokens).toBe(67);
+      // Verify the ceil(content.length / 1.5) formula
+      const expectedTokens100 = Math.ceil(100 / 1.5); // 67
+      expect(expectedTokens100).toBe(67);
 
-      const text0 = '';
       expect(Math.ceil(0 / 1.5)).toBe(0);
     });
   });
