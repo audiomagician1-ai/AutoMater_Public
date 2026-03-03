@@ -5,11 +5,7 @@
  * Actual search calls are async+network and not tested here.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  configureSearch,
-  getAvailableProviders,
-  type ProviderName,
-} from '../search-provider';
+import { configureSearch, getAvailableProviders, type ProviderName } from '../search-provider';
 
 // Reset config before each test
 beforeEach(() => {
@@ -18,21 +14,24 @@ beforeEach(() => {
     searxngUrl: undefined,
     tavilyApiKey: undefined,
     serperApiKey: undefined,
+    jinaApiKey: undefined,
   } as any);
 });
 
 describe('getAvailableProviders', () => {
-  it('returns only jina when nothing configured', () => {
-    // Jina needs no API key, so it's always "configured"
+  it('returns only duckduckgo when nothing configured', () => {
+    // DuckDuckGo needs no API key, so it's always "configured"
     const providers = getAvailableProviders();
-    expect(providers).toContain('jina');
+    expect(providers).toContain('duckduckgo');
+    // Jina now requires API key, so should NOT appear
+    expect(providers).not.toContain('jina');
   });
 
   it('includes brave when API key set', () => {
     configureSearch({ braveApiKey: 'test-key-123' });
     const providers = getAvailableProviders();
     expect(providers).toContain('brave');
-    expect(providers).toContain('jina');
+    expect(providers).toContain('duckduckgo');
   });
 
   it('includes searxng when URL set', () => {
@@ -51,16 +50,22 @@ describe('getAvailableProviders', () => {
     expect(getAvailableProviders()).toContain('tavily');
   });
 
+  it('includes jina when API key set', () => {
+    configureSearch({ jinaApiKey: 'jina-test' });
+    expect(getAvailableProviders()).toContain('jina');
+  });
+
   it('includes all providers when fully configured', () => {
     configureSearch({
       braveApiKey: 'b',
       searxngUrl: 'http://sx',
       tavilyApiKey: 't',
       serperApiKey: 's',
+      jinaApiKey: 'j',
     });
     const providers = getAvailableProviders();
-    expect(providers.length).toBe(5);
-    for (const name of ['brave', 'searxng', 'tavily', 'serper', 'jina'] as ProviderName[]) {
+    expect(providers.length).toBe(6);
+    for (const name of ['brave', 'searxng', 'tavily', 'serper', 'jina', 'duckduckgo'] as ProviderName[]) {
       expect(providers).toContain(name);
     }
   });

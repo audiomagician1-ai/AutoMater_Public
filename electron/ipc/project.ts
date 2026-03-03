@@ -8,12 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { getDb } from '../db';
 import { toErrorMessage, createLogger } from '../engine/logger';
-import {
-  assertProjectId,
-  assertNonEmptyString,
-  assertString,
-  assertObject,
-  } from './ipc-validator';
+import { assertProjectId, assertNonEmptyString, assertString, assertObject } from './ipc-validator';
 import {
   runOrchestrator,
   stopOrchestrator,
@@ -27,6 +22,16 @@ import {
   commit as gitCommit,
   getLog as gitLog,
   testGitHubConnection,
+  getStatus as gitStatus,
+  getStructuredLog,
+  getFileLog as gitFileLog,
+  showFileAtCommit,
+  checkoutFile as gitCheckoutFile,
+  getDiff as gitDiff,
+  getFileDiff as gitFileDiff,
+  getCommitFiles as gitCommitFiles,
+  getCurrentBranch,
+  listBranches,
   type GitProviderConfig,
 } from '../engine/git-provider';
 import { exportWorkspaceZip } from '../engine/workspace-git';
@@ -1314,6 +1319,101 @@ export function setupProjectHandlers() {
     return await gitLog(project.workspace_path);
   });
 
+  // ── v27.0: Git 版本管理 — status / structured-log / file-log / show-file / checkout-file / diff / branches / commit-files ──
+
+  /** 工作区 helper: 获取 workspace_path */
+  function getWorkspacePath(projectId: string): string | null {
+    const db = getDb();
+    const row = db.prepare('SELECT workspace_path FROM projects WHERE id = ?').get(projectId) as
+      | { workspace_path?: string }
+      | undefined;
+    return row?.workspace_path || null;
+  }
+
+  /** git status --porcelain */
+  ipcMain.handle('project:git-status', async (_event, projectId: string) => {
+    assertProjectId('project:git-status', projectId);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return [];
+    return await gitStatus(wp);
+  });
+
+  /** 结构化 git log (含 hash/author/date/message) */
+  ipcMain.handle('project:git-structured-log', async (_event, projectId: string, maxCount?: number) => {
+    assertProjectId('project:git-structured-log', projectId);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return [];
+    return await getStructuredLog(wp, maxCount || 50);
+  });
+
+  /** 单文件的提交历史 (git log --follow) */
+  ipcMain.handle('project:git-file-log', async (_event, projectId: string, filePath: string, maxCount?: number) => {
+    assertProjectId('project:git-file-log', projectId);
+    assertNonEmptyString('project:git-file-log', 'filePath', filePath);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return [];
+    return await gitFileLog(wp, filePath, maxCount || 30);
+  });
+
+  /** 查看指定 commit 中的文件内容 (git show <hash>:<file>) */
+  ipcMain.handle('project:git-show-file', async (_event, projectId: string, commitHash: string, filePath: string) => {
+    assertProjectId('project:git-show-file', projectId);
+    assertNonEmptyString('project:git-show-file', 'commitHash', commitHash);
+    assertNonEmptyString('project:git-show-file', 'filePath', filePath);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return null;
+    return await showFileAtCommit(wp, commitHash, filePath);
+  });
+
+  /** 回退单个文件到指定 commit (git checkout <hash> -- <file>) */
+  ipcMain.handle(
+    'project:git-checkout-file',
+    async (_event, projectId: string, commitHash: string, filePath: string) => {
+      assertProjectId('project:git-checkout-file', projectId);
+      assertNonEmptyString('project:git-checkout-file', 'commitHash', commitHash);
+      assertNonEmptyString('project:git-checkout-file', 'filePath', filePath);
+      const wp = getWorkspacePath(projectId);
+      if (!wp) return { success: false, error: '项目无工作区' };
+      return await gitCheckoutFile(wp, commitHash, filePath);
+    },
+  );
+
+  /** 获取工作区 diff (未提交的变更) */
+  ipcMain.handle('project:git-diff', async (_event, projectId: string, commitRange?: string) => {
+    assertProjectId('project:git-diff', projectId);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return '';
+    return await gitDiff(wp, commitRange);
+  });
+
+  /** 获取某次 commit 中单个文件的 diff */
+  ipcMain.handle('project:git-file-diff', async (_event, projectId: string, commitHash: string, filePath: string) => {
+    assertProjectId('project:git-file-diff', projectId);
+    assertNonEmptyString('project:git-file-diff', 'commitHash', commitHash);
+    assertNonEmptyString('project:git-file-diff', 'filePath', filePath);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return '';
+    return await gitFileDiff(wp, commitHash, filePath);
+  });
+
+  /** 获取某次 commit 变更的文件列表 */
+  ipcMain.handle('project:git-commit-files', async (_event, projectId: string, commitHash: string) => {
+    assertProjectId('project:git-commit-files', projectId);
+    assertNonEmptyString('project:git-commit-files', 'commitHash', commitHash);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return [];
+    return await gitCommitFiles(wp, commitHash);
+  });
+
+  /** 获取当前分支 + 分支列表 */
+  ipcMain.handle('project:git-branches', async (_event, projectId: string) => {
+    assertProjectId('project:git-branches', projectId);
+    const wp = getWorkspacePath(projectId);
+    if (!wp) return { current: '', branches: [] };
+    const [current, branches] = await Promise.all([getCurrentBranch(wp), listBranches(wp)]);
+    return { current, branches };
+  });
+
   // ── GitHub 连接测试 ──
   ipcMain.handle('project:test-github', async (_event, repo: string, token: string) => {
     assertNonEmptyString('project:test-github', 'repo', repo);
@@ -1800,6 +1900,103 @@ export function setupProjectHandlers() {
       canceled: result.canceled,
       filePaths: result.filePaths,
     };
+  });
+
+  // ── v28.0: 文件选择对话框 (图片/文件附件) ──
+  ipcMain.handle(
+    'dialog:open-files',
+    async (
+      _event,
+      options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; multiple?: boolean },
+    ) => {
+      const win = BrowserWindow.getFocusedWindow();
+      if (!win) return { canceled: true, filePaths: [] };
+      const properties: Array<'openFile' | 'multiSelections'> = ['openFile'];
+      if (options?.multiple !== false) properties.push('multiSelections');
+      const result = await dialog.showOpenDialog(win, {
+        title: options?.title || '选择文件',
+        properties,
+        filters: options?.filters || [
+          { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+          {
+            name: '文本文件',
+            extensions: [
+              'txt',
+              'md',
+              'json',
+              'yaml',
+              'yml',
+              'xml',
+              'csv',
+              'log',
+              'ts',
+              'tsx',
+              'js',
+              'jsx',
+              'py',
+              'html',
+              'css',
+            ],
+          },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      return {
+        canceled: result.canceled,
+        filePaths: result.filePaths,
+      };
+    },
+  );
+
+  // ── v28.0: 读取文件为 base64 (附件上传用) ──
+  ipcMain.handle('dialog:read-file-base64', async (_event, filePath: string) => {
+    const fs = require('fs');
+    const path = require('path');
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+      const stat = fs.statSync(filePath);
+      if (stat.size > 20 * 1024 * 1024) return { success: false, error: 'File too large (max 20MB)' };
+      const buffer = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+      const isImage = imageExts.includes(ext);
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.svg': 'image/svg+xml',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.yaml': 'text/yaml',
+        '.yml': 'text/yaml',
+        '.xml': 'text/xml',
+        '.csv': 'text/csv',
+        '.log': 'text/plain',
+        '.ts': 'text/typescript',
+        '.tsx': 'text/typescript',
+        '.js': 'text/javascript',
+        '.jsx': 'text/javascript',
+        '.py': 'text/x-python',
+        '.html': 'text/html',
+        '.css': 'text/css',
+      };
+      const mimeType = mimeMap[ext] || 'application/octet-stream';
+      const base64 = buffer.toString('base64');
+      return {
+        success: true,
+        name: path.basename(filePath),
+        type: isImage ? 'image' : 'file',
+        data: isImage ? `data:${mimeType};base64,${base64}` : filePath,
+        mimeType,
+        size: stat.size,
+      };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   });
 
   // ── 基线上下文预览 (v5.6) ──

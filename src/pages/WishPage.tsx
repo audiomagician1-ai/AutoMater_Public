@@ -20,6 +20,8 @@ import { toast, confirm } from '../stores/toast-store';
 import { renderMarkdown } from '../utils/markdown';
 import { EmptyState } from '../components/EmptyState';
 import { MSG_STYLES } from '../components/AgentWorkFeed';
+import { ChatInput, type ChatAttachment } from '../components/ChatInput';
+import { MessageAttachments } from '../components/MessageAttachments';
 
 // ═══════════════════════════════════════
 // Constants
@@ -196,7 +198,8 @@ function SessionListPanel() {
   const loadSessions = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await window.automater.metaAgent.listChatSessions(currentProjectId);
+      // v27.0: 始终加载全部会话(含隐藏)，前端按 showHidden 过滤
+      const list = await window.automater.metaAgent.listChatSessions(currentProjectId, undefined, true);
       setSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
     } catch {
       /* silent */
@@ -247,6 +250,54 @@ function SessionListPanel() {
   };
   const closeCtx = () => setCtxMenu(null);
 
+  // ── v27.0: 置顶 / 重命名 / 隐藏 ──
+  const [showHidden, setShowHidden] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<{ sessId: string; current: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const handleTogglePin = async () => {
+    if (!ctxMenu) return;
+    try {
+      await window.automater.session.togglePin(ctxMenu.sessId);
+      await loadSessions();
+    } catch {
+      /* silent */
+    }
+    closeCtx();
+  };
+
+  const handleStartRename = () => {
+    if (!ctxMenu) return;
+    const sess = sessionList.find(s => s.id === ctxMenu.sessId);
+    if (!sess) return;
+    const current = sess.customTitle || sess.title || `会话 #${sess.agentSeq}`;
+    setRenameTarget({ sessId: ctxMenu.sessId, current });
+    setRenameValue(current);
+    closeCtx();
+  };
+
+  const handleConfirmRename = async () => {
+    if (!renameTarget) return;
+    try {
+      await window.automater.session.rename(renameTarget.sessId, renameValue.trim() || null);
+      await loadSessions();
+    } catch {
+      /* silent */
+    }
+    setRenameTarget(null);
+  };
+
+  const handleToggleHidden = async () => {
+    if (!ctxMenu) return;
+    try {
+      await window.automater.session.toggleHidden(ctxMenu.sessId);
+      await loadSessions();
+    } catch {
+      /* silent */
+    }
+    closeCtx();
+  };
+
   const handleCopyAll = async () => {
     if (!ctxMenu) return;
     try {
@@ -292,6 +343,30 @@ function SessionListPanel() {
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={e => e.stopPropagation()}
         >
+          {/* 置顶/取消置顶 */}
+          <button
+            onClick={handleTogglePin}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
+            <span>{sessionList.find(s => s.id === ctxMenu.sessId)?.pinned ? '📌' : '📌'}</span>
+            {sessionList.find(s => s.id === ctxMenu.sessId)?.pinned ? '取消置顶' : '置顶'}
+          </button>
+          {/* 重命名 */}
+          <button
+            onClick={handleStartRename}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
+            <span>✏️</span>重命名
+          </button>
+          {/* 隐藏/取消隐藏 */}
+          <button
+            onClick={handleToggleHidden}
+            className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+          >
+            <span>{sessionList.find(s => s.id === ctxMenu.sessId)?.hidden ? '👁️' : '🙈'}</span>
+            {sessionList.find(s => s.id === ctxMenu.sessId)?.hidden ? '取消隐藏' : '隐藏'}
+          </button>
+          <div className="border-t border-slate-800 my-0.5" />
           <button
             onClick={handleCopyAll}
             className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
@@ -312,6 +387,41 @@ function SessionListPanel() {
             <span>📁</span>跳转至所在文件夹
           </button>
         </div>
+      )}
+
+      {/* 重命名弹窗 */}
+      {renameTarget && (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setRenameTarget(null)} />
+          <div className="fixed z-[71] top-1/3 left-1/2 -translate-x-1/2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4">
+            <div className="text-xs font-medium text-slate-300 mb-2">重命名会话</div>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleConfirmRename();
+                if (e.key === 'Escape') setRenameTarget(null);
+              }}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-forge-500 transition-colors"
+              placeholder="输入新名称，留空恢复默认"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={() => setRenameTarget(null)}
+                className="text-[10px] px-3 py-1 rounded-md text-slate-400 hover:bg-slate-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmRename}
+                className="text-[10px] px-3 py-1 rounded-md bg-forge-600/30 text-forge-400 hover:bg-forge-600/50 transition-colors"
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Header */}
@@ -363,36 +473,49 @@ function SessionListPanel() {
           <div className="text-center py-8 text-slate-600 text-[10px] animate-pulse">加载中...</div>
         )}
 
-        {sessionList.map(sess => {
-          const isSelected = currentSessionId === sess.id;
-          const title = sess.title || `会话 #${sess.agentSeq}`;
-          const isActive = sess.status === 'active';
+        {sessionList
+          .filter(sess => showHidden || !sess.hidden)
+          .map(sess => {
+            const isSelected = currentSessionId === sess.id;
+            const title = sess.customTitle || sess.title || `会话 #${sess.agentSeq}`;
+            const isActive = sess.status === 'active';
 
-          return (
-            <div
-              key={sess.id}
-              onClick={() => handleSelect(sess.id)}
-              onContextMenu={e => handleCtx(e, sess.id)}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] transition-colors group cursor-pointer
+            return (
+              <div
+                key={sess.id}
+                onClick={() => handleSelect(sess.id)}
+                onContextMenu={e => handleCtx(e, sess.id)}
+                className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] transition-colors group cursor-pointer
                 ${
                   isSelected
                     ? 'bg-forge-600/15 border border-forge-500/30 text-slate-200'
                     : 'border border-transparent hover:bg-slate-900/80 hover:border-slate-800 text-slate-400'
-                }`}
-            >
-              <div className="flex items-center gap-1.5 mb-0.5">
-                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
-                <span className="truncate font-medium flex-1">{title}</span>
-                <ModeSwitchBadge sessionId={sess.id} currentMode={sess.chatMode || 'work'} onRefresh={loadSessions} />
+                }
+                ${sess.hidden ? 'opacity-50' : ''}`}
+              >
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  {sess.pinned && (
+                    <span className="text-[9px] shrink-0" title="已置顶">
+                      📌
+                    </span>
+                  )}
+                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
+                  <span className="truncate font-medium flex-1">{title}</span>
+                  {sess.hidden && (
+                    <span className="text-[8px] shrink-0 opacity-60" title="已隐藏">
+                      🙈
+                    </span>
+                  )}
+                  <ModeSwitchBadge sessionId={sess.id} currentMode={sess.chatMode || 'work'} onRefresh={loadSessions} />
+                </div>
+                <div className="flex items-center gap-1.5 text-[9px] text-slate-600">
+                  <span>{formatSessionTime(sess.createdAt)}</span>
+                  {sess.totalTokens > 0 && <span>{formatTokens(sess.totalTokens)}</span>}
+                  {sess.totalCost > 0 && <span className="text-emerald-700">${sess.totalCost.toFixed(3)}</span>}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-[9px] text-slate-600">
-                <span>{formatSessionTime(sess.createdAt)}</span>
-                {sess.totalTokens > 0 && <span>{formatTokens(sess.totalTokens)}</span>}
-                {sess.totalCost > 0 && <span className="text-emerald-700">${sess.totalCost.toFixed(3)}</span>}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
         {!loading && sessionList.length === 0 && (
           <div className="text-center py-8 text-slate-600 text-[10px]">
@@ -404,10 +527,23 @@ function SessionListPanel() {
         )}
       </div>
 
-      {/* 底部统计 */}
+      {/* 底部: 统计 + 显示隐藏开关 */}
       {sessionList.length > 0 && (
-        <div className="px-2.5 py-1.5 border-t border-slate-800 text-[9px] text-slate-600">
-          共 {sessionList.length} 个会话
+        <div className="px-2.5 py-1.5 border-t border-slate-800 text-[9px] text-slate-600 flex items-center justify-between">
+          <span>
+            共 {sessionList.filter(s => !s.hidden).length} 个会话
+            {sessionList.some(s => s.hidden) ? ` (${sessionList.filter(s => s.hidden).length} 隐藏)` : ''}
+          </span>
+          {sessionList.some(s => s.hidden) && (
+            <button
+              onClick={() => setShowHidden(prev => !prev)}
+              className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                showHidden ? 'text-forge-400 bg-forge-600/15' : 'text-slate-600 hover:text-slate-400'
+              }`}
+            >
+              {showHidden ? '隐藏已隐藏' : '显示已隐藏'}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -547,7 +683,6 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     setModePopoverOpen(false);
   };
 
-  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentName, setAgentName] = useState('元Agent · 项目管家');
@@ -650,8 +785,8 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, metaAgentWorkMsgs.length]);
 
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
+  const handleSend = async (inputText: string, inputAttachments: ChatAttachment[]) => {
+    if ((!inputText.trim() && inputAttachments.length === 0) || sending) return;
 
     // 新对话时创建 session (含 chatMode)
     let sessionId = currentSessionId;
@@ -675,18 +810,24 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
 
     const activeChatKey = sessionId || currentProjectId || '_global';
 
+    // v28.0: 将 ChatInput attachments 转换为 MetaAgentMessage 格式
+    const msgAttachments =
+      inputAttachments.length > 0
+        ? inputAttachments.map(a => ({ type: a.type, name: a.name, data: a.data, mimeType: a.mimeType }))
+        : undefined;
+
     const userMsg: MetaAgentMessage = {
       id: String(Date.now()),
       role: 'user',
-      content: input.trim(),
+      content: inputText.trim(),
       timestamp: Date.now(),
+      attachments: msgAttachments,
     };
     addMessage(activeChatKey, userMsg);
-    setInput('');
     setSending(true);
     sendingStartMsgIndexRef.current = metaAgentWorkMsgs.length;
 
-    // 持久化 user 消息
+    // 持久化 user 消息 (含附件 JSON)
     if (sessionId) {
       window.automater.metaAgent
         .saveMessage({
@@ -695,6 +836,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           projectId: currentProjectId,
           role: 'user',
           content: userMsg.content,
+          attachments: msgAttachments ? JSON.stringify(msgAttachments) : undefined,
         })
         .catch(() => {});
     }
@@ -719,7 +861,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         currentProjectId,
         userMsg.content,
         history,
-        undefined, // attachments
+        msgAttachments, // v28.0: 传递附件
         currentChatMode,
         sessionId, // v25.0: 传递 sessionId 避免后端重复创建
       );
@@ -868,7 +1010,10 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                   {msg.role === 'assistant' ? (
                     <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                   ) : (
-                    msg.content
+                    <>
+                      {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                      {msg.attachments && <MessageAttachments attachments={msg.attachments} />}
+                    </>
                   )}
                   {msg.triggeredWish && <div className="mt-1 text-[10px] text-emerald-400">✅ 已创建需求</div>}
                   <div
@@ -921,31 +1066,13 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input — 所有会话均可继续对话 */}
-        <div className="shrink-0 px-3 py-2 border-t border-slate-800">
-          <div className="flex gap-2">
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder={compact ? '发消息...' : `${modeInfo.icon} ${modeInfo.label}模式 — 发消息...`}
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-forge-500 transition-colors"
-              disabled={sending}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || sending}
-              className="px-3 py-2 rounded-xl bg-forge-600 hover:bg-forge-500 text-white text-sm transition-all disabled:bg-slate-800 disabled:text-slate-600 shrink-0"
-            >
-              {sending ? '...' : '↑'}
-            </button>
-          </div>
-        </div>
+        {/* Input — v28.0: 支持附件上传 */}
+        <ChatInput
+          onSend={handleSend}
+          sending={sending}
+          placeholder={compact ? '发消息...' : `${modeInfo.icon} ${modeInfo.label}模式 — 发消息...`}
+          compact={compact}
+        />
 
         {settingsOpen && <MetaAgentSettings onClose={() => setSettingsOpen(false)} />}
       </div>

@@ -29,6 +29,12 @@ export interface MetaSessionItem {
   title?: string;
   /** v21.0: 会话模式 */
   chatMode?: ChatMode;
+  /** v27.0: 是否置顶 */
+  pinned?: boolean;
+  /** v27.0: 自定义标题 (重命名/备注) */
+  customTitle?: string | null;
+  /** v27.0: 是否隐藏 */
+  hidden?: boolean;
 }
 
 export interface MetaAgentSlice {
@@ -58,62 +64,67 @@ export interface MetaAgentSlice {
   attachWorkMessagesToLast: (chatKey: string, workMessages: AgentWorkMessage[]) => void;
 }
 
-export const createMetaAgentSlice: StateCreator<MetaAgentSlice, [], [], MetaAgentSlice> = (set) => ({
+export const createMetaAgentSlice: StateCreator<MetaAgentSlice, [], [], MetaAgentSlice> = set => ({
   metaAgentPanelOpen: false,
-  toggleMetaAgentPanel: () => set((s) => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
+  toggleMetaAgentPanel: () => set(s => ({ metaAgentPanelOpen: !s.metaAgentPanelOpen })),
 
   metaAgentSettingsOpen: false,
-  setMetaAgentSettingsOpen: (open) => set({ metaAgentSettingsOpen: open }),
+  setMetaAgentSettingsOpen: open => set({ metaAgentSettingsOpen: open }),
 
   // ── Session 状态 ──
   currentMetaSessionId: null,
   metaSessionList: [],
   metaSessionsLoading: false,
-  setCurrentMetaSessionId: (id) => set({ currentMetaSessionId: id }),
-  setMetaSessionList: (list) => set({ metaSessionList: list }),
-  setMetaSessionsLoading: (loading) => set({ metaSessionsLoading: loading }),
+  setCurrentMetaSessionId: id => set({ currentMetaSessionId: id }),
+  setMetaSessionList: list => set({ metaSessionList: list }),
+  setMetaSessionsLoading: loading => set({ metaSessionsLoading: loading }),
 
   // ── 消息管理 ──
   metaAgentMessages: new Map(),
-  addMetaAgentMessage: (chatKey, msg) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    const list = [...(next.get(chatKey) || []), msg];
-    next.set(chatKey, list.slice(-200));
-    return { metaAgentMessages: next };
-  }),
-  clearMetaAgentMessages: (chatKey) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    next.delete(chatKey);
-    return { metaAgentMessages: next };
-  }),
-  setMetaAgentMessages: (chatKey, messages) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    next.set(chatKey, messages);
-    return { metaAgentMessages: next };
-  }),
-  updateLastAssistantMessage: (chatKey, content) => set((s) => {
-    const next = new Map(s.metaAgentMessages);
-    const list = [...(next.get(chatKey) || [])];
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].role === 'assistant') {
-        list[i] = { ...list[i], content };
-        break;
+  addMetaAgentMessage: (chatKey, msg) =>
+    set(s => {
+      const next = new Map(s.metaAgentMessages);
+      const list = [...(next.get(chatKey) || []), msg];
+      next.set(chatKey, list.slice(-200));
+      return { metaAgentMessages: next };
+    }),
+  clearMetaAgentMessages: chatKey =>
+    set(s => {
+      const next = new Map(s.metaAgentMessages);
+      next.delete(chatKey);
+      return { metaAgentMessages: next };
+    }),
+  setMetaAgentMessages: (chatKey, messages) =>
+    set(s => {
+      const next = new Map(s.metaAgentMessages);
+      next.set(chatKey, messages);
+      return { metaAgentMessages: next };
+    }),
+  updateLastAssistantMessage: (chatKey, content) =>
+    set(s => {
+      const next = new Map(s.metaAgentMessages);
+      const list = [...(next.get(chatKey) || [])];
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role === 'assistant') {
+          list[i] = { ...list[i], content };
+          break;
+        }
       }
-    }
-    next.set(chatKey, list);
-    return { metaAgentMessages: next };
-  }),
-  attachWorkMessagesToLast: (chatKey, workMessages) => set((s) => {
-    if (!workMessages.length) return s;
-    const next = new Map(s.metaAgentMessages);
-    const list = [...(next.get(chatKey) || [])];
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].role === 'assistant') {
-        list[i] = { ...list[i], workMessages };
-        break;
+      next.set(chatKey, list);
+      return { metaAgentMessages: next };
+    }),
+  attachWorkMessagesToLast: (chatKey, workMessages) =>
+    set(s => {
+      if (!workMessages.length) return s;
+      const next = new Map(s.metaAgentMessages);
+      const list = [...(next.get(chatKey) || [])];
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role === 'assistant') {
+          list[i] = { ...list[i], workMessages };
+          break;
+        }
       }
-    }
-    next.set(chatKey, list);
-    return { metaAgentMessages: next };
-  }),
+      next.set(chatKey, list);
+      return { metaAgentMessages: next };
+    }),
 });

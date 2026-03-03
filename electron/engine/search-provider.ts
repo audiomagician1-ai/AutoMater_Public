@@ -60,13 +60,15 @@ export interface SearchProviderConfig {
   tavilyApiKey?: string;
   /** Serper.dev API Key (免费: https://serper.dev/) */
   serperApiKey?: string;
+  /** Jina AI API Key (免费额度: https://jina.ai/) — 2025 起需要 Bearer token */
+  jinaApiKey?: string;
   /** 自定义 fallback 顺序 */
   fallbackOrder?: ProviderName[];
   /** 超时 ms (每个引擎) */
   timeout?: number;
 }
 
-export type ProviderName = 'brave' | 'searxng' | 'tavily' | 'serper' | 'jina';
+export type ProviderName = 'brave' | 'searxng' | 'tavily' | 'serper' | 'jina' | 'duckduckgo';
 
 // ═══════════════════════════════════════
 // Provider Interface
@@ -86,13 +88,13 @@ interface ISearchProvider {
 
 const braveProvider: ISearchProvider = {
   name: 'brave',
-  isConfigured: (cfg) => !!cfg.braveApiKey,
+  isConfigured: cfg => !!cfg.braveApiKey,
   async search(query, maxResults, cfg) {
     const start = Date.now();
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
     const res = await fetch(url, {
       headers: {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'Accept-Encoding': 'gzip',
         'X-Subscription-Token': cfg.braveApiKey || '',
       },
@@ -100,11 +102,22 @@ const braveProvider: ISearchProvider = {
     });
 
     if (!res.ok) {
-      return { success: false, results: [], content: '', provider: 'brave', durationMs: Date.now() - start, error: `Brave HTTP ${res.status}` };
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'brave',
+        durationMs: Date.now() - start,
+        error: `Brave HTTP ${res.status}`,
+      };
     }
 
-    const data = await res.json() as { web?: { results?: Array<{ title?: string; url?: string; description?: string; age?: string; page_age?: string }> } };
-    const results: SearchResult[] = (data.web?.results || []).slice(0, maxResults).map((r) => ({
+    const data = (await res.json()) as {
+      web?: {
+        results?: Array<{ title?: string; url?: string; description?: string; age?: string; page_age?: string }>;
+      };
+    };
+    const results: SearchResult[] = (data.web?.results || []).slice(0, maxResults).map(r => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.description || '',
@@ -121,23 +134,32 @@ const braveProvider: ISearchProvider = {
 
 const searxngProvider: ISearchProvider = {
   name: 'searxng',
-  isConfigured: (cfg) => !!cfg.searxngUrl,
+  isConfigured: cfg => !!cfg.searxngUrl,
   async search(query, maxResults, cfg) {
     const start = Date.now();
     const baseUrl = cfg.searxngUrl?.replace(/\/$/, '');
     const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&engines=google,duckduckgo,bing&safesearch=0&pageno=1`;
 
     const res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
+      headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(cfg.timeout || 20000),
     });
 
     if (!res.ok) {
-      return { success: false, results: [], content: '', provider: 'searxng', durationMs: Date.now() - start, error: `SearXNG HTTP ${res.status}` };
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'searxng',
+        durationMs: Date.now() - start,
+        error: `SearXNG HTTP ${res.status}`,
+      };
     }
 
-    const data = await res.json() as { results?: Array<{ title?: string; url?: string; content?: string; publishedDate?: string; engine?: string }> };
-    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r) => ({
+    const data = (await res.json()) as {
+      results?: Array<{ title?: string; url?: string; content?: string; publishedDate?: string; engine?: string }>;
+    };
+    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map(r => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.content || '',
@@ -154,7 +176,7 @@ const searxngProvider: ISearchProvider = {
 
 const tavilyProvider: ISearchProvider = {
   name: 'tavily',
-  isConfigured: (cfg) => !!cfg.tavilyApiKey,
+  isConfigured: cfg => !!cfg.tavilyApiKey,
   async search(query, maxResults, cfg) {
     const start = Date.now();
     const res = await fetch('https://api.tavily.com/search', {
@@ -174,11 +196,21 @@ const tavilyProvider: ISearchProvider = {
     });
 
     if (!res.ok) {
-      return { success: false, results: [], content: '', provider: 'tavily', durationMs: Date.now() - start, error: `Tavily HTTP ${res.status}` };
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'tavily',
+        durationMs: Date.now() - start,
+        error: `Tavily HTTP ${res.status}`,
+      };
     }
 
-    const data = await res.json() as { results?: Array<{ title?: string; url?: string; content?: string }>; answer?: string };
-    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map((r) => ({
+    const data = (await res.json()) as {
+      results?: Array<{ title?: string; url?: string; content?: string }>;
+      answer?: string;
+    };
+    const results: SearchResult[] = (data.results || []).slice(0, maxResults).map(r => ({
       title: r.title || '',
       url: r.url || '',
       snippet: r.content || '',
@@ -199,7 +231,7 @@ const tavilyProvider: ISearchProvider = {
 
 const serperProvider: ISearchProvider = {
   name: 'serper',
-  isConfigured: (cfg) => !!cfg.serperApiKey,
+  isConfigured: cfg => !!cfg.serperApiKey,
   async search(query, maxResults, cfg) {
     const start = Date.now();
     const res = await fetch('https://google.serper.dev/search', {
@@ -213,10 +245,17 @@ const serperProvider: ISearchProvider = {
     });
 
     if (!res.ok) {
-      return { success: false, results: [], content: '', provider: 'serper', durationMs: Date.now() - start, error: `Serper HTTP ${res.status}` };
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'serper',
+        durationMs: Date.now() - start,
+        error: `Serper HTTP ${res.status}`,
+      };
     }
 
-    const data = await res.json() as {
+    const data = (await res.json()) as {
       knowledgeGraph?: { title?: string; website?: string; description?: string };
       organic?: Array<{ title?: string; link?: string; snippet?: string; date?: string }>;
     };
@@ -249,26 +288,37 @@ const serperProvider: ISearchProvider = {
   },
 };
 
-// ─── Jina AI (Free, zero API key) ───
+// ─── Jina AI (需要 API Key, 2025 起免费额度需 Bearer token) ───
 
 const jinaProvider: ISearchProvider = {
   name: 'jina',
-  isConfigured: () => true, // 始终可用
+  isConfigured: cfg => !!cfg.jinaApiKey, // 2025 起需要 API Key
   async search(query, maxResults, cfg) {
     const start = Date.now();
     const url = `https://s.jina.ai/${encodeURIComponent(query)}`;
+    const headers: Record<string, string> = {
+      Accept: 'text/plain',
+      'User-Agent': 'agentforge/8.0',
+      'X-Retain-Images': 'none',
+    };
+    if (cfg.jinaApiKey) {
+      headers['Authorization'] = `Bearer ${cfg.jinaApiKey}`;
+    }
     const res = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Accept': 'text/plain',
-        'User-Agent': 'agentforge/8.0',
-        'X-Retain-Images': 'none',
-      },
+      headers,
       signal: AbortSignal.timeout(cfg.timeout || 20000),
     });
 
     if (!res.ok) {
-      return { success: false, results: [], content: '', provider: 'jina', durationMs: Date.now() - start, error: `Jina HTTP ${res.status}` };
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'jina',
+        durationMs: Date.now() - start,
+        error: `Jina HTTP ${res.status}`,
+      };
     }
 
     const text = await res.text();
@@ -279,6 +329,120 @@ const jinaProvider: ISearchProvider = {
   },
 };
 
+// ─── DuckDuckGo HTML (免费零 Key 兜底) ───
+
+const duckduckgoProvider: ISearchProvider = {
+  name: 'duckduckgo',
+  isConfigured: () => true, // 始终可用, 零 key
+  async search(query, maxResults, cfg) {
+    const start = Date.now();
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(cfg.timeout || 15000),
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'duckduckgo',
+          durationMs: Date.now() - start,
+          error: `DDG HTTP ${res.status}`,
+        };
+      }
+
+      const html = await res.text();
+      const results = parseDuckDuckGoHtml(html, maxResults);
+
+      if (results.length === 0) {
+        return {
+          success: false,
+          results: [],
+          content: '',
+          provider: 'duckduckgo',
+          durationMs: Date.now() - start,
+          error: 'DDG: no results parsed',
+        };
+      }
+
+      const content = formatResultsToMarkdown(results, query, 'DuckDuckGo');
+      return { success: true, results, content, provider: 'duckduckgo', durationMs: Date.now() - start };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        results: [],
+        content: '',
+        provider: 'duckduckgo',
+        durationMs: Date.now() - start,
+        error: `DDG: ${msg}`,
+      };
+    }
+  },
+};
+
+/** 解析 DuckDuckGo HTML 搜索结果页 */
+function parseDuckDuckGoHtml(html: string, max: number): SearchResult[] {
+  const results: SearchResult[] = [];
+
+  // DDG HTML 结果格式: <a rel="nofollow" class="result__a" href="...">title</a>
+  // 与 <a class="result__snippet">snippet</a>
+  const resultBlocks = html.split(/class="result\s/g);
+
+  for (let i = 1; i < resultBlocks.length && results.length < max; i++) {
+    const block = resultBlocks[i];
+
+    // 提取 URL
+    const urlMatch = block.match(/class="result__a"\s+href="([^"]+)"/);
+    if (!urlMatch) continue;
+    let url = urlMatch[1];
+    // DDG 有时包装 redirect URL
+    const uddgMatch = url.match(/uddg=([^&]+)/);
+    if (uddgMatch) {
+      try {
+        url = decodeURIComponent(uddgMatch[1]);
+      } catch {
+        /* keep original */
+      }
+    }
+
+    // 提取标题
+    const titleMatch = block.match(/class="result__a"[^>]*>([^<]+)</);
+    const title = titleMatch ? titleMatch[1].trim() : url;
+
+    // 提取摘要
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)(?:<\/a>|<\/td>)/);
+    let snippet = '';
+    if (snippetMatch) {
+      snippet = snippetMatch[1]
+        .replace(/<[^>]+>/g, '') // strip HTML tags
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    // 过滤 DDG 广告和无效结果
+    if (url.includes('duckduckgo.com') || !url.startsWith('http')) continue;
+
+    results.push({ title, url, snippet, source: 'duckduckgo' });
+  }
+
+  return results;
+}
+
 function parseJinaResults(text: string, max: number): SearchResult[] {
   const results: SearchResult[] = [];
   const blocks = text.split(/\n---\n|\n\n(?=Title:)/);
@@ -286,9 +450,9 @@ function parseJinaResults(text: string, max: number): SearchResult[] {
     if (results.length >= max) break;
     const titleMatch = block.match(/Title:\s*(.+)/);
     const urlMatch = block.match(/URL Source:\s*(.+)/);
-    const contentLines = block.split('\n').filter(
-      l => !l.startsWith('Title:') && !l.startsWith('URL Source:') && l.trim()
-    );
+    const contentLines = block
+      .split('\n')
+      .filter(l => !l.startsWith('Title:') && !l.startsWith('URL Source:') && l.trim());
     if (titleMatch && urlMatch) {
       results.push({
         title: titleMatch[1].trim(),
@@ -311,9 +475,10 @@ const ALL_PROVIDERS: ISearchProvider[] = [
   tavilyProvider,
   serperProvider,
   jinaProvider,
+  duckduckgoProvider,
 ];
 
-const DEFAULT_FALLBACK_ORDER: ProviderName[] = ['brave', 'searxng', 'tavily', 'serper', 'jina'];
+const DEFAULT_FALLBACK_ORDER: ProviderName[] = ['brave', 'searxng', 'tavily', 'serper', 'jina', 'duckduckgo'];
 
 // ═══════════════════════════════════════
 // Search Manager (singleton)
@@ -347,17 +512,15 @@ export async function search(
   const order = _config.fallbackOrder || DEFAULT_FALLBACK_ORDER;
 
   // 如果指定了优先引擎，放到最前
-  const sorted = preferProvider
-    ? [preferProvider, ...order.filter(n => n !== preferProvider)]
-    : order;
+  const sorted = preferProvider ? [preferProvider, ...order.filter(n => n !== preferProvider)] : order;
 
   const configuredOrder = sorted.filter(name => {
     const p = ALL_PROVIDERS.find(pp => pp.name === name);
     return p && p.isConfigured(_config);
   });
 
-  // 确保 Jina 兜底
-  if (!configuredOrder.includes('jina')) configuredOrder.push('jina');
+  // 确保 DuckDuckGo 兜底 (零 key, 始终可用)
+  if (!configuredOrder.includes('duckduckgo')) configuredOrder.push('duckduckgo');
 
   const errors: string[] = [];
 
@@ -396,10 +559,7 @@ export async function search(
  * 用于重要查询: 同时请求多个引擎，合并去重，按出现频次排序。
  * 出现在多个引擎结果中的 URL 权重更高。
  */
-export async function searchBoost(
-  query: string,
-  maxResults: number = 15,
-): Promise<SearchResponse> {
+export async function searchBoost(query: string, maxResults: number = 15): Promise<SearchResponse> {
   const start = Date.now();
 
   const configured = ALL_PROVIDERS.filter(p => p.isConfigured(_config));
@@ -410,10 +570,16 @@ export async function searchBoost(
   // 并行搜索所有引擎 (最多 4 个)
   const selected = configured.slice(0, 4);
   const promises = selected.map(p =>
-    p.search(query, maxResults, _config).catch((err: unknown): SearchResponse => ({
-      success: false, results: [], content: '', provider: p.name,
-      durationMs: 0, error: err instanceof Error ? err.message : String(err),
-    }))
+    p.search(query, maxResults, _config).catch(
+      (err: unknown): SearchResponse => ({
+        success: false,
+        results: [],
+        content: '',
+        provider: p.name,
+        durationMs: 0,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    ),
   );
 
   const responses = await Promise.allSettled(promises);
@@ -459,9 +625,7 @@ export async function searchBoost(
     .slice(0, maxResults)
     .map(entry => ({
       ...entry.result,
-      source: entry.engines.length > 1
-        ? `[${entry.engines.join('+')}]`
-        : entry.result.source,
+      source: entry.engines.length > 1 ? `[${entry.engines.join('+')}]` : entry.result.source,
     }));
 
   const content = formatResultsToMarkdown(merged, query, `Boost (${providers.join(', ')})`);
@@ -493,16 +657,22 @@ export interface ReadUrlResponse {
  * 策略: Jina Reader → 原生 fetch + 简易 HTML 清洗
  * 自动截断超长内容。
  */
-export async function readUrl(
-  url: string,
-  maxLength: number = 20000,
-): Promise<ReadUrlResponse> {
-  // 策略 1: Jina Reader
+export async function readUrl(url: string, maxLength: number = 20000): Promise<ReadUrlResponse> {
+  // 策略 1: Jina Reader (需要 API Key)
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
+    const jinaHeaders: Record<string, string> = {
+      Accept: 'text/plain',
+      'User-Agent': 'agentforge/8.0',
+      'X-Retain-Images': 'none',
+      'X-Timeout': '15',
+    };
+    if (_config.jinaApiKey) {
+      jinaHeaders['Authorization'] = `Bearer ${_config.jinaApiKey}`;
+    }
     const res = await fetch(jinaUrl, {
       method: 'GET',
-      headers: { 'Accept': 'text/plain', 'User-Agent': 'agentforge/8.0', 'X-Retain-Images': 'none', 'X-Timeout': '15' },
+      headers: jinaHeaders,
       signal: AbortSignal.timeout(20000),
     });
 
@@ -510,12 +680,12 @@ export async function readUrl(
       const text = await res.text();
       const titleMatch = text.match(/^Title:\s*(.+)/m);
       const title = titleMatch ? titleMatch[1].trim() : '';
-      const content = text.length > maxLength
-        ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]`
-        : text;
+      const content =
+        text.length > maxLength ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]` : text;
       return { success: true, content, title, length: text.length };
     }
-  } catch { /* silent: fetch/解析失败,返回空结果 */
+  } catch {
+    /* silent: fetch/解析失败,返回空结果 */
     // Jina 失败, 继续 fallback
   }
 
@@ -524,7 +694,7 @@ export async function readUrl(
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgentForge/8.0',
-        'Accept': 'text/html,application/xhtml+xml,text/plain,application/json',
+        Accept: 'text/html,application/xhtml+xml,text/plain,application/json',
       },
       signal: AbortSignal.timeout(15000),
     });
@@ -553,9 +723,14 @@ export async function readUrl(
 
     const content = text.length > maxLength ? text.slice(0, maxLength) + '\n...[截断]' : text;
     return { success: true, content, title, length: text.length };
-
   } catch (err: unknown) {
-    return { success: false, content: '', title: '', length: 0, error: err instanceof Error ? err.message : String(err) };
+    return {
+      success: false,
+      content: '',
+      title: '',
+      length: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 

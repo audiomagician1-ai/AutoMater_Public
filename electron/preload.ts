@@ -51,11 +51,29 @@ contextBridge.exposeInMainWorld('automater', {
     getLogAgentIds: (projectId: string) => ipcRenderer.invoke('project:get-log-agent-ids', projectId),
     start: (projectId: string) => ipcRenderer.invoke('project:start', projectId),
     stop: (projectId: string) => ipcRenderer.invoke('project:stop', projectId),
-    delete: (projectId: string, deleteFiles?: boolean) => ipcRenderer.invoke('project:delete', projectId, deleteFiles ?? false),
+    delete: (projectId: string, deleteFiles?: boolean) =>
+      ipcRenderer.invoke('project:delete', projectId, deleteFiles ?? false),
     openWorkspace: (projectId: string) => ipcRenderer.invoke('project:open-workspace', projectId),
     export: (projectId: string) => ipcRenderer.invoke('project:export', projectId),
     gitCommit: (projectId: string, message: string) => ipcRenderer.invoke('project:git-commit', projectId, message),
     gitLog: (projectId: string) => ipcRenderer.invoke('project:git-log', projectId),
+    // v27.0: Git 版本管理
+    gitStatus: (projectId: string) => ipcRenderer.invoke('project:git-status', projectId),
+    gitStructuredLog: (projectId: string, maxCount?: number) =>
+      ipcRenderer.invoke('project:git-structured-log', projectId, maxCount),
+    gitFileLog: (projectId: string, filePath: string, maxCount?: number) =>
+      ipcRenderer.invoke('project:git-file-log', projectId, filePath, maxCount),
+    gitShowFile: (projectId: string, commitHash: string, filePath: string) =>
+      ipcRenderer.invoke('project:git-show-file', projectId, commitHash, filePath),
+    gitCheckoutFile: (projectId: string, commitHash: string, filePath: string) =>
+      ipcRenderer.invoke('project:git-checkout-file', projectId, commitHash, filePath),
+    gitDiff: (projectId: string, commitRange?: string) =>
+      ipcRenderer.invoke('project:git-diff', projectId, commitRange),
+    gitFileDiff: (projectId: string, commitHash: string, filePath: string) =>
+      ipcRenderer.invoke('project:git-file-diff', projectId, commitHash, filePath),
+    gitCommitFiles: (projectId: string, commitHash: string) =>
+      ipcRenderer.invoke('project:git-commit-files', projectId, commitHash),
+    gitBranches: (projectId: string) => ipcRenderer.invoke('project:git-branches', projectId),
     testGitHub: (repo: string, token: string) => ipcRenderer.invoke('project:test-github', repo, token),
     getContextSnapshots: (projectId: string) => ipcRenderer.invoke('project:get-context-snapshots', projectId),
     getReactStates: (projectId: string) => ipcRenderer.invoke('project:get-react-states', projectId),
@@ -208,9 +226,15 @@ contextBridge.exposeInMainWorld('automater', {
     getRanked: () => ipcRenderer.invoke('skill-evolution:get-ranked'),
   },
 
-  // ── 文件夹选择对话框 (v5.1) ──
+  // ── 文件夹/文件选择对话框 (v5.1 → v28.0) ──
   dialog: {
     openDirectory: (title?: string) => ipcRenderer.invoke('dialog:open-directory', title),
+    openFiles: (options?: {
+      title?: string;
+      filters?: Array<{ name: string; extensions: string[] }>;
+      multiple?: boolean;
+    }) => ipcRenderer.invoke('dialog:open-files', options),
+    readFileBase64: (filePath: string) => ipcRenderer.invoke('dialog:read-file-base64', filePath),
   },
 
   // ── 密钥管理 (v13.0) ──
@@ -276,8 +300,8 @@ contextBridge.exposeInMainWorld('automater', {
       ipcRenderer.invoke('meta-agent:messages:update', id, updates),
     loadMessages: (sessionId: string, limit?: number) =>
       ipcRenderer.invoke('meta-agent:messages:load', sessionId, limit),
-    listChatSessions: (projectId?: string | null, limit?: number) =>
-      ipcRenderer.invoke('meta-agent:messages:list-sessions', projectId, limit),
+    listChatSessions: (projectId?: string | null, limit?: number, includeHidden?: boolean) =>
+      ipcRenderer.invoke('meta-agent:messages:list-sessions', projectId, limit, includeHidden),
     deleteSessionMessages: (sessionId: string) => ipcRenderer.invoke('meta-agent:messages:delete-session', sessionId),
   },
 
@@ -327,6 +351,13 @@ contextBridge.exposeInMainWorld('automater', {
     /** v22.0: 更新会话的聊天模式 */
     updateChatMode: (sessionId: string, chatMode: string) =>
       ipcRenderer.invoke('session:update-chat-mode', sessionId, chatMode),
+    /** v27.0: 切换会话置顶 */
+    togglePin: (sessionId: string) => ipcRenderer.invoke('session:toggle-pin', sessionId),
+    /** v27.0: 重命名会话 */
+    rename: (sessionId: string, customTitle: string | null) =>
+      ipcRenderer.invoke('session:rename', sessionId, customTitle),
+    /** v27.0: 切换会话隐藏 */
+    toggleHidden: (sessionId: string) => ipcRenderer.invoke('session:toggle-hidden', sessionId),
   },
 
   // ── 工作流预设管理 (v12.0) ──

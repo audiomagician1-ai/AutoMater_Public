@@ -20,12 +20,33 @@ interface FileNode {
 function detectLanguage(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = {
-    ts: 'TypeScript', tsx: 'TypeScript (React)', js: 'JavaScript', jsx: 'JSX',
-    py: 'Python', rs: 'Rust', go: 'Go', java: 'Java', kt: 'Kotlin',
-    html: 'HTML', css: 'CSS', scss: 'SCSS', json: 'JSON', yaml: 'YAML', yml: 'YAML',
-    md: 'Markdown', sql: 'SQL', sh: 'Shell', bat: 'Batch', ps1: 'PowerShell',
-    toml: 'TOML', xml: 'XML', svg: 'SVG', txt: 'Text', env: 'Env',
-    dockerfile: 'Dockerfile', gitignore: 'Git Ignore',
+    ts: 'TypeScript',
+    tsx: 'TypeScript (React)',
+    js: 'JavaScript',
+    jsx: 'JSX',
+    py: 'Python',
+    rs: 'Rust',
+    go: 'Go',
+    java: 'Java',
+    kt: 'Kotlin',
+    html: 'HTML',
+    css: 'CSS',
+    scss: 'SCSS',
+    json: 'JSON',
+    yaml: 'YAML',
+    yml: 'YAML',
+    md: 'Markdown',
+    sql: 'SQL',
+    sh: 'Shell',
+    bat: 'Batch',
+    ps1: 'PowerShell',
+    toml: 'TOML',
+    xml: 'XML',
+    svg: 'SVG',
+    txt: 'Text',
+    env: 'Env',
+    dockerfile: 'Dockerfile',
+    gitignore: 'Git Ignore',
   };
   return map[ext] || ext.toUpperCase() || 'File';
 }
@@ -35,18 +56,36 @@ function fileIcon(name: string, type: 'file' | 'dir'): string {
   if (type === 'dir') return '📁';
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   const icons: Record<string, string> = {
-    ts: '🔷', tsx: '⚛️', js: '🟡', jsx: '⚛️', py: '🐍', rs: '🦀',
-    html: '🌐', css: '🎨', json: '📋', md: '📝', sql: '🗃️', sh: '🐚',
-    yaml: '⚙️', yml: '⚙️', toml: '⚙️',
+    ts: '🔷',
+    tsx: '⚛️',
+    js: '🟡',
+    jsx: '⚛️',
+    py: '🐍',
+    rs: '🦀',
+    html: '🌐',
+    css: '🎨',
+    json: '📋',
+    md: '📝',
+    sql: '🗃️',
+    sh: '🐚',
+    yaml: '⚙️',
+    yml: '⚙️',
+    toml: '⚙️',
   };
   return icons[ext] || '📄';
 }
 
 // ── 文件树节点 ──
 function TreeNode({
-  node, depth, selectedPath, onSelect, onRightClick
+  node,
+  depth,
+  selectedPath,
+  onSelect,
+  onRightClick,
 }: {
-  node: FileNode; depth: number; selectedPath: string | null;
+  node: FileNode;
+  depth: number;
+  selectedPath: string | null;
   onSelect: (path: string) => void;
   onRightClick?: (e: React.MouseEvent, node: FileNode) => void;
 }) {
@@ -65,9 +104,17 @@ function TreeNode({
           <span>{fileIcon(node.name, 'dir')}</span>
           <span className="truncate">{node.name}</span>
         </div>
-        {expanded && node.children?.map((child: FileNode) => (
-          <TreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} onRightClick={onRightClick} />
-        ))}
+        {expanded &&
+          node.children?.map((child: FileNode) => (
+            <TreeNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
+              onRightClick={onRightClick}
+            />
+          ))}
       </div>
     );
   }
@@ -77,7 +124,7 @@ function TreeNode({
       className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer rounded text-xs transition-colors ${isSelected ? 'bg-forge-600/20 text-forge-300' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-300'}`}
       style={{ paddingLeft: `${depth * 14 + 20}px` }}
       onClick={() => onSelect(node.path)}
-      onContextMenu={(e) => {
+      onContextMenu={e => {
         e.preventDefault();
         e.stopPropagation();
         onRightClick?.(e, node);
@@ -101,7 +148,7 @@ function highlightCode(line: string, _lang: string): string {
 
   // 注释 — 大多数语言
   html = html.replace(/(\/\/.*$)/gm, '<span class="text-slate-500 italic">$1</span>');
-  html = html.replace(/(#.*$)/gm, (m) => {
+  html = html.replace(/(#.*$)/gm, m => {
     // 避免误匹配 CSS hex 颜色
     if (/^#[0-9a-fA-F]{3,8}\b/.test(m.trim())) return m;
     return `<span class="text-slate-500 italic">${m}</span>`;
@@ -112,7 +159,8 @@ function highlightCode(line: string, _lang: string): string {
   html = html.replace(/("[^"]*"|'[^']*')/g, '<span class="text-emerald-400">$1</span>');
 
   // 关键字 (JS/TS/Python/Rust/Go/Java)
-  const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|new|typeof|interface|type|enum|extends|implements|try|catch|throw|finally|switch|case|break|default|continue|yield|in|of|as|is|null|undefined|true|false|this|self|def|fn|pub|mod|use|struct|impl|trait|where|match|loop|mut|ref|move|super|package|func|go|chan|select|defer|map|range|lambda|pass|raise|with|elif|except|print|None|True|False|void|int|float|double|string|bool|byte|char|long|short|static|final|abstract|public|private|protected|override|virtual|readonly|declare|namespace|module)\b/g;
+  const keywords =
+    /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|new|typeof|interface|type|enum|extends|implements|try|catch|throw|finally|switch|case|break|default|continue|yield|in|of|as|is|null|undefined|true|false|this|self|def|fn|pub|mod|use|struct|impl|trait|where|match|loop|mut|ref|move|super|package|func|go|chan|select|defer|map|range|lambda|pass|raise|with|elif|except|print|None|True|False|void|int|float|double|string|bool|byte|char|long|short|static|final|abstract|public|private|protected|override|virtual|readonly|declare|namespace|module)\b/g;
   html = html.replace(keywords, '<span class="text-violet-400">$1</span>');
 
   // 数字
@@ -147,7 +195,9 @@ function CodeView({ content, filename, highlightLine }: { content: string; filen
           <span className="text-xs">{fileIcon(filename, 'file')}</span>
           <span className="text-xs text-slate-300 font-mono">{filename}</span>
         </div>
-        <span className="text-[10px] text-slate-500">{lang} · {lines.length} lines</span>
+        <span className="text-[10px] text-slate-500">
+          {lang} · {lines.length} lines
+        </span>
       </div>
       <div className="flex-1 overflow-auto font-mono text-xs leading-5">
         <table className="w-full">
@@ -159,11 +209,19 @@ function CodeView({ content, filename, highlightLine }: { content: string; filen
                 <tr
                   key={i}
                   ref={isHighlighted ? highlightRef : undefined}
-                  className={isHighlighted ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-500/30' : 'hover:bg-slate-800/30'}
+                  className={
+                    isHighlighted ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-500/30' : 'hover:bg-slate-800/30'
+                  }
                 >
-                  <td className={`text-right select-none px-3 py-0 w-12 border-r align-top ${isHighlighted ? 'text-amber-400 border-amber-500/30' : 'text-slate-600 border-slate-800/50'}`}>{lineNum}</td>
-                  <td className="px-4 py-0 text-slate-300 whitespace-pre-wrap break-all"
-                    dangerouslySetInnerHTML={{ __html: highlightCode(line, lang) || ' ' }} />
+                  <td
+                    className={`text-right select-none px-3 py-0 w-12 border-r align-top ${isHighlighted ? 'text-amber-400 border-amber-500/30' : 'text-slate-600 border-slate-800/50'}`}
+                  >
+                    {lineNum}
+                  </td>
+                  <td
+                    className="px-4 py-0 text-slate-300 whitespace-pre-wrap break-all"
+                    dangerouslySetInnerHTML={{ __html: highlightCode(line, lang) || ' ' }}
+                  />
                 </tr>
               );
             })}
@@ -176,7 +234,8 @@ function CodeView({ content, filename, highlightLine }: { content: string; filen
 
 // ── 统计摘要 ──
 function countFiles(nodes: FileNode[]): { files: number; dirs: number } {
-  let files = 0, dirs = 0;
+  let files = 0,
+    dirs = 0;
   for (const n of nodes) {
     if (n.type === 'file') files++;
     else {
@@ -193,7 +252,9 @@ function countFiles(nodes: FileNode[]): { files: number; dirs: number } {
 
 // ── 搜索面板 (v21.0 — VS Code 风格, 文件名 + 内容搜索) ──
 function SearchPanel({
-  projectId, onSelectFile, onSelectMatch,
+  projectId,
+  onSelectFile,
+  onSelectMatch,
 }: {
   projectId: string;
   onSelectFile: (path: string) => void;
@@ -211,24 +272,37 @@ function SearchPanel({
   // Debounced search
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!query.trim()) { setResults(null); return; }
+    if (!query.trim()) {
+      setResults(null);
+      return;
+    }
 
     timerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
         const r = await window.automater.workspace.search(projectId, query, {
-          mode, caseSensitive, wholeWord, maxResults: 80, context: 1,
+          mode,
+          caseSensitive,
+          wholeWord,
+          maxResults: 80,
+          context: 1,
         });
         setResults(r);
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
       setSearching(false);
     }, 300);
 
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [query, mode, caseSensitive, wholeWord, projectId]);
 
   // Focus input on mount
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -244,7 +318,11 @@ function SearchPanel({
             placeholder={mode === 'filename' ? '搜索文件名...' : '搜索内容...'}
             className="w-full bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 pl-7 pr-2 py-1.5 focus:outline-none focus:border-forge-500/50 placeholder:text-slate-600"
           />
-          {searching && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 animate-pulse">...</span>}
+          {searching && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 animate-pulse">
+              ...
+            </span>
+          )}
         </div>
         <div className="flex items-center justify-between">
           {/* 模式切换 */}
@@ -288,14 +366,20 @@ function SearchPanel({
       <div className="flex-1 overflow-y-auto text-xs">
         {!results && !searching && (
           <div className="text-slate-600 text-center mt-8 px-4 text-[10px] leading-4">
-            输入关键词搜索<br />
-            <span className="text-slate-700">内容搜索基于 ripgrep 引擎<br />与 Agent 使用同一搜索能力</span>
+            输入关键词搜索
+            <br />
+            <span className="text-slate-700">
+              内容搜索基于 ripgrep 引擎
+              <br />与 Agent 使用同一搜索能力
+            </span>
           </div>
         )}
 
         {results && results.mode === 'filename' && results.files && (
           <div className="py-1">
-            <div className="px-2 py-1 text-[10px] text-slate-500">{results.totalMatches} 个文件{results.truncated ? ' (已截断)' : ''}</div>
+            <div className="px-2 py-1 text-[10px] text-slate-500">
+              {results.totalMatches} 个文件{results.truncated ? ' (已截断)' : ''}
+            </div>
             {results.files.map(f => (
               <div
                 key={f}
@@ -312,7 +396,9 @@ function SearchPanel({
         {results && results.mode === 'content' && results.matches && (
           <div className="py-1">
             <div className="px-2 py-1 text-[10px] text-slate-500">
-              {results.totalMatches} 个匹配{results.truncated ? ' (已截断)' : ''}{results.engine ? ` · ${results.engine}` : ''}{results.durationMs ? ` · ${results.durationMs}ms` : ''}
+              {results.totalMatches} 个匹配{results.truncated ? ' (已截断)' : ''}
+              {results.engine ? ` · ${results.engine}` : ''}
+              {results.durationMs ? ` · ${results.durationMs}ms` : ''}
             </div>
             {groupMatchesByFile(results.matches).map(([file, matches]) => (
               <div key={file}>
@@ -375,7 +461,10 @@ export function OutputPage() {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
-  const [versionModal, setVersionModal] = useState<{ filePath: string; versions: Array<{ hash: string; date: string; summary: string }> } | null>(null);
+  const [versionModal, setVersionModal] = useState<{
+    filePath: string;
+    versions: Array<{ hash: string; shortHash: string; date: string; summary: string; author: string }>;
+  } | null>(null);
   // v21.0: 搜索状态
   const [showSearch, setShowSearch] = useState(false);
   const [highlightLine, setHighlightLine] = useState<number | undefined>(undefined);
@@ -387,7 +476,9 @@ export function OutputPage() {
   }, [currentProjectId]);
 
   // 初始加载 + 定时刷新
-  useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => {
+    loadTree();
+  }, [loadTree]);
   useEffect(() => {
     const t = setInterval(loadTree, 5000);
     return () => clearInterval(t);
@@ -409,7 +500,8 @@ export function OutputPage() {
     try {
       const result = await window.automater.workspace.readFile(currentProjectId, filePath);
       setFileContent(result.success ? result.content : '无法读取文件');
-    } catch { /* silent: 文件读取失败 */
+    } catch {
+      /* silent: 文件读取失败 */
       setFileContent('读取失败');
     }
     setLoading(false);
@@ -462,14 +554,47 @@ export function OutputPage() {
     }
   };
 
-  const handleViewVersions = async (_filePath: string) => {
-    // TODO: 实现真正的 git log 版本查询 — 暂时隐藏此功能
-    toast.info('版本历史功能即将上线');
+  const handleViewVersions = async (filePath: string) => {
+    if (!currentProjectId) return;
+    try {
+      const history = await window.automater.project.gitFileLog(currentProjectId, filePath);
+      if (!history || history.length === 0) {
+        toast.info('此文件尚无提交记录');
+        return;
+      }
+      setVersionModal({
+        filePath,
+        versions: history.map(h => ({
+          hash: h.hash,
+          shortHash: h.shortHash,
+          date: h.date,
+          summary: h.message,
+          author: h.author,
+        })),
+      });
+    } catch {
+      toast.error('获取文件历史失败');
+    }
   };
 
-  const handleRollback = async (_filePath: string, _hash: string) => {
-    // TODO: 实现 git checkout <hash> -- <file>
-    toast.info('版本回退功能即将上线');
+  const handleRollback = async (filePath: string, hash: string) => {
+    if (!currentProjectId) return;
+    try {
+      const result = await window.automater.project.gitCheckoutFile(currentProjectId, hash, filePath);
+      if (result.success) {
+        toast.success(`已回退 ${filePath.split('/').pop()} 到 ${hash.slice(0, 7)}`);
+        setVersionModal(null);
+        // 重新加载文件内容
+        if (selectedFile === filePath) {
+          const readResult = await window.automater.workspace.readFile(currentProjectId, filePath);
+          setFileContent(readResult.success ? readResult.content : '无法读取文件');
+        }
+      } else {
+        toast.error(`回退失败: ${result.error || '未知错误'}`);
+      }
+    } catch (err) {
+      toast.error(`回退失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   if (!currentProjectId) {
@@ -489,7 +614,9 @@ export function OutputPage() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-bold">产出</h2>
-          <span className="text-xs text-slate-500">{stats.files} 文件 · {stats.dirs} 目录</span>
+          <span className="text-xs text-slate-500">
+            {stats.files} 文件 · {stats.dirs} 目录
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -536,7 +663,14 @@ export function OutputPage() {
                 <EmptyState icon="📂" title="暂无文件" description="Agent 开发过程中会自动生成代码文件" />
               ) : (
                 tree.map(node => (
-                  <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedFile} onSelect={handleSelectFile} onRightClick={handleFileRightClick} />
+                  <TreeNode
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    selectedPath={selectedFile}
+                    onSelect={handleSelectFile}
+                    onRightClick={handleFileRightClick}
+                  />
                 ))
               )}
             </div>
@@ -573,25 +707,37 @@ export function OutputPage() {
 
       {/* Version history modal */}
       {versionModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setVersionModal(null)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-xl w-[480px] max-h-[60vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+          onClick={() => setVersionModal(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-xl w-[480px] max-h-[60vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-200">📜 历史版本</h3>
                 <p className="text-[10px] text-slate-500 mt-0.5 font-mono">{versionModal.filePath}</p>
               </div>
-              <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">✕</button>
+              <button onClick={() => setVersionModal(null)} className="text-slate-500 hover:text-slate-300">
+                ✕
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto">
               {versionModal.versions.map((v, i) => (
-                <div key={v.hash} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30">
+                <div
+                  key={v.hash}
+                  className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30"
+                >
                   <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400 font-mono shrink-0">
-                    {i === 0 ? '⭐' : `v${versionModal.versions.length - i}`}
+                    {i === 0 ? '⭐' : v.shortHash}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs text-slate-300">{v.summary}</div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
-                      <span className="font-mono">{v.hash.slice(0, 8)}</span> · {new Date(v.date).toLocaleString()}
+                      <span className="font-mono">{v.shortHash}</span> · {v.author} ·{' '}
+                      {new Date(v.date).toLocaleString()}
                     </div>
                   </div>
                   {i > 0 && (

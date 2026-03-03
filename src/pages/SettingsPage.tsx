@@ -13,14 +13,16 @@ import { LlmTab } from './settings/LlmTab';
 import { McpTab } from './settings/McpTab';
 import { SkillTab } from './settings/SkillTab';
 import { DisplayTab } from './settings/DisplayTab';
+import { SearchTab } from './settings/SearchTab';
 
-type TabId = 'llm' | 'mcp' | 'skill' | 'display';
+type TabId = 'llm' | 'search' | 'mcp' | 'skill' | 'display';
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
-  { id: 'llm',     label: 'LLM',       icon: '🧠' },
-  { id: 'mcp',     label: 'MCP',       icon: '🔌' },
-  { id: 'skill',   label: '技能',      icon: '🧩' },
-  { id: 'display', label: '显示',      icon: '🖥️' },
+  { id: 'llm', label: 'LLM', icon: '🧠' },
+  { id: 'search', label: '搜索', icon: '🔍' },
+  { id: 'mcp', label: 'MCP', icon: '🔌' },
+  { id: 'skill', label: '技能', icon: '🧩' },
+  { id: 'display', label: '显示', icon: '🖥️' },
 ];
 
 export function SettingsPage() {
@@ -56,12 +58,13 @@ export function SettingsPage() {
         {/* Tab Bar */}
         <div className="flex gap-1 bg-slate-900 rounded-lg p-1 border border-slate-800">
           {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-slate-800 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}>
+                activeTab === tab.id ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
               {tab.icon} {tab.label}
             </button>
           ))}
@@ -70,6 +73,7 @@ export function SettingsPage() {
         {activeTab === 'llm' && (
           <LlmTab settings={settings} setSettings={setSettings} setSettingsConfigured={setSettingsConfigured} />
         )}
+        {activeTab === 'search' && <SearchTab settings={settings} setSettings={setSettings} />}
         {activeTab === 'mcp' && <McpTab />}
         {activeTab === 'skill' && <SkillTab />}
         {activeTab === 'display' && <DisplayTab />}
@@ -77,4 +81,3 @@ export function SettingsPage() {
     </div>
   );
 }
-

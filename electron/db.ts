@@ -47,9 +47,12 @@ function safeAddColumn(sql: string): void {
 /** 获取当前 schema 版本号 */
 function getSchemaVersion(): number {
   try {
-    const row = db.prepare("SELECT value FROM schema_version WHERE key = 'version'").get() as { value: string } | undefined;
+    const row = db.prepare("SELECT value FROM schema_version WHERE key = 'version'").get() as
+      | { value: string }
+      | undefined;
     return row ? parseInt(row.value, 10) : 0;
-  } catch { /* silent: schema_version表不存在(首次运行) */
+  } catch {
+    /* silent: schema_version表不存在(首次运行) */
     // schema_version 表不存在 = 旧版本数据库
     return 0;
   }
@@ -268,7 +271,8 @@ const MIGRATIONS: Migration[] = [
 
       // 迁移旧 github_token 到 project_secrets
       try {
-        const { migrateGitHubTokensFromProjects } = require('./engine/secret-manager') as typeof import('./engine/secret-manager');
+        const { migrateGitHubTokensFromProjects } =
+          require('./engine/secret-manager') as typeof import('./engine/secret-manager');
         migrateGitHubTokensFromProjects();
       } catch (err) {
         // 非致命: 首次安装时 projects 表可能为空
@@ -361,6 +365,15 @@ const MIGRATIONS: Migration[] = [
       safeAddColumn("ALTER TABLE sessions ADD COLUMN chat_mode TEXT NOT NULL DEFAULT 'work'");
     },
   },
+  {
+    version: 16,
+    description: 'v27.0: sessions 置顶/重命名/隐藏 — pinned, custom_title, hidden',
+    up: () => {
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN custom_title TEXT');
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */
@@ -384,8 +397,8 @@ function runMigrations(): void {
       log.error(`  ❌ Migration ${migration.version} FAILED: ${migration.description}`, err);
       throw new Error(
         `Database migration ${migration.version} failed: ${migration.description}. ` +
-        `Error: ${err instanceof Error ? err.message : String(err)}. ` +
-        `Database may be in an inconsistent state — please check the logs.`
+          `Error: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Database may be in an inconsistent state — please check the logs.`,
       );
     }
   }

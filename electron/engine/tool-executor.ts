@@ -53,10 +53,10 @@ const TOOL_OUTPUT_MAX_TOKENS = 4000;
  * git 历史、开发文档、数据库等敏感信息。
  */
 const META_AGENT_BLOCKED_PATTERNS = [
-  /[\/\\]\.git[\/\\]/i,         // .git/ 目录内容
-  /[\/\\]\.git$/i,               // .git 目录本身
-  /^\.git[\/\\]/i,               // 相对路径 .git/
-  /^\.git$/i,                     // 相对路径 .git
+  /[\/\\]\.git[\/\\]/i, // .git/ 目录内容
+  /[\/\\]\.git$/i, // .git 目录本身
+  /^\.git[\/\\]/i, // 相对路径 .git/
+  /^\.git$/i, // 相对路径 .git
 ];
 
 /**
@@ -730,6 +730,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
           searxngUrl: call.arguments.searxng_url,
           tavilyApiKey: call.arguments.tavily_api_key,
           serperApiKey: call.arguments.serper_api_key,
+          jinaApiKey: call.arguments.jina_api_key,
         });
         const available = getAvailableProviders();
         return {

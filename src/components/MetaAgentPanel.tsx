@@ -15,6 +15,8 @@ import { MetaAgentSettings } from './MetaAgentSettings';
 import { MSG_STYLES } from './AgentWorkFeed';
 import { friendlyErrorMessage } from '../utils/errors';
 import { renderMarkdown } from '../utils/markdown';
+import { ChatInput, type ChatAttachment } from './ChatInput';
+import { MessageAttachments } from './MessageAttachments';
 
 const EMPTY_WORK_MSGS: readonly AgentWorkMessage[] = [];
 const META_AGENT_ID = 'meta-agent';
@@ -297,7 +299,6 @@ export function MetaAgentPanel() {
   const chatKey = currentSessionId || currentProjectId || '_global';
   const messages = messagesMap.get(chatKey) || [];
 
-  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [agentName, setAgentName] = useState('元Agent · 管家');
   const [greeting, setGreeting] = useState('你好！我是元Agent管家。告诉我你的需求，或问我任何项目相关的问题。');
@@ -398,8 +399,8 @@ export function MetaAgentPanel() {
     timestamp: Date.now(),
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
+  const handleSend = async (inputText: string, inputAttachments: ChatAttachment[]) => {
+    if ((!inputText.trim() && inputAttachments.length === 0) || sending) return;
 
     let sessionId = currentSessionId;
     if (!sessionId) {
@@ -414,18 +415,24 @@ export function MetaAgentPanel() {
 
     const activeChatKey = sessionId || currentProjectId || '_global';
 
+    // v28.0: 附件处理
+    const msgAttachments =
+      inputAttachments.length > 0
+        ? inputAttachments.map(a => ({ type: a.type, name: a.name, data: a.data, mimeType: a.mimeType }))
+        : undefined;
+
     const userMsg: MetaAgentMessage = {
       id: String(Date.now()),
       role: 'user',
-      content: input.trim(),
+      content: inputText.trim(),
       timestamp: Date.now(),
+      attachments: msgAttachments,
     };
     addMessage(activeChatKey, userMsg);
-    setInput('');
     setSending(true);
     sendingStartMsgIndexRef.current = metaAgentWorkMsgs.length;
 
-    // 持久化 user 消息
+    // 持久化 user 消息 (含附件)
     if (sessionId) {
       window.automater.metaAgent
         .saveMessage({
@@ -434,6 +441,7 @@ export function MetaAgentPanel() {
           projectId: currentProjectId,
           role: 'user',
           content: userMsg.content,
+          attachments: msgAttachments ? JSON.stringify(msgAttachments) : undefined,
         })
         .catch(() => {});
     }
@@ -444,7 +452,14 @@ export function MetaAgentPanel() {
     try {
       const currentMsgs = messagesMap.get(activeChatKey) || [];
       const history = [...currentMsgs].slice(-20).map(m => ({ role: m.role as string, content: m.content }));
-      const result = await window.automater.metaAgent.chat(currentProjectId, userMsg.content, history, undefined, undefined, sessionId);
+      const result = await window.automater.metaAgent.chat(
+        currentProjectId,
+        userMsg.content,
+        history,
+        msgAttachments,
+        undefined,
+        sessionId,
+      );
       updateLastAssistant(activeChatKey, result.reply);
 
       if (sessionId) {
@@ -570,7 +585,17 @@ export function MetaAgentPanel() {
                 }`}
                 title={showWorkDetails ? '隐藏工作过程' : '显示工作过程'}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
                   <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
                 </svg>
@@ -618,7 +643,10 @@ export function MetaAgentPanel() {
                           dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                         />
                       ) : (
-                        msg.content
+                        <>
+                          {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                          {msg.attachments && <MessageAttachments attachments={msg.attachments} />}
+                        </>
                       )}
                       {msg.triggeredWish && <div className="mt-0.5 text-[9px] text-emerald-400">✅ 已创建需求</div>}
                       <div

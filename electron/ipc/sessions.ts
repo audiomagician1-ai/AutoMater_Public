@@ -14,22 +14,32 @@
 import { ipcMain, shell } from 'electron';
 import { assertProjectId, assertNonEmptyString, assertOptionalNumber } from './ipc-validator';
 import {
-  createSession, switchSession, listSessions, listAllSessions,
-  getActiveSession, readSessionBackup, getBackupStats, cleanupOldBackups,
-  getSessionsForFeature, getFeaturesForSession, listFeatureSessionLinks,
+  createSession,
+  switchSession,
+  listSessions,
+  listAllSessions,
+  getActiveSession,
+  readSessionBackup,
+  getBackupStats,
+  cleanupOldBackups,
+  getSessionsForFeature,
+  getFeaturesForSession,
+  listFeatureSessionLinks,
   batchGetFeatureSessionSummaries,
-  } from '../engine/conversation-backup';
+} from '../engine/conversation-backup';
 
 export function setupSessionHandlers() {
-
   // ── Session CRUD ──
 
   /** 创建新 Session */
-  ipcMain.handle('session:create', (_event, projectId: string | null, agentId: string, agentRole: string, chatMode?: string) => {
-    assertNonEmptyString('session:create', 'agentId', agentId);
-    assertNonEmptyString('session:create', 'agentRole', agentRole);
-    return createSession(projectId, agentId, agentRole, (chatMode as 'work' | 'chat' | 'deep') || 'work');
-  });
+  ipcMain.handle(
+    'session:create',
+    (_event, projectId: string | null, agentId: string, agentRole: string, chatMode?: string) => {
+      assertNonEmptyString('session:create', 'agentId', agentId);
+      assertNonEmptyString('session:create', 'agentRole', agentRole);
+      return createSession(projectId, agentId, agentRole, (chatMode as 'work' | 'chat' | 'deep') || 'work');
+    },
+  );
 
   /** 切换到指定 Session */
   ipcMain.handle('session:switch', (_event, sessionId: string) => {
@@ -72,14 +82,18 @@ export function setupSessionHandlers() {
     try {
       const { getDb } = await import('../db');
       const db = getDb();
-      const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as { backup_path: string | null } | undefined;
+      const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as
+        | { backup_path: string | null }
+        | undefined;
       if (row?.backup_path) {
         const path = await import('path');
         const dir = path.default.dirname(row.backup_path);
         await shell.openPath(dir);
         return { success: true };
       }
-    } catch { /* fallthrough */ }
+    } catch {
+      /* fallthrough */
+    }
     return { success: false, error: 'No backup path found' };
   });
 
@@ -135,7 +149,39 @@ export function setupSessionHandlers() {
     assertNonEmptyString('session:update-chat-mode', 'chatMode', chatMode);
     const { getDb } = require('../db');
     const db = getDb();
-    db.prepare("UPDATE sessions SET chat_mode = ? WHERE id = ?").run(chatMode, sessionId);
+    db.prepare('UPDATE sessions SET chat_mode = ? WHERE id = ?').run(chatMode, sessionId);
     return { success: true };
+  });
+
+  /** v27.0: 切换会话置顶状态 */
+  ipcMain.handle('session:toggle-pin', (_event, sessionId: string) => {
+    assertNonEmptyString('session:toggle-pin', 'sessionId', sessionId);
+    const { getDb } = require('../db');
+    const db = getDb();
+    // 翻转 pinned: 0→1, 1→0
+    db.prepare('UPDATE sessions SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?').run(sessionId);
+    const row = db.prepare('SELECT pinned FROM sessions WHERE id = ?').get(sessionId) as { pinned: number } | undefined;
+    return { success: true, pinned: !!row?.pinned };
+  });
+
+  /** v27.0: 重命名会话 (自定义标题) */
+  ipcMain.handle('session:rename', (_event, sessionId: string, customTitle: string | null) => {
+    assertNonEmptyString('session:rename', 'sessionId', sessionId);
+    const { getDb } = require('../db');
+    const db = getDb();
+    // null 或空字符串 = 清除自定义标题，恢复默认
+    const title = customTitle?.trim() || null;
+    db.prepare('UPDATE sessions SET custom_title = ? WHERE id = ?').run(title, sessionId);
+    return { success: true, customTitle: title };
+  });
+
+  /** v27.0: 切换会话隐藏状态 */
+  ipcMain.handle('session:toggle-hidden', (_event, sessionId: string) => {
+    assertNonEmptyString('session:toggle-hidden', 'sessionId', sessionId);
+    const { getDb } = require('../db');
+    const db = getDb();
+    db.prepare('UPDATE sessions SET hidden = CASE WHEN hidden = 1 THEN 0 ELSE 1 END WHERE id = ?').run(sessionId);
+    const row = db.prepare('SELECT hidden FROM sessions WHERE id = ?').get(sessionId) as { hidden: number } | undefined;
+    return { success: true, hidden: !!row?.hidden };
   });
 }

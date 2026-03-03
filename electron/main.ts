@@ -2,7 +2,7 @@
 import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';
-import { setupSettingsHandlers } from './ipc/settings';
+import { setupSettingsHandlers, initSearchConfigFromDb } from './ipc/settings';
 import { setupWorkspaceHandlers } from './ipc/workspace';
 import { setupEventHandlers } from './ipc/events';
 import { setupMcpHandlers, initMcpAndSkills, shutdownMcpAndSkills } from './ipc/mcp';
@@ -127,13 +127,13 @@ app.whenReady().then(async () => {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self';" +
-          " script-src 'self' 'unsafe-inline' 'unsafe-eval';" +
-          " style-src 'self' 'unsafe-inline';" +
-          " img-src 'self' data: https:;" +
-          " connect-src 'self' https: http: ws: wss:;" +
-          " font-src 'self' data:;" +
-          " object-src 'none';" +
-          " base-uri 'self'"
+            " script-src 'self' 'unsafe-inline' 'unsafe-eval';" +
+            " style-src 'self' 'unsafe-inline';" +
+            " img-src 'self' data: https:;" +
+            " connect-src 'self' https: http: ws: wss:;" +
+            " font-src 'self' data:;" +
+            " object-src 'none';" +
+            " base-uri 'self'",
         ],
       },
     });
@@ -148,6 +148,7 @@ app.whenReady().then(async () => {
 
     // 注册 IPC 处理器
     setupSettingsHandlers();
+    initSearchConfigFromDb(); // v24.0: 搜索引擎 key 从 DB 加载到 search-provider
     setupLLMHandlers();
     setupProjectHandlers();
     setupWorkspaceHandlers();
@@ -160,7 +161,9 @@ app.whenReady().then(async () => {
     registerWorkflowHandlers();
 
     // 自动连接 MCP 服务器 + 加载技能目录 (不阻塞窗口创建)
-    initMcpAndSkills().catch(() => { /* 启动时失败不阻塞 */ });
+    initMcpAndSkills().catch(() => {
+      /* 启动时失败不阻塞 */
+    });
 
     // v7.0: 启动管家守护进程 (心跳/事件钩子/定时任务)
     startDaemon();
@@ -172,9 +175,9 @@ app.whenReady().then(async () => {
     dialog.showErrorBox(
       '启动失败 — 智械母机 AutoMater',
       `应用初始化时发生错误，请截图反馈：\n\n${msg}\n\n` +
-      '可尝试的修复方式：\n' +
-      '1. 完全退出后重新打开\n' +
-      '2. 删除 %APPDATA%/automater/data/automater.db 后重试（会丢失历史数据）'
+        '可尝试的修复方式：\n' +
+        '1. 完全退出后重新打开\n' +
+        '2. 删除 %APPDATA%/automater/data/automater.db 后重试（会丢失历史数据）',
     );
   }
 

@@ -614,9 +614,25 @@ interface AutoMaterAPI {
     getRanked(): Promise<Array<SkillEvolutionEntry & { score: number }>>;
   };
 
-  /** v5.1: 文件夹选择对话框 */
+  /** v5.1: 文件夹/文件选择对话框 */
   dialog: {
     openDirectory(title?: string): Promise<{ canceled: boolean; filePaths: string[] }>;
+    /** v28.0: 打开文件选择对话框 */
+    openFiles(options?: {
+      title?: string;
+      filters?: Array<{ name: string; extensions: string[] }>;
+      multiple?: boolean;
+    }): Promise<{ canceled: boolean; filePaths: string[] }>;
+    /** v28.0: 读取文件内容为 base64 (用于附件上传) */
+    readFileBase64(filePath: string): Promise<{
+      success: boolean;
+      name?: string;
+      type?: 'image' | 'file';
+      data?: string;
+      mimeType?: string;
+      size?: number;
+      error?: string;
+    }>;
   };
 
   /** v5.4 → v7.0: 元Agent对话 + 管理 + 记忆 */
@@ -1050,6 +1066,16 @@ interface AppSettings {
   zoomFactor?: number;
   /** 用户自定义模型定价 ($/1K tokens)。key = 模型名 */
   modelPricing?: Record<string, ModelPricingEntry>;
+  /** 搜索引擎 — Brave Search API Key */
+  braveSearchApiKey?: string;
+  /** 搜索引擎 — Serper.dev API Key */
+  serperApiKey?: string;
+  /** 搜索引擎 — Tavily API Key */
+  tavilyApiKey?: string;
+  /** 搜索引擎 — Jina AI API Key (2025 起需要 Bearer token) */
+  jinaApiKey?: string;
+  /** 搜索引擎 — SearXNG 实例 URL */
+  searxngUrl?: string;
 }
 
 /** MCP 服务器配置 (v5.0) */

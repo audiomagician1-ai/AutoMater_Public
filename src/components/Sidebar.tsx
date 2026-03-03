@@ -2,23 +2,24 @@
 
 const globalNavItems: { id: GlobalPageId; icon: string; label: string }[] = [
   { id: 'projects', icon: '📁', label: '项目' },
-  { id: 'guide',    icon: '📖', label: '教程' },
+  { id: 'guide', icon: '📖', label: '教程' },
   { id: 'settings', icon: '⚙️', label: '设置' },
 ];
 
 const projectNavItems: { id: ProjectPageId; icon: string; label: string }[] = [
-  { id: 'overview',  icon: '🗺️', label: '全景' },
-  { id: 'wish',      icon: '✨', label: '许愿' },
-  { id: 'board',     icon: '📋', label: '看板' },
-  { id: 'docs',      icon: '📄', label: '文档' },
-  { id: 'workflow',  icon: '🔄', label: '工作流' },
-  { id: 'team',      icon: '👥', label: '团队' },
-  { id: 'context',   icon: '🧠', label: '上下文' },
-  { id: 'timeline',  icon: '⏳', label: '时间线' },
-  { id: 'sessions',  icon: '📼', label: '会话' },
-  { id: 'output',    icon: '📦', label: '产出' },
-  { id: 'logs',      icon: '📜', label: '日志' },
-  { id: 'guide',     icon: '📖', label: '教程' },
+  { id: 'overview', icon: '🗺️', label: '全景' },
+  { id: 'wish', icon: '✨', label: '许愿' },
+  { id: 'board', icon: '📋', label: '看板' },
+  { id: 'docs', icon: '📄', label: '文档' },
+  { id: 'workflow', icon: '🔄', label: '工作流' },
+  { id: 'team', icon: '👥', label: '团队' },
+  { id: 'context', icon: '🧠', label: '上下文' },
+  { id: 'timeline', icon: '⏳', label: '时间线' },
+  { id: 'sessions', icon: '📼', label: '会话' },
+  { id: 'output', icon: '📦', label: '产出' },
+  { id: 'git', icon: '🔀', label: '版本' },
+  { id: 'logs', icon: '📜', label: '日志' },
+  { id: 'guide', icon: '📖', label: '教程' },
 ];
 
 export function Sidebar() {
@@ -41,7 +42,10 @@ export function Sidebar() {
       <div
         className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center text-sm font-bold shadow-lg shadow-forge-500/20 mb-3 cursor-pointer select-none hover:shadow-forge-500/40 hover:scale-105 transition-all duration-300 z-10"
         title="智械母机 AutoMater"
-        onClick={() => { if (insideProject) exitProject(); else setGlobalPage('projects'); }}
+        onClick={() => {
+          if (insideProject) exitProject();
+          else setGlobalPage('projects');
+        }}
       >
         F
         <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-white/0 to-white/10 pointer-events-none" />
@@ -70,9 +74,11 @@ export function Sidebar() {
                 }}
                 className={`
                   relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 text-xs group
-                  ${projectPage === item.id
-                    ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
-                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'}
+                  ${
+                    projectPage === item.id
+                      ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
+                      : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'
+                  }
                 `}
                 title={item.label}
               >
@@ -96,9 +102,11 @@ export function Sidebar() {
               onClick={() => setGlobalPage(item.id)}
               className={`
                 w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 text-xs group
-                ${globalPage === item.id
-                  ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'}
+                ${
+                  globalPage === item.id
+                    ? 'bg-forge-600/20 text-forge-400 shadow-inner shadow-forge-500/10 ring-1 ring-forge-500/20'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-black/20'
+                }
               `}
               title={item.label}
             >
