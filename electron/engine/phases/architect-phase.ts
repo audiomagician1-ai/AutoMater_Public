@@ -13,7 +13,8 @@ import {
   emitEvent, createCheckpoint,
   resolveMemberModel,
   ARCHITECT_SYSTEM_PROMPT,
-  type AppSettings, type ProjectRow, type ParsedFeature,
+  type AppSettings, type ProjectRow, type ParsedFeature, type PhaseResult,
+  makePhaseResult,
 } from './shared';
 
 const _log = createLogger('phase:architect');
@@ -21,8 +22,9 @@ const _log = createLogger('phase:architect');
 export async function phaseArchitect(
   projectId: string, project: ProjectRow, features: ParsedFeature[], settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string | null,
-): Promise<void> {
-  if (signal.aborted) return;
+): Promise<PhaseResult> {
+  const startTime = Date.now();
+  if (signal.aborted) return makePhaseResult('architect', 'skipped', '中止', startTime);
 
   const db = getDb();
   const archId = 'arch-0';  // 固定 ID: 复用同一 Architect Agent
@@ -68,10 +70,14 @@ export async function phaseArchitect(
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `✅ 架构 + 产品设计完成 (${archResult.inputTokens + archResult.outputTokens} tokens, $${archCost.toFixed(4)})` });
     emitEvent({ projectId, agentId: archId, type: 'phase:architect:end', data: { tokens: archResult.inputTokens + archResult.outputTokens, cost: archCost }, inputTokens: archResult.inputTokens, outputTokens: archResult.outputTokens, costUsd: archCost });
     createCheckpoint(projectId, '架构 + 产品设计完成');
+    return makePhaseResult('architect', 'success',
+      `架构+产品设计完成 (${features.length} features)`,
+      startTime, { costUsd: archCost });
   } catch (err: unknown) {
-    if (signal.aborted) return;
+    if (signal.aborted) return makePhaseResult('architect', 'skipped', '中止', startTime);
     const errMsg = err instanceof Error ? err.message : String(err);
     sendToUI(win, 'agent:log', { projectId, agentId: archId, content: `⚠️ 架构设计失败 (非致命): ${errMsg}` });
     db.prepare("UPDATE agents SET status = 'error' WHERE id = ? AND project_id = ?").run(archId, projectId);
+    return makePhaseResult('architect', 'failure', `架构设计失败: ${errMsg.slice(0, 100)}`, startTime);
   }
 }

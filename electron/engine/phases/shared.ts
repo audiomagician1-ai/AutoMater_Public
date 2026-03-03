@@ -30,7 +30,8 @@ export type { GenericReactResult } from '../react-loop';
 export { runQAReview, generateTestSkeleton } from '../qa-loop';
 
 // ── Types ──
-export type { AppSettings, ProjectRow, FeatureRow, CountResult, ParsedFeature, EnrichedFeature, WorkflowStageId } from '../types';
+export type { AppSettings, ProjectRow, FeatureRow, CountResult, ParsedFeature, EnrichedFeature, WorkflowStageId, PhaseResult, PhaseStatus, PMPhaseResult } from '../types';
+export { makePhaseResult } from '../types';
 export {
   PM_SYSTEM_PROMPT, ARCHITECT_SYSTEM_PROMPT,
   PM_DESIGN_DOC_PROMPT, PM_SPLIT_REQS_PROMPT, QA_TEST_SPEC_PROMPT, PM_ACCEPTANCE_PROMPT,

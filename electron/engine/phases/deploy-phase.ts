@@ -26,7 +26,7 @@ import {
   spawnAgent, reactAgentLoop, getTeamMemberMaxIterations,
   emitEvent, commitWorkspace,
   resolveMemberModel,
-  type AppSettings, type GenericReactResult,
+  type AppSettings, type GenericReactResult, type PhaseResult, makePhaseResult,
 } from './shared';
 
 import type { GitProviderConfig } from '../git-provider';
@@ -265,8 +265,9 @@ export async function phaseDeployPipeline(
   signal: AbortSignal,
   workspacePath: string,
   gitConfig: GitProviderConfig,
-): Promise<void> {
-  if (signal.aborted) return;
+): Promise<PhaseResult> {
+  const startTime = Date.now();
+  if (signal.aborted) return makePhaseResult('devops_build', 'skipped', '中止', startTime);
 
   const db = getDb();
   const devopsId = 'devops-0';  // 固定 ID: 复用同一 DevOps Agent
@@ -296,8 +297,8 @@ export async function phaseDeployPipeline(
 
   if (!hasDeployTarget) {
     // ── 快速模式: 无部署目标，仅做构建验证 (兼容旧 devops-phase 行为) ──
-    await quickBuildVerify(projectId, devopsId, settings, win, signal, workspacePath, gitConfig, deployCtx);
-    return;
+    const buildResult = await quickBuildVerify(projectId, devopsId, settings, win, signal, workspacePath, gitConfig, deployCtx);
+    return buildResult ?? makePhaseResult('devops_build', 'success', '快速构建验证完成', startTime);
   }
 
   // ── ReAct 模式: 全流程部署 ──
@@ -360,6 +361,9 @@ export async function phaseDeployPipeline(
       hasDeployTarget: true,
     },
   });
+  return makePhaseResult('devops_build', result.completed ? 'success' : 'partial',
+    result.completed ? `部署完成 (${result.iterations} 轮, $${result.totalCost.toFixed(4)})` : `部署未完全完成`,
+    startTime, { costUsd: result.totalCost });
 }
 
 // ═══════════════════════════════════════
@@ -375,7 +379,8 @@ async function quickBuildVerify(
   workspacePath: string,
   gitConfig: GitProviderConfig,
   ctx: DeployContext,
-): Promise<void> {
+): Promise<PhaseResult> {
+  const startTime = Date.now();
   const db = getDb();
 
   const buildSteps: Array<{ name: string; cmd: string; critical: boolean }> = [];
@@ -488,4 +493,7 @@ async function quickBuildVerify(
     projectId, agentId: devopsId, type: 'phase:deploy:end',
     data: { completed: allPassed, steps: results.length, passed: passedCount, hasDeployTarget: false },
   });
+  return makePhaseResult('devops_build', allPassed ? 'success' : 'partial',
+    allPassed ? `构建验证全部通过 (${passedCount} 步骤)` : `构建验证部分失败 (${passedCount}/${results.length})`,
+    startTime);
 }

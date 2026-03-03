@@ -76,6 +76,8 @@ export interface ToolContext {
   featureId?: string;
   /** v16.0: 项目级权限开关 */
   permissions?: AgentPermissions;
+  /** v23.0: 当前调用角色 — 用于 meta-agent 路径安全防护 */
+  role?: import('./tool-permissions').AgentRole;
 }
 
 // ═══════════════════════════════════════

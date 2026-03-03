@@ -165,6 +165,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
   ],
   // v6.1: 元Agent (管家) — 只读工具集 + 搜索 + 项目查询 + 需求派发
   //   模式裁剪在 meta-agent.ts 中按 mode 动态过滤
+  //   v23.0: 移除 git_log — 管家无权访问 git 历史，防止信息泄露
   'meta-agent': [
     'think', 'task_complete',
     'read_file', 'list_files', 'search_files', 'glob_files',
@@ -173,7 +174,6 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'web_search_boost', 'deep_research',  // v8.0
     'download_file', 'search_images',  // v19.0
     'memory_read', 'memory_append',
-    'git_log',
     'create_wish',  // v21.0: 派发任务给团队
     // v22.0: 深度讨论模式 — 可输出文件 + 派发任务
     'write_file', 'edit_file', 'batch_edit',

@@ -13,7 +13,7 @@ import {
   backupConversation, getOrCreateSession, linkFeatureSession, completeFeatureSessionLink,
   incrementalUpdate, type ProjectSkeleton,
   PM_SPLIT_REQS_PROMPT, QA_TEST_SPEC_PROMPT,
-  type AppSettings, type ParsedFeature,
+  type AppSettings, type ParsedFeature, type PhaseResult, makePhaseResult,
 } from './shared';
 
 const log = createLogger('phase:docs');
@@ -65,7 +65,8 @@ function splitBatchOutput(content: string, featureIds: string[]): Record<string,
 export async function phaseReqsAndTestSpecs(
   projectId: string, features: ParsedFeature[], settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal, workspacePath: string,
-): Promise<void> {
+): Promise<PhaseResult> {
+  const startTime = Date.now();
   const db = getDb();
   const designContext = buildDesignContext(workspacePath, 4000);
 
@@ -210,6 +211,9 @@ export async function phaseReqsAndTestSpecs(
 
   emitEvent({ projectId, agentId: 'system', type: 'phase:docs:end', data: { featureCount: features.length } });
   createCheckpoint(projectId, `Phase 3 完成: ${features.length} Feature 文档已生成`);
+  return makePhaseResult('docs_gen', consistency.ok ? 'success' : 'partial',
+    `${features.length} 个 Feature 文档已生成${consistency.ok ? '' : ` (一致性检查有 ${consistency.issues.length} 个问题)`}`,
+    startTime, { artifacts: { featureIds: featureIds } });
 }
 
 // ═══════════════════════════════════════
@@ -220,11 +224,12 @@ export async function phaseIncrementalDocSync(
   projectId: string,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string,
-): Promise<void> {
+): Promise<PhaseResult> {
+  const startTime = Date.now();
   const skeletonPath = path.join(workspacePath, '.automater/analysis/skeleton.json');
   if (!fs.existsSync(skeletonPath)) {
     log.debug('No skeleton.json found, skipping incremental doc sync');
-    return;
+    return makePhaseResult('incremental_doc_sync', 'skipped', '无 skeleton.json, 跳过', startTime);
   }
 
   sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '📝 Phase 4c: 增量文档同步 — 根据代码变更更新模块摘要...' });
@@ -245,7 +250,7 @@ export async function phaseIncrementalDocSync(
 
     if (changedFiles.length === 0) {
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ↳ 无代码变更，跳过文档同步' });
-      return;
+      return makePhaseResult('incremental_doc_sync', 'skipped', '无代码变更', startTime);
     }
 
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ↳ 检测到 ${changedFiles.length} 个文件变更，更新受影响模块...` });
@@ -261,10 +266,14 @@ export async function phaseIncrementalDocSync(
     }
 
     emitEvent({ projectId, agentId: 'system', type: 'phase:dev:end', data: { incrementalDocSync: true, updatedModules: result.updatedModules.length } });
+    return makePhaseResult('incremental_doc_sync', 'success',
+      `更新了 ${result.updatedModules.length} 个模块摘要`,
+      startTime);
   } catch (err: unknown) {
-    if (signal.aborted) return;
+    if (signal.aborted) return makePhaseResult('incremental_doc_sync', 'skipped', '中止', startTime);
     const errMsg = err instanceof Error ? err.message : String(err);
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  ⚠️ 增量文档同步失败 (非致命): ${errMsg}` });
     log.warn('Incremental doc sync failed', { error: err instanceof Error ? err.message : String(err) });
+    return makePhaseResult('incremental_doc_sync', 'failure', `失败: ${errMsg.slice(0, 100)}`, startTime);
   }
 }

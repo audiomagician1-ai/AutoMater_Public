@@ -588,6 +588,7 @@ interface AutoMaterAPI {
       history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
       attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
       chatMode?: string,
+      sessionId?: string | null,
     ): Promise<{
       reply: string;
       intent: 'wish' | 'query' | 'workflow' | 'general';

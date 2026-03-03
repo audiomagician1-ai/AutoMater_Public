@@ -16,6 +16,24 @@ import { initDatabase } from './db';
 
 let mainWindow: BrowserWindow | null = null;
 
+/* ── 单实例锁 ──
+ * 阻止用户多次双击启动多个进程。
+ * 第二个实例启动时会自动退出, 并把焦点切回已有窗口。
+ */
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  // 已有实例在运行 → 立即退出
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // 第二个实例尝试启动时, 把已有窗口拉到前台
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 /** 允许的缩放倍率 (50%~300%) */
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3.0;

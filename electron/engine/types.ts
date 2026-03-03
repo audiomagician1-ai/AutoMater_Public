@@ -223,6 +223,16 @@ export type WorkflowStageId =
   | 'perf_benchmark'
   | 'finalize';
 
+/** 阶段转移条件 (v25.0 DAG 工作流) */
+export interface WorkflowTransition {
+  /** 目标阶段 ID */
+  target: WorkflowStageId;
+  /** 触发条件: success=前序成功, failure=前序失败, always=无条件 */
+  condition: 'success' | 'failure' | 'always';
+  /** failure 路径的最大重试次数 (防止死循环, 默认 3) */
+  maxRetries?: number;
+}
+
 /** 工作流中每个阶段的配置 */
 export interface WorkflowStage {
   id: WorkflowStageId;
@@ -233,6 +243,12 @@ export interface WorkflowStage {
   config?: Record<string, unknown>;
   /** 是否可跳过 (用户可在运行前 toggle) */
   skippable?: boolean;
+  /**
+   * v25.0: 转移规则 (DAG 支持)
+   * 未定义时走默认: 成功→数组中下一个阶段, 失败→终止
+   * 定义后可实现循环 (如 QA→Dev 回退) 和条件分支
+   */
+  transitions?: WorkflowTransition[];
 }
 
 /** 工作流预设记录 (DB row) */
@@ -262,6 +278,57 @@ export interface WorkflowPreset {
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// ═══════════════════════════════════════
+// Phase Result (v25.0 — 阶段结果标准化)
+// ═══════════════════════════════════════
+
+export type PhaseStatus = 'success' | 'failure' | 'partial' | 'skipped';
+
+/**
+ * PhaseResult — 每个阶段的标准化输出
+ * orchestrator 状态机根据 status 解析 transitions 决定下一步
+ */
+export interface PhaseResult {
+  stageId: WorkflowStageId;
+  status: PhaseStatus;
+  /** 结论摘要 (200字内), 供后续阶段的 Prompt 引用 */
+  summary: string;
+  /** 结构化产物 (可选) */
+  artifacts?: {
+    featureIds?: string[];
+    filesCreated?: string[];
+    testResults?: { passed: number; failed: number };
+    reviewScore?: number;
+  };
+  /** 耗时 ms */
+  durationMs: number;
+  /** 成本 USD */
+  costUsd: number;
+}
+
+/** 辅助: 快速构建 PhaseResult */
+export function makePhaseResult(
+  stageId: WorkflowStageId,
+  status: PhaseStatus,
+  summary: string,
+  startTime: number,
+  extras?: Partial<Pick<PhaseResult, 'artifacts' | 'costUsd'>>,
+): PhaseResult {
+  return {
+    stageId,
+    status,
+    summary,
+    durationMs: Date.now() - startTime,
+    costUsd: extras?.costUsd ?? 0,
+    ...(extras?.artifacts ? { artifacts: extras.artifacts } : {}),
+  };
+}
+
+/** PM 阶段的扩展结果 — 附带产出的 Feature 列表 */
+export interface PMPhaseResult extends PhaseResult {
+  features: ParsedFeature[] | null;
 }
 
 // ═══════════════════════════════════════

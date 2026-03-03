@@ -108,7 +108,7 @@ import {
   type NginxSiteConfig,
   type DockerfileConfig,
 } from './deploy-tools';
-import { executeTool, checkExternalReadPermission } from './tool-executor';
+import { executeTool, checkExternalReadPermission, checkMetaAgentPathBlock } from './tool-executor';
 import { executeMcpTool, executeSkillTool } from './tool-handlers-external';
 import { compressSubAgentResult, compressParallelResults } from './sub-agent-compressor';
 
@@ -312,6 +312,9 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
   // ── v17.0: Enhanced File Operations (async) ──
   if (call.name === 'read_file') {
     const inputPath = call.arguments.path || '';
+    // v23.0: meta-agent 路径安全防护
+    const metaBlock = checkMetaAgentPathBlock(inputPath, ctx);
+    if (metaBlock) return { success: false, output: metaBlock, action: 'read' };
     const normalizedInput = path.normalize(inputPath);
     const offset = Math.max(1, call.arguments.offset ?? 1);
     const limit = Math.min(500, Math.max(1, call.arguments.limit ?? ctx.permissions?.readFileLineLimit ?? 200));

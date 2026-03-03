@@ -10,7 +10,7 @@ import {
   emitEvent, createCheckpoint,
   commitWorkspace,
   extractFromProjectMemory,
-  type AppSettings,
+  type AppSettings, type PhaseResult, makePhaseResult,
 } from './shared';
 import { contributeToGlobal } from '../experience-library';
 
@@ -20,8 +20,9 @@ export async function phaseFinalize(
   projectId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string | null, projectName: string,
-): Promise<void> {
-  if (signal.aborted) return;
+): Promise<PhaseResult> {
+  const startTime = Date.now();
+  if (signal.aborted) return makePhaseResult('finalize', 'skipped', '中止', startTime);
 
   const db = getDb();
   const stats = db.prepare(`
@@ -86,4 +87,10 @@ export async function phaseFinalize(
       log.warn('Experience library global contribution failed', { error: String(err) });
     }
   }
+
+  return makePhaseResult('finalize', allPassed ? 'success' : 'partial',
+    `${stats.passed}/${stats.total} features 通过${stats.failed > 0 ? `, ${stats.failed} 失败` : ''}`,
+    startTime, {
+      artifacts: { testResults: { passed: stats.passed, failed: stats.failed } },
+    });
 }

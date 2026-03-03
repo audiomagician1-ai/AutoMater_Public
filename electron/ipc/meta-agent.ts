@@ -727,6 +727,7 @@ export function setupMetaAgentHandlers() {
     history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
     attachments?: ChatAttachment[],
     chatMode?: string,
+    sessionId?: string | null,
   ) => {
     assertNonEmptyString('meta-agent:chat', 'message', message);
     const settings = getSettings();
@@ -823,7 +824,7 @@ export function setupMetaAgentHandlers() {
         'think', 'task_complete',
         'read_file', 'list_files', 'search_files', 'glob_files',
         'code_search', 'code_search_files', 'read_many_files', 'repo_map', 'code_graph_query',
-        'web_search', 'fetch_url', 'memory_read', 'memory_append', 'git_log',
+        'web_search', 'fetch_url', 'memory_read', 'memory_append',
         'admin_list_members', 'admin_add_member', 'admin_update_member', 'admin_remove_member',
         'admin_list_workflows', 'admin_activate_workflow', 'admin_update_workflow',
         'admin_update_project', 'admin_get_available_stages',
@@ -845,6 +846,7 @@ export function setupMetaAgentHandlers() {
       permissions: {
         readFileLineLimit: config.readFileLineLimit || 1000,
       },
+      role: 'meta-agent',  // v23.0: 路径安全防护标识
     };
 
     let totalIn = 0;
@@ -1099,6 +1101,7 @@ const result = await callLLMWithTools(
 
     // v8.0: 备份元 Agent 对话
     backupConversation({
+      sessionId: sessionId || undefined,
       projectId,
       agentId,
       agentRole: 'meta-agent',

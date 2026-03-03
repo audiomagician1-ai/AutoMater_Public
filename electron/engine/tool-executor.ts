@@ -44,6 +44,37 @@ const _log = createLogger('tool-executor');
 const TOOL_OUTPUT_MAX_TOKENS = 4000;
 
 // ═══════════════════════════════════════
+// v23.0: Meta-Agent 路径安全防护
+// ═══════════════════════════════════════
+
+/**
+ * 禁止 meta-agent 访问的路径模式。
+ * 防止管家通过 read_file/list_files/search_files/code_search 读取
+ * git 历史、开发文档、数据库等敏感信息。
+ */
+const META_AGENT_BLOCKED_PATTERNS = [
+  /[\/\\]\.git[\/\\]/i,         // .git/ 目录内容
+  /[\/\\]\.git$/i,               // .git 目录本身
+  /^\.git[\/\\]/i,               // 相对路径 .git/
+  /^\.git$/i,                     // 相对路径 .git
+];
+
+/**
+ * 检查 meta-agent 是否被禁止访问该路径。
+ * @returns 如果被禁止，返回错误消息；否则返回 null。
+ */
+export function checkMetaAgentPathBlock(inputPath: string, ctx: ToolContext): string | null {
+  if (ctx.role !== 'meta-agent') return null;
+  const normalizedForCheck = path.normalize(inputPath || '').replace(/\\/g, '/');
+  for (const pattern of META_AGENT_BLOCKED_PATTERNS) {
+    if (pattern.test(inputPath) || pattern.test(normalizedForCheck)) {
+      return `安全限制: 管家无权访问 ${inputPath}。此路径包含敏感的开发信息。`;
+    }
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════
 // Path Security
 // ═══════════════════════════════════════
 
@@ -108,6 +139,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       // 此处作为 fallback: 若意外走到同步路径, 仍提供基本读取能力
       case 'read_file': {
         const rfInput = call.arguments.path || '';
+        // v23.0: meta-agent 路径安全防护
+        const rfBlock = checkMetaAgentPathBlock(rfInput, ctx);
+        if (rfBlock) return { success: false, output: rfBlock, action: 'read' };
         const rfNorm = path.normalize(rfInput);
         let rfTarget: string;
         if (path.isAbsolute(rfNorm)) {
@@ -232,6 +266,9 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       case 'list_files': {
         const dir = call.arguments.directory || '';
+        // v23.0: meta-agent 路径安全防护
+        const lfBlock = checkMetaAgentPathBlock(dir, ctx);
+        if (lfBlock) return { success: false, output: lfBlock, action: 'read' };
         const maxDepth = call.arguments.max_depth ?? 3;
         const normalizedDir = path.normalize(dir || '.');
         let tree: FileTreeNode[];

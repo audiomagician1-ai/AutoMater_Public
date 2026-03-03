@@ -412,7 +412,7 @@ export function MetaAgentPanel() {
     try {
       const currentMsgs = messagesMap.get(activeChatKey) || [];
       const history = [...currentMsgs].slice(-20).map(m => ({ role: m.role as string, content: m.content }));
-      const result = await window.automater.metaAgent.chat(currentProjectId, userMsg.content, history);
+      const result = await window.automater.metaAgent.chat(currentProjectId, userMsg.content, history, undefined, undefined, sessionId);
       updateLastAssistant(activeChatKey, result.reply);
 
       if (sessionId) {

@@ -239,7 +239,8 @@ contextBridge.exposeInMainWorld('automater', {
       history?: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
       attachments?: Array<{ type: string; name: string; data: string; mimeType: string }>,
       chatMode?: string,
-    ) => ipcRenderer.invoke('meta-agent:chat', projectId, message, history, attachments, chatMode),
+      sessionId?: string | null,
+    ) => ipcRenderer.invoke('meta-agent:chat', projectId, message, history, attachments, chatMode, sessionId),
     // Config
     getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
     saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:config:save', config),

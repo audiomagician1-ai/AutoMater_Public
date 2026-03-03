@@ -134,6 +134,7 @@ function SimpleMdRenderer({ lines }: { lines: string[] }) {
     } else if (line.match(/^\d+\. /)) {
       // Numbered list
       const match = line.match(/^(\d+)\. (.+)/);
+      if (!match) continue;
       elements.push(
         <div key={i} className="flex gap-2 text-slate-400 ml-2 my-0.5">
           <span className="text-slate-500 flex-shrink-0 w-4 text-right">{match[1]}.</span>

@@ -10,7 +10,7 @@ import {
   spawnAgent,
   emitEvent,
   commitWorkspace,
-  type AppSettings,
+  type AppSettings, type PhaseResult, makePhaseResult,
 } from './shared';
 import { safeJsonParse } from '../safe-json';
 
@@ -20,8 +20,9 @@ export async function phaseDevOpsBuild(
   projectId: string, settings: AppSettings,
   win: BrowserWindow | null, signal: AbortSignal,
   workspacePath: string,
-): Promise<void> {
-  if (signal.aborted) return;
+): Promise<PhaseResult> {
+  const startTime = Date.now();
+  if (signal.aborted) return makePhaseResult('devops_build', 'skipped', '中止', startTime);
 
   const db = getDb();
   const devopsId = 'devops-0';  // 固定 ID: 复用同一 DevOps Agent
@@ -70,7 +71,7 @@ export async function phaseDevOpsBuild(
     sendToUI(win, 'agent:log', { projectId, agentId: devopsId, content: '  ↳ 未检测到已知构建系统，跳过' });
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(devopsId, projectId);
     sendToUI(win, 'agent:status', { projectId, agentId: devopsId, status: 'idle' });
-    return;
+    return makePhaseResult('devops_build', 'skipped', '未检测到构建系统', startTime);
   }
 
   let allPassed = true;
@@ -111,4 +112,7 @@ export async function phaseDevOpsBuild(
   if (workspacePath && allPassed) {
     await commitWorkspace(workspacePath, 'AutoMater: DevOps build verification passed');
   }
+  return makePhaseResult('devops_build', allPassed ? 'success' : 'partial',
+    `构建验证 ${passedCount}/${results.length} 通过`,
+    startTime, { artifacts: { testResults: { passed: passedCount, failed: results.length - passedCount } } });
 }

@@ -86,6 +86,7 @@ function ModeSwitchBadge({
   const [open, setOpen] = useState(false);
   const [hoveredMode, setHoveredMode] = useState<ChatMode | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const info = CHAT_MODE_INFO[currentMode];
 
   // 关闭 popover 当点击外部
@@ -113,24 +114,31 @@ function ModeSwitchBadge({
     setOpen(false);
   };
 
+  const handleToggle = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    if (!open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setPopoverPos({ top: rect.bottom + 4, left: rect.right });
+    }
+    setOpen(!open);
+  };
+
   return (
     <div className="relative shrink-0" ref={ref}>
       {/* 模式图标按钮 — 更大、可点击 */}
       <button
-        onClick={e => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
+        onClick={handleToggle}
         className={`w-6 h-6 rounded-md flex items-center justify-center text-sm hover:bg-slate-700/60 transition-all ${info.color}`}
         title={`${info.label}模式 · 点击切换`}
       >
         {info.icon}
       </button>
 
-      {/* 水平弹出的模式选择面板 */}
-      {open && (
+      {/* 使用 fixed 定位避免被 overflow 容器裁剪 */}
+      {open && popoverPos && (
         <div
-          className="absolute right-0 top-8 z-50 flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
+          className="fixed z-[60] flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
+          style={{ top: popoverPos.top, left: popoverPos.left, transform: 'translateX(-100%)' }}
           onClick={e => e.stopPropagation()}
         >
           {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
@@ -160,7 +168,7 @@ function ModeSwitchBadge({
           })}
           {/* 悬停说明浮层 */}
           {hoveredMode && (
-            <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] text-slate-300 whitespace-nowrap shadow-xl pointer-events-none z-50">
+            <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] text-slate-300 whitespace-nowrap shadow-xl pointer-events-none z-[61]">
               {CHAT_MODE_INFO[hoveredMode].desc}
             </div>
           )}
@@ -709,6 +717,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
         history,
         undefined, // attachments
         currentChatMode,
+        sessionId, // v25.0: 传递 sessionId 避免后端重复创建
       );
 
       updateLastAssistant(activeChatKey, result.reply);
