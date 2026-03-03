@@ -465,6 +465,155 @@ export function getProjectExperienceContext(
 }
 
 // ═══════════════════════════════════════
+// D5: 错误经验主动检索 (v25.0)
+// ═══════════════════════════════════════
+
+/**
+ * 从经验库中检索与错误/QA反馈相关的历史案例
+ * 用于 QA 驳回后重做、工具错误后重试时注入上下文
+ *
+ * 检索策略:
+ *   1. 从 instances 中模糊匹配 error/qaFeedback 关键词
+ *   2. 从 patterns 中检索同 domain 的相关经验
+ *   3. 格式化为提示文本，限制在 maxChars 内
+ *
+ * @param workspacePath 工作区路径
+ * @param errorContext 错误描述或 QA 反馈文本
+ * @param domains 相关领域 (可选, 用于优先匹配)
+ * @param maxChars 最大字符数
+ * @returns 格式化的经验检索文本 (空字符串 = 无相关经验)
+ */
+export function retrieveErrorExperience(
+  workspacePath: string,
+  errorContext: string,
+  domains?: string[],
+  maxChars: number = 1500,
+): string {
+  try {
+    const lib = loadProjectLibrary(workspacePath);
+    const globalLib = loadGlobalLibrary();
+
+    // 提取错误关键词 (去除路径、行号等噪声)
+    const keywords = extractErrorKeywords(errorContext);
+    if (keywords.length === 0) return '';
+
+    const sections: string[] = [];
+    let totalLen = 0;
+
+    // 1. 搜索项目 instances (qa_fail, error_fixed 优先)
+    const relevantInstances = matchInstances(lib.instances, keywords, domains);
+    if (relevantInstances.length > 0) {
+      const iLines = relevantInstances.slice(0, 5).map(inst =>
+        `- [${inst.source}] ${inst.summary}`,
+      );
+      const iSection = `## 📌 相关历史案例\n以下是本项目之前遇到的类似问题及解决方案:\n${iLines.join('\n')}`;
+      if (totalLen + iSection.length < maxChars) {
+        sections.push(iSection);
+        totalLen += iSection.length;
+      }
+    }
+
+    // 2. 搜索全局 instances (跨项目)
+    const globalInstances = matchInstances(globalLib.instances, keywords, domains);
+    if (globalInstances.length > 0 && totalLen + 200 < maxChars) {
+      const gLines = globalInstances.slice(0, 3).map(inst =>
+        `- [全局/${inst.source}] ${inst.summary}`,
+      );
+      const gSection = `## 📌 跨项目经验\n${gLines.join('\n')}`;
+      if (totalLen + gSection.length < maxChars) {
+        sections.push(gSection);
+        totalLen += gSection.length;
+      }
+    }
+
+    // 3. 搜索项目 patterns (同 domain)
+    const relevantPatterns = matchPatterns([...lib.patterns, ...globalLib.patterns], keywords, domains);
+    if (relevantPatterns.length > 0 && totalLen + 200 < maxChars) {
+      const pLines = relevantPatterns.slice(0, 3).map(p => `- [${p.domain}] ${p.text}`);
+      const pSection = `## 📘 相关经验模式\n${pLines.join('\n')}`;
+      if (totalLen + pSection.length < maxChars) {
+        sections.push(pSection);
+        totalLen += pSection.length;
+        // 标记使用
+        for (const p of relevantPatterns.slice(0, 3)) {
+          p.use_count++;
+        }
+        saveProjectLibrary(workspacePath, lib);
+      }
+    }
+
+    if (sections.length === 0) return '';
+
+    log.info(`[D5] Retrieved ${relevantInstances.length} instances + ${relevantPatterns.length} patterns for error context`);
+    return sections.join('\n\n');
+  } catch {
+    return '';
+  }
+}
+
+/** 从错误文本中提取关键词 */
+function extractErrorKeywords(errorText: string): string[] {
+  // 清理: 去除路径前缀、行号、时间戳
+  const cleaned = errorText
+    .replace(/[A-Z]:\\[\w\\\/.-]+/g, '') // Windows paths
+    .replace(/\/[\w\/.-]+/g, '')          // Unix paths
+    .replace(/:\d+:\d+/g, '')            // line:col
+    .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/g, '') // timestamps
+    .toLowerCase();
+
+  // 提取有意义的词 (长度 > 3)
+  const words = cleaned.match(/[a-z_][a-z0-9_]{2,}/g) || [];
+  // 去重并取最有辨识度的前 10 个
+  const unique = [...new Set(words)].filter(w =>
+    !['the', 'and', 'for', 'from', 'with', 'that', 'this', 'error', 'failed', 'null', 'undefined'].includes(w),
+  );
+  return unique.slice(0, 10);
+}
+
+/** 从 instances 中模糊匹配关键词 */
+function matchInstances(instances: Instance[], keywords: string[], domains?: string[]): Instance[] {
+  const scored = instances.map(inst => {
+    const text = inst.summary.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) score += 2;
+    }
+    // qa_fail 和 error_fixed 类型的加权
+    if (inst.source === 'qa_fail') score += 1;
+    if (inst.source === 'error_fixed') score += 1;
+    return { inst, score };
+  });
+
+  return scored
+    .filter(s => s.score >= 2) // 至少匹配一个关键词
+    .sort((a, b) => b.score - a.score)
+    .map(s => s.inst);
+}
+
+/** 从 patterns 中匹配 */
+function matchPatterns(patterns: Pattern[], keywords: string[], domains?: string[]): Pattern[] {
+  const domainSet = domains ? new Set(domains) : null;
+
+  const scored = patterns.map(pat => {
+    const text = pat.text.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) score += 2;
+    }
+    // domain 相关加权
+    if (domainSet?.has(pat.domain)) score += 3;
+    // 使用频率加权
+    score += Math.min(pat.use_count, 5);
+    return { pat, score };
+  });
+
+  return scored
+    .filter(s => s.score >= 3)
+    .sort((a, b) => b.score - a.score)
+    .map(s => s.pat);
+}
+
+// ═══════════════════════════════════════
 // 蒸馏到全局经验库 (项目完成时)
 // ═══════════════════════════════════════
 

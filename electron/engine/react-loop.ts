@@ -75,7 +75,7 @@ import {
   extractExperience,
   getOtherWorkersChanges,
 } from './scratchpad';
-import { getProjectExperienceContext } from './experience-library';
+import { getProjectExperienceContext, retrieveErrorExperience } from './experience-library';
 import { compressSubAgentResult } from './sub-agent-compressor';
 import { harvestPostSession } from './experience-harvester';
 import { summarizeToolResult } from './tool-result-summarizer';
@@ -586,6 +586,17 @@ export async function reactDeveloperLoop(
     }
   }
 
+  // v25.0 D5: QA 驳回时主动检索相关错误经验
+  let errorExperienceText = '';
+  if (qaFeedback && workspacePath) {
+    try {
+      const domains = inferDomainsFromFeature(feature);
+      errorExperienceText = retrieveErrorExperience(workspacePath, qaFeedback, domains, 1500);
+    } catch {
+      /* silent: error experience retrieval non-critical */
+    }
+  }
+
   // v4.0: 从 team_members 读取自定义 prompt, fallback 到内置 prompt
   const baseDevPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
   // v20.0: 按 feature category 注入特定指导
@@ -599,7 +610,7 @@ export async function reactDeveloperLoop(
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${experienceText ? experienceText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${errorExperienceText ? `\n\n${errorExperienceText}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${experienceText ? experienceText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 

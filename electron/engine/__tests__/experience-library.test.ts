@@ -52,6 +52,7 @@ import {
   tryDistillPatterns,
   formatLibraryForContext,
   compactProjectMemory,
+  retrieveErrorExperience,
   type ExperienceLibrary,
   type Instance,
 } from '../experience-library';
@@ -336,6 +337,61 @@ Header info...
       const result = compactProjectMemory(workspacePath, 1000);
       expect(result).toBe(false);
       expect(mockFs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── D5: Error Experience Retrieval ──
+
+  describe('retrieveErrorExperience', () => {
+    it('retrieves matching instances from project library', () => {
+      const lib = createEmptyLib();
+      lib.instances.push(
+        { id: 'i1', summary: 'F001 QA 驳回: tsconfig paths 与 vite alias 不同步导致编译失败', source: 'qa_fail', created_at: new Date().toISOString() },
+        { id: 'i2', summary: 'F003 完成: 用户注册功能', source: 'feature_done', created_at: new Date().toISOString() },
+        { id: 'i3', summary: 'F002 QA 驳回: vite 编译报错 module not found', source: 'qa_fail', created_at: new Date().toISOString() },
+      );
+      lib.patterns.push(
+        { id: 'p1', domain: 'typescript', text: 'tsconfig paths 与 vite resolve.alias 必须同步修改', last_validated: new Date().toISOString(), use_count: 3 },
+      );
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(lib));
+
+      const result = retrieveErrorExperience('/mock/workspace', 'tsconfig paths 配置错误, vite 编译失败', ['typescript']);
+      expect(result).toContain('tsconfig');
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it('returns empty string when no matches', () => {
+      const lib = createEmptyLib();
+      lib.instances.push(
+        { id: 'i1', summary: 'F001 完成: 按钮样式修复', source: 'feature_done', created_at: new Date().toISOString() },
+      );
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(lib));
+
+      const result = retrieveErrorExperience('/mock/workspace', 'database connection timeout');
+      expect(result).toBe('');
+    });
+
+    it('returns empty string when library does not exist', () => {
+      mockFs.existsSync.mockReturnValue(false);
+      const result = retrieveErrorExperience('/mock/workspace', 'some error');
+      // empty library → no matches
+      expect(result).toBe('');
+    });
+
+    it('respects maxChars limit', () => {
+      const lib = createEmptyLib();
+      for (let i = 0; i < 20; i++) {
+        lib.instances.push({
+          id: `i${i}`, summary: `QA 驳回 typescript 编译错误 case ${i}: module resolution failed with very long description that should use up characters`, source: 'qa_fail', created_at: new Date().toISOString(),
+        });
+      }
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(lib));
+
+      const result = retrieveErrorExperience('/mock/workspace', 'typescript module resolution', ['typescript'], 500);
+      expect(result.length).toBeLessThanOrEqual(600); // some margin for headers
     });
   });
 });
