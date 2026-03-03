@@ -319,6 +319,18 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // 首次运行: 按工作流配置执行阶段 (v12.0)
     // ═══════════════════════════════════════
 
+    // v23.0: 检查是否有需求待分析 — 无需求时跳过 PM 分析, 避免浪费 token
+    const pendingWishCount = (db.prepare(
+      "SELECT COUNT(*) as c FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing')"
+    ).get(projectId) as CountResult).c;
+    const hasWishContent = !!(project.wish?.trim()) || pendingWishCount > 0;
+
+    if (!hasWishContent) {
+      sendToUI(win, 'agent:log', {
+        projectId, agentId: 'system',
+        content: 'ℹ️ 无待分析的需求, 跳过 PM 分析阶段。请先添加需求后再启动。',
+      });
+    } else {
     // v13.1: 将 wishes 表中所有 pending/developing 的需求标记为 analyzing
     db.prepare(
       "UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE project_id = ? AND status IN ('pending', 'developing')"
@@ -356,6 +368,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'"
       ).run(projectId);
     }
+    } // end hasWishContent
   } else {
     // ═══════════════════════════════════════
     // Phase 0: PM 需求分诊 (Wish Triage) — 由 PM 执行, 非元 Agent
@@ -403,11 +416,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       ).run(projectId);
     }
 
-    // 元 Agent 只负责通用交互/路由, 不加载项目设计内容。
     // 分诊需要项目上下文(已有 Feature + 设计文档), 因此由 PM 角色执行。
     // 用户可能只是续跑未完成的 feature, 也可能带了新 wish。
     // 关键: 新 wish 可能隐含对已有 feature 的变更 — 用户不会主动说"这是变更"。
-    sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — PM 检查是否有新需求或隐式变更...' });
 
     // v13.1: 从 wishes 表收集所有待处理的需求 (pending / developing)
     // 修复: 此前只读 projects.wish (单字段)，导致 wishes 表中待分析的需求被忽略
@@ -435,6 +446,13 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     } else if (projectWish) {
       // 兜底: 如果 wishes 表没有 pending, 使用 projects.wish
       mergedWishContent = projectWish;
+    }
+
+    // v23.0: 根据是否有待处理需求显示精确日志
+    if (mergedWishContent) {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — PM 检查新需求和隐式变更...' });
+    } else {
+      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — 无新需求, 继续处理未完成的 Feature...' });
     }
 
     // 标记 wishes 为 analyzing
