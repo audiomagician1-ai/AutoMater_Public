@@ -328,8 +328,12 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     if (!hasWishContent) {
       sendToUI(win, 'agent:log', {
         projectId, agentId: 'system',
-        content: 'ℹ️ 无待分析的需求, 跳过 PM 分析阶段。请先添加需求后再启动。',
+        content: 'ℹ️ 无待分析的需求, 跳过所有阶段。请先添加需求后再启动。',
       });
+      db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      sendToUI(win, 'project:status', { projectId, status: 'paused' });
+      unregisterOrchestrator(projectId);
+      return;
     } else {
     // v13.1: 将 wishes 表中所有 pending/developing 的需求标记为 analyzing
     db.prepare(

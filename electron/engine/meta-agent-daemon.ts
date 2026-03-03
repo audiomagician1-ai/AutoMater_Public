@@ -246,6 +246,21 @@ async function runAgentCheck(type: HeartbeatLog['type'], trigger: string, custom
     return;
   }
 
+  // v23.0: 无活跃项目时跳过心跳 LLM 调用 — 避免空转浪费 token
+  // 只有定时心跳才检查 (hook/cron 有明确触发事件, 不受此限)
+  if (type === 'heartbeat') {
+    const db0 = getDb();
+    const activeCount = (db0.prepare(
+      "SELECT COUNT(*) as c FROM projects WHERE status IN ('initializing', 'analyzing', 'developing', 'reviewing', 'deploying')"
+    ).get() as { c: number }).c;
+    const totalCount = (db0.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c;
+    if (totalCount === 0 || activeCount === 0) {
+      log.debug(`Heartbeat skipped: no active projects (total=${totalCount}, active=${activeCount})`);
+      logHeartbeat({ type, trigger, result: 'ok', message: `HEARTBEAT_OK (no active projects: ${totalCount} total, ${activeCount} active)`, tokensUsed: 0 });
+      return;
+    }
+  }
+
   // Load meta-agent config for name/personality
   const db = getDb();
   const metaRow = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('config') as { value: string } | undefined;
