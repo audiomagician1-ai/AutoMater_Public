@@ -31,7 +31,7 @@ import { emitEvent } from './event-store';
 import { cleanupDecisionLog } from './decision-log';
 import { cleanExpiredLocks } from './file-lock';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
-import type { AppSettings, ProjectRow, CountResult, WorkflowStage, WorkflowStageId } from './types';
+import type { AppSettings, ProjectRow, CountResult, WorkflowStage, WorkflowStageId, PhaseResult } from './types';
 import type { GitProviderConfig } from './git-provider';
 
 // ── Phase modules (all logic extracted) ──
@@ -99,7 +99,7 @@ interface HotJoinContext {
   signal: AbortSignal;
   workspacePath: string | null;
   gitConfig: GitProviderConfig;
-  workerPromises: Set<Promise<void>>;
+  workerPromises: Set<Promise<void | PhaseResult>>;
   /** 已分配的最大 worker 编号 (用于生成唯一 workerId) */
   nextWorkerSeq: number;
   /** v16.0: 项目级权限开关 */
@@ -563,7 +563,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
   // v9.0: 注册热加入上下文 — 支持 developing 阶段动态添加 worker
   ensureHotJoinListener();
-  const workerPromiseSet = new Set<Promise<void>>();
+  const workerPromiseSet = new Set<Promise<void | PhaseResult>>();
   const hotJoinCtx: HotJoinContext = {
     projectId, qaId, settings, win, signal, workspacePath, gitConfig,
     workerPromises: workerPromiseSet,

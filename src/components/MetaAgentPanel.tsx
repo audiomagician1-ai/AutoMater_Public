@@ -76,6 +76,37 @@ function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
 }
 
 // ═══════════════════════════════════════
+// CollapsibleWorkBlockMini — 已完成对话的工作过程折叠区 (紧凑版)
+// ═══════════════════════════════════════
+
+function CollapsibleWorkBlockMini({ workMessages }: { workMessages: AgentWorkMessage[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const thinkCount = workMessages.filter(m => m.type === 'think').length;
+  const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
+
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-[9px] text-slate-500 hover:text-slate-300 transition-colors py-0.5 group"
+      >
+        <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+        <span className="w-1 h-1 rounded-full bg-slate-600 group-hover:bg-slate-400 shrink-0" />
+        <span>工作过程 · {workMessages.length} 步</span>
+        {thinkCount > 0 && <span className="text-blue-500/60">💭{thinkCount}</span>}
+        {toolCount > 0 && <span className="text-emerald-500/60">🔧{toolCount}</span>}
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1 pl-1 border-l border-slate-800/50">
+          {workMessages.map(wm => (
+            <InlineWorkMessage key={wm.id} msg={wm} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+// ═══════════════════════════════════════
 // SessionDropdown — 顶栏下拉选单
 // ═══════════════════════════════════════
 
@@ -272,6 +303,7 @@ export function MetaAgentPanel() {
   const [greeting, setGreeting] = useState('你好！我是元Agent管家。告诉我你的需求，或问我任何项目相关的问题。');
   const [panelWidth, setPanelWidth] = useState(380);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showWorkDetails, setShowWorkDetails] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
   const sendingStartMsgIndexRef = useRef(0);
@@ -523,6 +555,24 @@ export function MetaAgentPanel() {
                   strokeLinejoin="round"
                 >
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+              {/* v26.0: 工作过程开关 */}
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  setShowWorkDetails(!showWorkDetails);
+                }}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
+                  showWorkDetails
+                    ? 'text-forge-400 bg-forge-600/15 hover:bg-forge-600/25'
+                    : 'text-slate-600 hover:text-slate-400 hover:bg-slate-800'
+                }`}
+                title={showWorkDetails ? '隐藏工作过程' : '显示工作过程'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
                 </svg>
               </button>
               <button
