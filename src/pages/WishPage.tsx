@@ -677,6 +677,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   // 模式切换弹出框
   const [modePopoverOpen, setModePopoverOpen] = useState(false);
   const modePopoverRef = useRef<HTMLDivElement>(null);
+  const [modePopoverPos, setModePopoverPos] = useState<{ top: number; left: number } | null>(null);
 
   // 关闭 popover 当点击外部
   useEffect(() => {
@@ -962,7 +963,13 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
               {/* ── 可点击的模式切换器 ── */}
               <div className="relative" ref={modePopoverRef}>
                 <button
-                  onClick={() => setModePopoverOpen(!modePopoverOpen)}
+                  onClick={() => {
+                    if (!modePopoverOpen && modePopoverRef.current) {
+                      const rect = modePopoverRef.current.getBoundingClientRect();
+                      setModePopoverPos({ top: rect.bottom + 4, left: rect.left });
+                    }
+                    setModePopoverOpen(!modePopoverOpen);
+                  }}
                   className="flex items-center gap-2 text-[10px] text-slate-500 hover:text-slate-300 transition-colors group"
                 >
                   <span className={`${modeInfo.color}`}>
@@ -980,8 +987,11 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                     <path d="M3 5l3 3 3-3" />
                   </svg>
                 </button>
-                {modePopoverOpen && (
-                  <div className="absolute left-0 top-6 z-50 flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden">
+                {modePopoverOpen && modePopoverPos && (
+                  <div
+                    className="fixed z-[60] flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
+                    style={{ top: modePopoverPos.top, left: modePopoverPos.left }}
+                  >
                     {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
                       const mi = CHAT_MODE_INFO[m];
                       const isActive = m === currentChatMode;
