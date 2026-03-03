@@ -8,7 +8,7 @@
 
 import { ipcMain } from 'electron';
 import { getDb } from '../db';
-import type { WorkflowPresetRow, WorkflowPreset, WorkflowStage } from '../engine/types';
+import type { WorkflowPresetRow, WorkflowPreset, WorkflowStage, WorkflowTransition } from '../engine/types';
 import { assertNonEmptyString, assertProjectId, assertObject } from './ipc-validator';
 
 // ═══════════════════════════════════════
@@ -24,14 +24,23 @@ const BUILTIN_PRESETS: Array<{
     description: '从零开始的新项目 — 覆盖需求分析、架构设计、文档生成、开发、QA、验收、构建的全流程',
     icon: '🚀',
     stages: [
-      { id: 'pm_analysis',    label: 'PM 需求分析',  icon: '🧠', color: 'bg-violet-500' },
-      { id: 'architect',      label: '架构 + 设计',   icon: '🏗️', color: 'bg-blue-500' },
-      { id: 'docs_gen',       label: '文档生成',      icon: '📋', color: 'bg-cyan-500' },
-      { id: 'dev_implement',  label: '开发实现',      icon: '💻', color: 'bg-amber-500' },
+      { id: 'pm_analysis',    label: 'PM 需求分析',  icon: '🧠', color: 'bg-violet-500',
+        transitions: [{ target: 'architect', condition: 'success' }] },
+      { id: 'architect',      label: '架构 + 设计',   icon: '🏗️', color: 'bg-blue-500',
+        transitions: [{ target: 'docs_gen', condition: 'success' }] },
+      { id: 'docs_gen',       label: '文档生成',      icon: '📋', color: 'bg-cyan-500',
+        transitions: [{ target: 'dev_implement', condition: 'success' }] },
+      { id: 'dev_implement',  label: '开发实现',      icon: '💻', color: 'bg-amber-500',
+        transitions: [
+          { target: 'pm_acceptance', condition: 'success' },
+          { target: 'dev_implement', condition: 'failure', maxRetries: 3 },
+        ] },
       { id: 'qa_review',      label: 'QA 审查',       icon: '🧪', color: 'bg-emerald-500' },
-      { id: 'pm_acceptance',  label: 'PM 验收',       icon: '📝', color: 'bg-indigo-500', skippable: true },
+      { id: 'pm_acceptance',  label: 'PM 验收',       icon: '📝', color: 'bg-indigo-500', skippable: true,
+        transitions: [{ target: 'incremental_doc_sync', condition: 'success' }, { target: 'incremental_doc_sync', condition: 'failure' }] },
       { id: 'devops_build',   label: 'DevOps 构建',   icon: '🚀', color: 'bg-rose-500', skippable: true },
-      { id: 'incremental_doc_sync', label: '文档同步', icon: '📄', color: 'bg-teal-500', skippable: true },
+      { id: 'incremental_doc_sync', label: '文档同步', icon: '📄', color: 'bg-teal-500', skippable: true,
+        transitions: [{ target: 'devops_build', condition: 'always' }] },
       { id: 'finalize',       label: '交付',          icon: '🎯', color: 'bg-orange-500' },
     ],
   },
@@ -41,8 +50,13 @@ const BUILTIN_PRESETS: Array<{
     description: '已有架构的项目 — 跳过架构设计和文档生成，直接分诊需求后进入开发和QA，快速交付',
     icon: '⚡',
     stages: [
-      { id: 'pm_triage',      label: 'PM 分诊',      icon: '🔀', color: 'bg-violet-500' },
-      { id: 'dev_implement',  label: '开发实现',      icon: '💻', color: 'bg-amber-500' },
+      { id: 'pm_triage',      label: 'PM 分诊',      icon: '🔀', color: 'bg-violet-500',
+        transitions: [{ target: 'dev_implement', condition: 'success' }] },
+      { id: 'dev_implement',  label: '开发实现',      icon: '💻', color: 'bg-amber-500',
+        transitions: [
+          { target: 'devops_build', condition: 'success' },
+          { target: 'dev_implement', condition: 'failure', maxRetries: 2 },
+        ] },
       { id: 'qa_review',      label: 'QA 审查',       icon: '🧪', color: 'bg-emerald-500' },
       { id: 'devops_build',   label: '构建验证',      icon: '🚀', color: 'bg-rose-500', skippable: true },
       { id: 'finalize',       label: '交付',          icon: '🎯', color: 'bg-orange-500' },

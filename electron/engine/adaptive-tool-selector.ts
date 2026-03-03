@@ -153,12 +153,14 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
     priority: 3,
   },
 
-  // 子代理 — 复杂任务
+  // 子代理 — 复杂任务 / 批量工作 / 大范围探索
   sub_agents: {
     tools: ['spawn_agent', 'spawn_parallel', 'spawn_researcher', 'list_sub_agents', 'cancel_sub_agent'],
-    phases: ['planning', 'coding'],
-    condition: (p) => p.fileCount > 50,
-    priority: 4,
+    phases: ['planning', 'coding', 'testing', 'reviewing'],
+    // v26.0: 大幅降低门槛 — 即使小项目也可以用子代理做并行编码/调研
+    // 以前要 > 50 文件才给，现在只要有 5 个文件以上就给
+    condition: (p) => p.fileCount > 5,
+    priority: 6,
   },
 
   // 图片生成 — 特定需求
