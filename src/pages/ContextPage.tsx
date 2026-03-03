@@ -705,8 +705,8 @@ export function ContextPage() {
           {sortedMembers.map(member => {
             // 查找匹配快照
             let snap: ContextSnapshot | null = null;
-            if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id) ?? null;
-            else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name) ?? null;
+            if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id);
+            else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name);
             else {
               for (const [aid, s] of contextSnapshots) {
                 if (aid.includes(member.name) || aid.includes(member.role)) {
