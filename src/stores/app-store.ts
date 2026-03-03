@@ -9,7 +9,12 @@
  */
 
 import { create } from 'zustand';
-import { createNavigationSlice, type NavigationSlice, type GlobalPageId, type ProjectPageId } from './slices/navigation-slice';
+import {
+  createNavigationSlice,
+  type NavigationSlice,
+  type GlobalPageId,
+  type ProjectPageId,
+} from './slices/navigation-slice';
 import { createLogSlice, type LogSlice } from './slices/log-slice';
 import { createAgentSlice, type AgentSlice } from './slices/agent-slice';
 import { createMetaAgentSlice, type MetaAgentSlice } from './slices/meta-agent-slice';
@@ -23,12 +28,29 @@ export interface AgentWorkMessage {
   type: 'think' | 'tool-call' | 'tool-result' | 'output' | 'status' | 'sub-agent' | 'error' | 'plan';
   timestamp: number;
   content: string;
+  /** v26.0: reasoning / extended_thinking content (DeepSeek, Claude, o1) */
+  reasoning?: string;
   /** 工具调用详情 */
   tool?: {
     name: string;
     args: string;
     success?: boolean;
     outputPreview?: string;
+    /** v26.0: 完整输出 (用于展开查看) */
+    fullOutput?: string;
+    /** v26.0: 完整参数 JSON */
+    fullArgs?: string;
+    /** v26.0: 命令行 (run_command 等) */
+    command?: string;
+    cwd?: string;
+  };
+  /** v26.0: 文件修改 diff (edit_file / write_file) */
+  diff?: {
+    path: string;
+    oldString?: string;
+    newString?: string;
+    added: number;
+    removed: number;
   };
   /** 迭代编号 */
   iteration?: number;
@@ -62,4 +84,3 @@ export const useAppStore = create<AppState>()((...a) => ({
   ...createAgentSlice(...a),
   ...createMetaAgentSlice(...a),
 }));
-

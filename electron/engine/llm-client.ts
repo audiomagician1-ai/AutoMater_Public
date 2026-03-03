@@ -89,10 +89,15 @@ export interface ToolCallMessage {
   }>;
 }
 
+/** Streaming callback for assistant content during tool-calling (thinking / reasoning) */
+export type ContentChunkCallback = (chunk: string, type: 'content' | 'reasoning') => void;
+
 export interface LLMWithToolsResult {
   message: ToolCallMessage;
   inputTokens: number;
   outputTokens: number;
+  /** v26.0: reasoning/thinking content captured from extended_thinking / reasoning_content */
+  reasoning?: string;
 }
 
 // ═══════════════════════════════════════
@@ -100,20 +105,20 @@ export interface LLMWithToolsResult {
 // ═══════════════════════════════════════
 
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4o':                      { input: 0.0025,  output: 0.01 },
-  'gpt-4o-mini':                 { input: 0.00015, output: 0.0006 },
-  'gpt-4-turbo':                 { input: 0.01,    output: 0.03 },
-  'gpt-3.5-turbo':               { input: 0.0005,  output: 0.0015 },
-  'o1':                          { input: 0.015,   output: 0.06 },
-  'o1-mini':                     { input: 0.003,   output: 0.012 },
-  'o3-mini':                     { input: 0.0011,  output: 0.0044 },
-  'claude-sonnet-4-20250514':    { input: 0.003,   output: 0.015 },
-  'claude-opus-4-20250514':      { input: 0.015,   output: 0.075 },
-  'claude-3-5-sonnet-20241022':  { input: 0.003,   output: 0.015 },
-  'claude-3-5-haiku-20241022':   { input: 0.001,   output: 0.005 },
-  'claude-3-7-sonnet-20250219':  { input: 0.003,   output: 0.015 },
-  'deepseek-chat':               { input: 0.00014, output: 0.00028 },
-  'deepseek-reasoner':           { input: 0.00055, output: 0.0022 },
+  'gpt-4o': { input: 0.0025, output: 0.01 },
+  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
+  'gpt-4-turbo': { input: 0.01, output: 0.03 },
+  'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
+  o1: { input: 0.015, output: 0.06 },
+  'o1-mini': { input: 0.003, output: 0.012 },
+  'o3-mini': { input: 0.0011, output: 0.0044 },
+  'claude-sonnet-4-20250514': { input: 0.003, output: 0.015 },
+  'claude-opus-4-20250514': { input: 0.015, output: 0.075 },
+  'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
+  'claude-3-5-haiku-20241022': { input: 0.001, output: 0.005 },
+  'claude-3-7-sonnet-20250219': { input: 0.003, output: 0.015 },
+  'deepseek-chat': { input: 0.00014, output: 0.00028 },
+  'deepseek-reasoner': { input: 0.00055, output: 0.0022 },
 };
 
 const FALLBACK_PRICING = { input: 0.002, output: 0.008 };
@@ -123,14 +128,21 @@ const FALLBACK_PRICING = { input: 0.002, output: 0.008 };
  * 优先级：用户自定义定价(settings.modelPricing) > 内置定价表 > 兜底定价
  * customPricing 参数可选，不传时自动从 DB settings 读取。
  */
-export function calcCost(model: string, inputTokens: number, outputTokens: number, customPricing?: Record<string, { input: number; output: number }>): number {
+export function calcCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  customPricing?: Record<string, { input: number; output: number }>,
+): number {
   // 如果没有显式传入自定义价格，尝试从用户设置中读取
   let userPricing = customPricing;
   if (!userPricing) {
     try {
       const settings = getSettings();
       if (settings?.modelPricing) userPricing = settings.modelPricing;
-    } catch { /* settings 不可用时降级 */ }
+    } catch {
+      /* settings 不可用时降级 */
+    }
   }
   const p = userPricing?.[model] ?? MODEL_PRICING[model] ?? FALLBACK_PRICING;
   return (inputTokens / 1000) * p.input + (outputTokens / 1000) * p.output;
@@ -142,7 +154,9 @@ export function calcCost(model: string, inputTokens: number, outputTokens: numbe
 
 export function getSettings(): AppSettings | null {
   const db = getDb();
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as
+    | { value: string }
+    | undefined;
   const settings = row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings, 'getSettings') : null;
   if (!settings) return null;
 
@@ -152,7 +166,9 @@ export function getSettings(): AppSettings | null {
       const { getSecret } = require('./secret-manager'); // require-ok: 条件加载避免循环
       const encrypted = getSecret('__global__', 'llm_api_key');
       if (encrypted) settings.apiKey = encrypted;
-    } catch { /* silent: secret-manager 不可用时保留空 apiKey */ }
+    } catch {
+      /* silent: secret-manager 不可用时保留空 apiKey */
+    }
   }
 
   return settings;
@@ -169,16 +185,14 @@ export function getSettings(): AppSettings | null {
 export async function validateModel(settings: AppSettings, model: string): Promise<string | null> {
   if (!model?.trim()) return `模型名称为空`;
   try {
-    await callLLM(settings, model, [
-      { role: 'user', content: 'hi' },
-    ], undefined, 1, 0); // maxTokens=1, retries=0 — 极低开销
+    await callLLM(settings, model, [{ role: 'user', content: 'hi' }], undefined, 1, 0); // maxTokens=1, retries=0 — 极低开销
     return null; // 通过
   } catch (err: unknown) {
     if (err instanceof NonRetryableError) {
-      return `模型 ${model} 不可用: ${(err instanceof Error ? err.message : String(err))}`;
+      return `模型 ${model} 不可用: ${err instanceof Error ? err.message : String(err)}`;
     }
     // 网络错误等也报出来
-    return `模型 ${model} 连接失败: ${(err instanceof Error ? err.message : String(err))}`;
+    return `模型 ${model} 连接失败: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 
@@ -204,7 +218,10 @@ async function throwOnHttpError(res: Response, provider: string): Promise<void> 
 export function anySignal(signals: AbortSignal[]): AbortSignal {
   const ctrl = new AbortController();
   for (const s of signals) {
-    if (s.aborted) { ctrl.abort(s.reason); return ctrl.signal; }
+    if (s.aborted) {
+      ctrl.abort(s.reason);
+      return ctrl.signal;
+    }
     s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true });
   }
   return ctrl.signal;
@@ -225,7 +242,7 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
  * 同时确保: content 不为 null/undefined, role='tool' 消息有 content。
  */
 function sanitizeMessagesForAPI(
-  messages: Array<{ role: string; content: unknown; tool_calls?: unknown[]; tool_call_id?: string }>
+  messages: Array<{ role: string; content: unknown; tool_calls?: unknown[]; tool_call_id?: string }>,
 ): Array<Record<string, unknown>> {
   return messages.map(msg => {
     const cleaned: Record<string, unknown> = { role: msg.role };
@@ -282,7 +299,8 @@ function sanitizeMessagesForAPI(
 // ═══════════════════════════════════════
 
 export async function callLLM(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   signal?: AbortSignal,
   maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
@@ -310,7 +328,8 @@ export async function callLLM(
 }
 
 async function _callLLMOnce(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   signal?: AbortSignal,
   maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
@@ -319,9 +338,7 @@ async function _callLLMOnce(
 ): Promise<LLMResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const combinedSignal = signal
-    ? anySignal([signal, controller.signal])
-    : controller.signal;
+  const combinedSignal = signal ? anySignal([signal, controller.signal]) : controller.signal;
 
   const useStream = !!onChunk;
 
@@ -339,23 +356,26 @@ async function _callLLMOnce(
 }
 
 async function _callOpenAI(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
-  maxTokens: number, fetchOpts: RequestInit,
-  stream: boolean, onChunk?: StreamCallback
+  maxTokens: number,
+  fetchOpts: RequestInit,
+  stream: boolean,
+  onChunk?: StreamCallback,
 ): Promise<LLMResult> {
   const body: Record<string, unknown> = { model, messages, temperature: 0.3, max_tokens: maxTokens };
   if (stream) body.stream = true;
 
   const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
     ...fetchOpts,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
   if (!stream) {
-    const data = await res.json() as OpenAIChatResponse;
+    const data = (await res.json()) as OpenAIChatResponse;
     return {
       content: data.choices[0].message.content ?? '',
       inputTokens: data.usage?.prompt_tokens ?? 0,
@@ -397,7 +417,9 @@ async function _callOpenAI(
           inputTokens = json.usage.prompt_tokens ?? inputTokens;
           outputTokens = json.usage.completion_tokens ?? outputTokens;
         }
-      } catch { /* skip malformed SSE JSON chunk (common during streaming) */ }
+      } catch {
+        /* skip malformed SSE JSON chunk (common during streaming) */
+      }
     }
   }
 
@@ -409,10 +431,13 @@ async function _callOpenAI(
 }
 
 async function _callAnthropic(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
-  maxTokens: number, fetchOpts: RequestInit,
-  stream: boolean, onChunk?: StreamCallback
+  maxTokens: number,
+  fetchOpts: RequestInit,
+  stream: boolean,
+  onChunk?: StreamCallback,
 ): Promise<LLMResult> {
   const systemMsg = messages.find(m => m.role === 'system');
   const otherMsgs = messages.filter(m => m.role !== 'system');
@@ -428,9 +453,12 @@ async function _callAnthropic(
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
   if (!stream) {
-    const data = await res.json() as AnthropicResponse;
+    const data = (await res.json()) as AnthropicResponse;
     return {
-      content: data.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''),
+      content: data.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text ?? '')
+        .join(''),
       inputTokens: data.usage?.input_tokens ?? 0,
       outputTokens: data.usage?.output_tokens ?? 0,
     };
@@ -471,7 +499,9 @@ async function _callAnthropic(
         } else if (json.type === 'message_delta' && json.usage) {
           outputTokens = json.usage.output_tokens ?? 0;
         }
-      } catch { /* skip malformed Anthropic SSE chunk */ }
+      } catch {
+        /* skip malformed Anthropic SSE chunk */
+      }
     }
   }
 
@@ -493,20 +523,20 @@ export async function callLLMWithTools(
   tools: Array<Record<string, unknown>> | OpenAIFunctionTool[],
   signal?: AbortSignal,
   maxTokens: number = LLM_DEFAULT_MAX_TOKENS,
+  /** v26.0: stream callback for assistant content/reasoning chunks */
+  onContentChunk?: ContentChunkCallback,
 ): Promise<LLMWithToolsResult> {
   if (signal?.aborted) throw new Error('Aborted');
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LLM_DEFAULT_TIMEOUT_MS);
-  const combinedSignal = signal
-    ? anySignal([signal, controller.signal])
-    : controller.signal;
+  const combinedSignal = signal ? anySignal([signal, controller.signal]) : controller.signal;
 
   try {
     if (settings.llmProvider === 'anthropic') {
-      return await _callAnthropicWithTools(settings, model, messages, tools, maxTokens, combinedSignal);
+      return await _callAnthropicWithTools(settings, model, messages, tools, maxTokens, combinedSignal, onContentChunk);
     } else {
-      return await _callOpenAIWithTools(settings, model, messages, tools, maxTokens, combinedSignal);
+      return await _callOpenAIWithTools(settings, model, messages, tools, maxTokens, combinedSignal, onContentChunk);
     }
   } finally {
     clearTimeout(timeout);
@@ -514,9 +544,13 @@ export async function callLLMWithTools(
 }
 
 async function _callOpenAIWithTools(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: unknown }>,
-  tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
+  tools: Array<Record<string, unknown>>,
+  maxTokens: number,
+  signal: AbortSignal,
+  onContentChunk?: ContentChunkCallback,
 ): Promise<LLMWithToolsResult> {
   // v20.1: 清理 messages — 确保 tool_calls.arguments 是合法 JSON 字符串
   // OpenRouter/OpenAI 在解析 messages 时会尝试 parse arguments 字符串,
@@ -537,13 +571,14 @@ async function _callOpenAIWithTools(
   const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     signal,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) await throwOnHttpError(res, 'OpenAI');
 
-  // ── 流式解析 SSE (tool_calls + content) ──
+  // ── 流式解析 SSE (tool_calls + content + reasoning_content) ──
   let content = '';
+  let reasoning = ''; // v26.0: DeepSeek reasoning_content / OpenAI o1 reasoning
   let inputTokens = 0;
   let outputTokens = 0;
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
@@ -570,7 +605,15 @@ async function _callOpenAIWithTools(
         const json = JSON.parse(trimmed.slice(6));
         const delta = json.choices?.[0]?.delta;
         if (delta) {
-          if (delta.content) content += delta.content;
+          // v26.0: reasoning_content (DeepSeek Reasoner, etc.)
+          if (delta.reasoning_content) {
+            reasoning += delta.reasoning_content;
+            onContentChunk?.(delta.reasoning_content, 'reasoning');
+          }
+          if (delta.content) {
+            content += delta.content;
+            onContentChunk?.(delta.content, 'content');
+          }
           if (delta.tool_calls) {
             for (const tc of delta.tool_calls) {
               const idx = tc.index as number;
@@ -595,7 +638,9 @@ async function _callOpenAIWithTools(
           inputTokens = json.usage.prompt_tokens ?? inputTokens;
           outputTokens = json.usage.completion_tokens ?? outputTokens;
         }
-      } catch { /* skip malformed SSE JSON chunk */ }
+      } catch {
+        /* skip malformed SSE JSON chunk */
+      }
     }
   }
 
@@ -609,22 +654,20 @@ async function _callOpenAIWithTools(
     const errMatch = content.match(/<<ERROR:([a-f0-9]+)>>:?(.+)/s);
     const errDetail = errMatch ? errMatch[2].trim() : content;
     log.warn(`LLM proxy returned error in stream: ${errDetail.slice(0, 200)}`);
-    throw new NonRetryableError(
-      `LLM proxy error: ${errDetail.slice(0, 500)}`,
-      400
-    );
+    throw new NonRetryableError(`LLM proxy error: ${errDetail.slice(0, 500)}`, 400);
   }
 
   // 组装 tool_calls 数组
-  const toolCalls = toolCallMap.size > 0
-    ? Array.from(toolCallMap.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([, tc]) => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: { name: tc.name, arguments: tc.arguments },
-        }))
-    : undefined;
+  const toolCalls =
+    toolCallMap.size > 0
+      ? Array.from(toolCallMap.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([, tc]) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          }))
+      : undefined;
 
   return {
     message: {
@@ -634,13 +677,18 @@ async function _callOpenAIWithTools(
     } as ToolCallMessage,
     inputTokens,
     outputTokens,
+    reasoning: reasoning || undefined,
   };
 }
 
 async function _callAnthropicWithTools(
-  settings: AppSettings, model: string,
+  settings: AppSettings,
+  model: string,
   messages: Array<{ role: string; content: unknown }>,
-  tools: Array<Record<string, unknown>>, maxTokens: number, signal: AbortSignal,
+  tools: Array<Record<string, unknown>>,
+  maxTokens: number,
+  signal: AbortSignal,
+  onContentChunk?: ContentChunkCallback,
 ): Promise<LLMWithToolsResult> {
   // Convert OpenAI tools format to Anthropic format
   const anthropicTools = tools.map((t: Record<string, unknown>) => ({
@@ -653,58 +701,68 @@ async function _callAnthropicWithTools(
   const otherMsgs = messages.filter(m => m.role !== 'system');
 
   // Anthropic 需要将 tool_result 消息转换格式
-  const anthropicMessages = otherMsgs.map((m: { role: string; content: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> }) => {
-    if (m.role === 'tool') {
-      // OpenAI tool result → Anthropic tool_result
-      // v2.2: 支持 multimodal content (图像)
-      const toolContent = m.content;
-      let anthropicToolContent: unknown;
-      if (Array.isArray(toolContent)) {
-        // Multimodal content (text + image)
-        anthropicToolContent = (toolContent as Array<Record<string, unknown>>).map((block) => {
-          const imageUrl = block.image_url as { url?: string } | undefined;
-          if (block.type === 'image_url' && imageUrl?.url) {
-            const dataMatch = imageUrl.url.match(/^data:([^;]+);base64,(.+)/);
-            if (dataMatch) {
-              return {
-                type: 'image',
-                source: { type: 'base64', media_type: dataMatch[1], data: dataMatch[2] },
-              };
+  const anthropicMessages = otherMsgs.map(
+    (m: {
+      role: string;
+      content: unknown;
+      tool_call_id?: string;
+      tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+    }) => {
+      if (m.role === 'tool') {
+        // OpenAI tool result → Anthropic tool_result
+        // v2.2: 支持 multimodal content (图像)
+        const toolContent = m.content;
+        let anthropicToolContent: unknown;
+        if (Array.isArray(toolContent)) {
+          // Multimodal content (text + image)
+          anthropicToolContent = (toolContent as Array<Record<string, unknown>>).map(block => {
+            const imageUrl = block.image_url as { url?: string } | undefined;
+            if (block.type === 'image_url' && imageUrl?.url) {
+              const dataMatch = imageUrl.url.match(/^data:([^;]+);base64,(.+)/);
+              if (dataMatch) {
+                return {
+                  type: 'image',
+                  source: { type: 'base64', media_type: dataMatch[1], data: dataMatch[2] },
+                };
+              }
             }
-          }
-          if (block.type === 'text') return { type: 'text', text: block.text };
-          return { type: 'text', text: JSON.stringify(block) };
-        });
-      } else {
-        anthropicToolContent = typeof toolContent === 'string' ? toolContent : JSON.stringify(toolContent);
+            if (block.type === 'text') return { type: 'text', text: block.text };
+            return { type: 'text', text: JSON.stringify(block) };
+          });
+        } else {
+          anthropicToolContent = typeof toolContent === 'string' ? toolContent : JSON.stringify(toolContent);
+        }
+        return {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: m.tool_call_id,
+              content: anthropicToolContent,
+            },
+          ],
+        };
       }
-      return {
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: m.tool_call_id,
-          content: anthropicToolContent,
-        }],
-      };
-    }
-    if (m.role === 'assistant' && m.tool_calls) {
-      // OpenAI assistant with tool_calls → Anthropic with tool_use blocks
-      const content: Array<Record<string, unknown>> = [];
-      if (m.content) content.push({ type: 'text', text: m.content });
-      for (const tc of m.tool_calls) {
-        content.push({
-          type: 'tool_use',
-          id: tc.id,
-          name: tc.function.name,
-          input: typeof tc.function.arguments === 'string'
-            ? safeParseToolArgs(tc.function.arguments)
-            : tc.function.arguments,
-        });
+      if (m.role === 'assistant' && m.tool_calls) {
+        // OpenAI assistant with tool_calls → Anthropic with tool_use blocks
+        const content: Array<Record<string, unknown>> = [];
+        if (m.content) content.push({ type: 'text', text: m.content });
+        for (const tc of m.tool_calls) {
+          content.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.function.name,
+            input:
+              typeof tc.function.arguments === 'string'
+                ? safeParseToolArgs(tc.function.arguments)
+                : tc.function.arguments,
+          });
+        }
+        return { role: 'assistant', content };
       }
-      return { role: 'assistant', content };
-    }
-    return m;
-  });
+      return m;
+    },
+  );
 
   const body: Record<string, unknown> = {
     model,
@@ -713,7 +771,8 @@ async function _callAnthropicWithTools(
     max_tokens: maxTokens,
     temperature: 0.2,
   };
-  if (systemMsg) body.system = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
+  if (systemMsg)
+    body.system = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
 
   const res = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/v1/messages`, {
     method: 'POST',
@@ -727,15 +786,25 @@ async function _callAnthropicWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
-  const data = await res.json() as { content?: AnthropicToolBlock[]; usage?: { input_tokens: number; output_tokens: number } };
+  const data = (await res.json()) as {
+    content?: AnthropicToolBlock[];
+    usage?: { input_tokens: number; output_tokens: number };
+  };
 
   // Convert Anthropic response back to OpenAI format
   let textContent = '';
+  let reasoningContent = ''; // v26.0: Anthropic extended_thinking
   const toolCalls: ToolCallMessage['tool_calls'] = [];
 
   for (const block of data.content || []) {
-    if (block.type === 'text') {
+    if (block.type === 'thinking') {
+      // v26.0: Anthropic extended_thinking block
+      const thinkText = block.text ?? '';
+      reasoningContent += thinkText;
+      onContentChunk?.(thinkText, 'reasoning');
+    } else if (block.type === 'text') {
       textContent += block.text ?? '';
+      onContentChunk?.(block.text ?? '', 'content');
     } else if (block.type === 'tool_use') {
       toolCalls.push({
         id: block.id ?? '',
@@ -756,5 +825,6 @@ async function _callAnthropicWithTools(
     },
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
+    reasoning: reasoningContent || undefined,
   };
 }

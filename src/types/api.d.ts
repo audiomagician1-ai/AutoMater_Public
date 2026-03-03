@@ -396,6 +396,43 @@ interface AutoMaterAPI {
     export(projectId: string): Promise<{ success: boolean; path?: string; error?: string }>;
     gitCommit(projectId: string, message: string): Promise<{ success: boolean; hash?: string; pushed?: boolean }>;
     gitLog(projectId: string): Promise<string[]>;
+    // v27.0: Git 版本管理
+    gitStatus(projectId: string): Promise<Array<{ index: string; worktree: string; path: string }>>;
+    gitStructuredLog(
+      projectId: string,
+      maxCount?: number,
+    ): Promise<
+      Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        date: string;
+        message: string;
+      }>
+    >;
+    gitFileLog(
+      projectId: string,
+      filePath: string,
+      maxCount?: number,
+    ): Promise<
+      Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        date: string;
+        message: string;
+      }>
+    >;
+    gitShowFile(projectId: string, commitHash: string, filePath: string): Promise<string | null>;
+    gitCheckoutFile(
+      projectId: string,
+      commitHash: string,
+      filePath: string,
+    ): Promise<{ success: boolean; error?: string }>;
+    gitDiff(projectId: string, commitRange?: string): Promise<string>;
+    gitFileDiff(projectId: string, commitHash: string, filePath: string): Promise<string>;
+    gitCommitFiles(projectId: string, commitHash: string): Promise<string[]>;
+    gitBranches(projectId: string): Promise<{ current: string; branches: Array<{ name: string; current: boolean }> }>;
     testGitHub(repo: string, token: string): Promise<{ success: boolean; message: string }>;
     getContextSnapshots(projectId: string): Promise<Record<string, ContextSnapshot>>;
     getReactStates(projectId: string): Promise<Record<string, AgentReactState>>;
@@ -653,7 +690,11 @@ interface AutoMaterAPI {
         createdAt: string;
       }>
     >;
-    listChatSessions(projectId?: string | null, limit?: number): Promise<Array<SessionInfo & { title: string | null }>>;
+    listChatSessions(
+      projectId?: string | null,
+      limit?: number,
+      includeHidden?: boolean,
+    ): Promise<Array<SessionInfo & { title: string | null; chatMode?: string }>>;
     deleteSessionMessages(sessionId: string): Promise<{ success: boolean; deletedCount: number }>;
   };
 
@@ -756,6 +797,12 @@ interface AutoMaterAPI {
     batchFeatureSummaries(projectId: string): Promise<Record<string, FeatureSessionSummary>>;
     /** v22.0: 更新会话的聊天模式 */
     updateChatMode(sessionId: string, chatMode: string): Promise<{ success: boolean }>;
+    /** v27.0: 切换会话置顶 */
+    togglePin(sessionId: string): Promise<{ success: boolean; pinned: boolean }>;
+    /** v27.0: 重命名会话 */
+    rename(sessionId: string, customTitle: string | null): Promise<{ success: boolean; customTitle: string | null }>;
+    /** v27.0: 切换会话隐藏 */
+    toggleHidden(sessionId: string): Promise<{ success: boolean; hidden: boolean }>;
   };
 }
 
@@ -811,6 +858,20 @@ interface IpcAgentToolCallData {
   args: string;
   success: boolean;
   outputPreview: string;
+  /** v26.0: enhanced fields */
+  fullOutput?: string;
+  fullArgs?: string;
+  iteration?: number;
+  featureId?: string;
+  command?: string;
+  cwd?: string;
+  diff?: {
+    path: string;
+    oldString?: string;
+    newString?: string;
+    added: number;
+    removed: number;
+  };
 }
 
 interface IpcContextSnapshotData {
@@ -1119,6 +1180,12 @@ interface SessionInfo {
   messageCount: number;
   totalTokens: number;
   totalCost: number;
+  /** v27.0: 是否置顶 */
+  pinned?: boolean;
+  /** v27.0: 自定义标题 (重命名) */
+  customTitle?: string | null;
+  /** v27.0: 是否隐藏 */
+  hidden?: boolean;
 }
 
 /** Feature-Session 关联记录 (v8.1) */

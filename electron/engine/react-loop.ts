@@ -10,8 +10,8 @@
 
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
-import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError } from './llm-client';
-import { sendToUI, addLog } from './ui-bridge';
+import { callLLM, callLLMWithTools, calcCost, sleep, NonRetryableError, type ContentChunkCallback } from './llm-client';
+import { sendToUI, addLog, createStreamCallback } from './ui-bridge';
 import {
   updateAgentStats,
   checkBudget,
@@ -240,9 +240,22 @@ interface TerminationSummaryConfig {
  */
 async function generateTerminationSummary(config: TerminationSummaryConfig): Promise<string> {
   const {
-    projectId, agentId, role, terminationReason, iterations,
-    totalCost, totalIn, totalOut, filesWritten,
-    messages, settings, model, signal, win, workspacePath, featureId,
+    projectId,
+    agentId,
+    role,
+    terminationReason,
+    iterations,
+    totalCost,
+    totalIn,
+    totalOut,
+    filesWritten,
+    messages,
+    settings,
+    model,
+    signal,
+    win,
+    workspacePath,
+    featureId,
   } = config;
 
   // 已中断 / 正常完成 → 不需要总结
@@ -251,9 +264,7 @@ async function generateTerminationSummary(config: TerminationSummaryConfig): Pro
   const filesList = Array.isArray(filesWritten) ? filesWritten : [...filesWritten];
 
   // 构造精简的历史上下文 — 只取 system prompt + 最近 20 条消息，控制 token 消耗
-  const recentMessages = messages.length > 21
-    ? [messages[0], ...messages.slice(-20)]
-    : [...messages];
+  const recentMessages = messages.length > 21 ? [messages[0], ...messages.slice(-20)] : [...messages];
 
   // 在末尾注入总结请求
   const summaryMessages: LLMMessage[] = [
@@ -285,8 +296,8 @@ async function generateTerminationSummary(config: TerminationSummaryConfig): Pro
       summaryModel,
       summaryMessages as Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
       signal,
-      2048,  // maxTokens — 总结不需要太长
-      1,     // retries — 只重试 1 次
+      2048, // maxTokens — 总结不需要太长
+      1, // retries — 只重试 1 次
       undefined,
       30000, // timeoutMs — 30 秒超时
     );
@@ -319,12 +330,7 @@ async function generateTerminationSummary(config: TerminationSummaryConfig): Pro
     });
 
     // 写入持久化日志
-    addLog(
-      projectId,
-      agentId,
-      'output',
-      `[终止总结] ${terminationReason}\n${summaryText}`,
-    );
+    addLog(projectId, agentId, 'output', `[终止总结] ${terminationReason}\n${summaryText}`);
 
     // 推送 work message 到 UI
     sendToUI(win, 'agent:work-message', {
@@ -401,10 +407,15 @@ export async function reactDeveloperLoop(
   // v10.1: Budget Tracker + Stuck Detector (developer loop)
   const devStuckState = createStuckDetectorState();
   const devBudgetTracker: BudgetTrackerState = {
-    iteration: 0, maxIterations: MAX_ITERATIONS,
-    totalTokens: 0, maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
-    totalCost: 0, maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
-    hasWrittenFiles: false, hasRunVerification: false, role: 'developer',
+    iteration: 0,
+    maxIterations: MAX_ITERATIONS,
+    totalTokens: 0,
+    maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
+    totalCost: 0,
+    maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
+    hasWrittenFiles: false,
+    hasRunVerification: false,
+    role: 'developer',
   };
 
   // v11.0: 从 workerId 提取 worker 索引 (用于成员级配置)
@@ -602,9 +613,7 @@ export async function reactDeveloperLoop(
   // v20.0: 按 feature category 注入特定指导
   const categoryGuidance = getCategoryGuidance(feature.category || '');
   // v10.2: 全局上下文管理纪律
-  const devSystemPrompt = withContextDiscipline(
-    categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt,
-  );
+  const devSystemPrompt = withContextDiscipline(categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt);
 
   const messages: LLMMessage[] = [
     { role: 'system', content: devSystemPrompt },
@@ -694,10 +703,28 @@ export async function reactDeveloperLoop(
       const devStuck = detectStuckPattern(devStuckState, devBudgetTracker);
       if (devStuck.isStuck) {
         messages.push({ role: 'user', content: devStuck.correctionMessage });
-        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔍 Stuck [${devStuck.pattern}]: ${devStuck.correctionMessage.slice(0, 120)}` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `🔍 Stuck [${devStuck.pattern}]: ${devStuck.correctionMessage.slice(0, 120)}`,
+        });
       }
 
-      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
+      // v26.0: 流式推送思维链 — 创建 stream callback 将 content/reasoning 实时推送到前端
+      sendToUI(win, 'agent:stream-start', { agentId: workerId, label: `${feature.id} [${iter}] 思考中` });
+      let streamedReasoning = '';
+      const onContentChunk: ContentChunkCallback = (chunk, type) => {
+        if (type === 'reasoning') {
+          streamedReasoning += chunk;
+          sendToUI(win, 'agent:stream', { agentId: workerId, chunk });
+        } else {
+          sendToUI(win, 'agent:stream', { agentId: workerId, chunk });
+        }
+      };
+
+      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384, onContentChunk);
+      sendToUI(win, 'agent:stream-end', { agentId: workerId });
+
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
       totalCost += cost;
       totalIn += result.inputTokens;
@@ -710,12 +737,27 @@ export async function reactDeveloperLoop(
 
       const msg = result.message;
 
-      if (msg.content) {
-        const shortThought = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+      // v26.0: 推送完整思维链 + reasoning 到工作消息
+      const fullThinking = result.reasoning || msg.content || '';
+      if (fullThinking) {
         sendToUI(win, 'agent:log', {
           projectId,
           agentId: workerId,
-          content: `💭 ${feature.id} [${iter}] ${shortThought}`,
+          content: `💭 ${feature.id} [${iter}] ${fullThinking.length > 200 ? fullThinking.slice(0, 200) + '...' : fullThinking}`,
+        });
+        // 推送完整思维链作为工作消息
+        sendToUI(win, 'agent:work-message', {
+          projectId,
+          agentId: workerId,
+          message: {
+            id: `think-${iter}-${Date.now()}`,
+            type: 'think',
+            content: msg.content || '',
+            reasoning: result.reasoning || undefined,
+            timestamp: Date.now(),
+            iteration: iter,
+            featureId: feature.id,
+          },
         });
       }
 
@@ -973,14 +1015,48 @@ export async function reactDeveloperLoop(
             : tc.function.name === 'edit_file'
               ? `path=${toolArgs.path}, replace ${(toolArgs.old_string || '').length}→${(toolArgs.new_string || '').length} chars`
               : JSON.stringify(toolArgs).slice(0, 150);
-        sendToUI(win, 'agent:tool-call', {
+
+        // v26.0: 构建增强的工具调用数据 (含 diff / fullArgs / output)
+        const enhancedToolData: Record<string, unknown> = {
           projectId,
           agentId: workerId,
           tool: tc.function.name,
           args: argsSummary,
           success: toolResult.success,
-          outputPreview: toolResult.output.slice(0, 200),
-        });
+          outputPreview: toolResult.output.slice(0, 500), // 增大 preview 上限
+          fullOutput: toolResult.output.slice(0, 5000),
+          iteration: iter,
+          featureId: feature.id,
+        };
+
+        // edit_file: 携带 diff 数据用于前端展示
+        if (tc.function.name === 'edit_file') {
+          enhancedToolData.diff = {
+            path: toolArgs.path,
+            oldString: (toolArgs.old_string || '').slice(0, 3000),
+            newString: (toolArgs.new_string || '').slice(0, 3000),
+            added: (toolArgs.new_string || '').split('\n').length,
+            removed: (toolArgs.old_string || '').split('\n').length,
+          };
+        }
+        // write_file: 携带文件内容摘要
+        if (tc.function.name === 'write_file') {
+          enhancedToolData.diff = {
+            path: toolArgs.path,
+            newString: (toolArgs.content || '').slice(0, 3000),
+            added: (toolArgs.content || '').split('\n').length,
+            removed: 0,
+          };
+        }
+        // run_command / run_test / run_lint: 携带完整命令和输出
+        if (['run_command', 'run_test', 'run_lint'].includes(tc.function.name)) {
+          enhancedToolData.command = toolArgs.command || toolArgs.cmd || '';
+          enhancedToolData.cwd = toolArgs.cwd || '';
+        }
+        // 完整参数 (search_files, read_file 等)
+        enhancedToolData.fullArgs = JSON.stringify(toolArgs).slice(0, 2000);
+
+        sendToUI(win, 'agent:tool-call', enhancedToolData);
         emitEvent({
           projectId,
           agentId: workerId,
@@ -1112,10 +1188,22 @@ export async function reactDeveloperLoop(
       const toolCallsThisIter = (msg.tool_calls || []).map((tc: LLMToolCall) => tc.function.name);
 
       // v10.1: Record tool calls for stuck detection (developer loop)
-      recordStuckToolCalls(devStuckState, (msg.tool_calls || []).map((tc: LLMToolCall) => ({
-        name: tc.function.name,
-        argsSignature: toolCallSignature(tc.function.name, (() => { try { return JSON.parse(tc.function.arguments as string); } catch { return {}; } })()),
-      })));
+      recordStuckToolCalls(
+        devStuckState,
+        (msg.tool_calls || []).map((tc: LLMToolCall) => ({
+          name: tc.function.name,
+          argsSignature: toolCallSignature(
+            tc.function.name,
+            (() => {
+              try {
+                return JSON.parse(tc.function.arguments as string);
+              } catch {
+                return {};
+              }
+            })(),
+          ),
+        })),
+      );
 
       // v3.0: 更新 guard 的 idle/error 追踪
       if (hasToolSideEffect(toolCallsThisIter)) {
@@ -1598,10 +1686,15 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
   // v10.1: Budget Tracker + Stuck Detector
   const stuckState = createStuckDetectorState();
   const budgetTrackerBase: BudgetTrackerState = {
-    iteration: 0, maxIterations: maxIterations,
-    totalTokens: 0, maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
-    totalCost: 0, maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
-    hasWrittenFiles: false, hasRunVerification: false, role,
+    iteration: 0,
+    maxIterations: maxIterations,
+    totalTokens: 0,
+    maxTokens: DEFAULT_REACT_CONFIG.maxTotalTokens,
+    totalCost: 0,
+    maxCost: DEFAULT_REACT_CONFIG.maxCostUsd,
+    hasWrittenFiles: false,
+    hasRunVerification: false,
+    role,
   };
 
   // v10.2: 全局上下文管理纪律
@@ -1662,7 +1755,11 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       const stuckResult = detectStuckPattern(stuckState, budgetTrackerBase);
       if (stuckResult.isStuck) {
         messages.push({ role: 'user', content: stuckResult.correctionMessage });
-        sendToUI(win, 'agent:log', { projectId, agentId, content: `🔍 Stuck 检测 [${stuckResult.pattern}]: ${stuckResult.correctionMessage.slice(0, 100)}` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId,
+          content: `🔍 Stuck 检测 [${stuckResult.pattern}]: ${stuckResult.correctionMessage.slice(0, 100)}`,
+        });
       }
 
       const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
@@ -1905,10 +2002,22 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
       guardState.consecutiveErrorCount = 0;
 
       // v10.1: Record tool calls for stuck detection
-      recordStuckToolCalls(stuckState, (msg.tool_calls || []).map((tc: LLMToolCall) => ({
-        name: tc.function.name,
-        argsSignature: toolCallSignature(tc.function.name, (() => { try { return JSON.parse(tc.function.arguments as string); } catch { return {}; } })()),
-      })));
+      recordStuckToolCalls(
+        stuckState,
+        (msg.tool_calls || []).map((tc: LLMToolCall) => ({
+          name: tc.function.name,
+          argsSignature: toolCallSignature(
+            tc.function.name,
+            (() => {
+              try {
+                return JSON.parse(tc.function.arguments as string);
+              } catch {
+                return {};
+              }
+            })(),
+          ),
+        })),
+      );
 
       if (completed || blocked) {
         sendToUI(win, 'agent:log', {

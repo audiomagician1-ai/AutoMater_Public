@@ -23,6 +23,7 @@ const ContextPage = lazy(() => import('./pages/ContextPage').then(m => ({ defaul
 const WorkflowPage = lazy(() => import('./pages/WorkflowPage').then(m => ({ default: m.WorkflowPage })));
 const TimelinePage = lazy(() => import('./pages/TimelinePage'));
 const GuidePage = lazy(() => import('./pages/GuidePage').then(m => ({ default: m.GuidePage })));
+const GitPage = lazy(() => import('./pages/GitPage').then(m => ({ default: m.GitPage })));
 const AcceptancePanel = lazy(() => import('./components/AcceptancePanel').then(m => ({ default: m.AcceptancePanel })));
 const MetaAgentPanel = lazy(() => import('./components/MetaAgentPanel').then(m => ({ default: m.MetaAgentPanel })));
 const SessionManager = lazy(() => import('./components/SessionManager').then(m => ({ default: m.SessionManager })));
@@ -63,26 +64,16 @@ export function App() {
     unsubs.push(
       window.automater.on('agent:log', (data: IpcAgentLogData) => {
         s().addLog({ projectId: data.projectId, agentId: data.agentId, content: data.content });
-        // v6.0: 解析为结构化工作消息分发到 agentWorkMessages
+        // v26.0: 💭 和 🔧 现在由 agent:work-message / agent:tool-call 事件专门推送
+        // 这里只处理非 react-loop 产生的日志 (PM/Architect/系统状态等)
         if (data.agentId && data.agentId !== 'system') {
           const pid = data.projectId;
           const c: string = data.content || '';
           const msgId = `wm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const ts = Date.now();
-          if (c.includes('💭')) {
-            s().addAgentWorkMessage(pid, data.agentId, {
-              id: msgId,
-              type: 'think',
-              timestamp: ts,
-              content: c.replace(/^.*?💭\s*/, ''),
-            });
-          } else if (c.includes('🔧')) {
-            s().addAgentWorkMessage(data.projectId, data.agentId, {
-              id: msgId,
-              type: 'tool-call',
-              timestamp: ts,
-              content: c,
-            });
+          // 跳过 💭 和 🔧 — 这些已由专用事件处理，避免重复
+          if (c.includes('💭') || c.includes('🔧')) {
+            // 不再从 log 重复推送到 work messages
           } else if (
             c.includes('✅') &&
             (c.includes('task_complete') || c.includes('ReAct 完成') || c.includes('ReAct 循环结束'))
@@ -168,7 +159,7 @@ export function App() {
       ),
     );
 
-    // 工具调用事件 (v0.9 ReAct)
+    // 工具调用事件 (v0.9 ReAct → v26.0 enhanced)
     unsubs.push(
       window.automater.on('agent:tool-call', (data: IpcAgentToolCallData) => {
         const icon = data.success ? '✅' : '❌';
@@ -177,22 +168,41 @@ export function App() {
           agentId: data.agentId,
           content: `🔧 ${data.tool}(${data.args}) → ${icon} ${data.outputPreview}`,
         });
-        // v6.0: 结构化工具调用消息
+        // v26.0: 增强的结构化工具调用消息 (含 diff, fullArgs, fullOutput)
         if (data.agentId) {
           s().addAgentWorkMessage(data.projectId, data.agentId, {
             id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             type: 'tool-result',
             timestamp: Date.now(),
             content: data.outputPreview || '',
+            iteration: data.iteration,
+            featureId: data.featureId,
             tool: {
               name: data.tool,
               args: data.args,
               success: data.success,
               outputPreview: data.outputPreview,
+              fullOutput: data.fullOutput,
+              fullArgs: data.fullArgs,
+              command: data.command,
+              cwd: data.cwd,
             },
+            diff: data.diff,
           });
         }
       }),
+    );
+
+    // v26.0: 后端直接推送的工作消息 (思维链等)
+    unsubs.push(
+      window.automater.on(
+        'agent:work-message',
+        (data: { projectId: string; agentId: string; message: import('./stores/app-store').AgentWorkMessage }) => {
+          if (data.agentId && data.message) {
+            s().addAgentWorkMessage(data.projectId, data.agentId, data.message);
+          }
+        },
+      ),
     );
 
     // 上下文快照事件 (v1.1)
@@ -392,6 +402,12 @@ export function App() {
         return (
           <ErrorBoundary key="sessions">
             <SessionManager projectId={currentProjectId} visible={true} />
+          </ErrorBoundary>
+        );
+      case 'git':
+        return (
+          <ErrorBoundary key="git">
+            <GitPage />
           </ErrorBoundary>
         );
       case 'guide':
