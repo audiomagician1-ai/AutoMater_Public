@@ -61,14 +61,17 @@ const META_AGENT_BLOCKED_PATTERNS = [
 
 /**
  * 检查 meta-agent 是否被禁止访问该路径。
+ * 如果用户已手动授权 allowGitAccess，则放行 .git/ 访问。
  * @returns 如果被禁止，返回错误消息；否则返回 null。
  */
 export function checkMetaAgentPathBlock(inputPath: string, ctx: ToolContext): string | null {
   if (ctx.role !== 'meta-agent') return null;
+  // 用户已手动授权 git 访问 → 放行
+  if (ctx.metaAgentAllowGit) return null;
   const normalizedForCheck = path.normalize(inputPath || '').replace(/\\/g, '/');
   for (const pattern of META_AGENT_BLOCKED_PATTERNS) {
     if (pattern.test(inputPath) || pattern.test(normalizedForCheck)) {
-      return `安全限制: 管家无权访问 ${inputPath}。此路径包含敏感的开发信息。`;
+      return `安全限制: 管家无权访问 ${inputPath}。请在「管家设置 → 基本设置」中开启「GitHub / Git 访问权限」后重试。`;
     }
   }
   return null;

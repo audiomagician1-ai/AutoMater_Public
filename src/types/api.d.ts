@@ -54,6 +54,8 @@ interface MetaAgentConfig {
   autoMemory: boolean;
   memoryInjectLimit: number;
   greeting: string;
+  /** v23.0: 允许管家访问 Git/GitHub 信息 (默认 false) */
+  allowGitAccess: boolean;
   /** v22.0: 各模式独立参数覆盖 */
   modeConfigs: Record<string, ModeConfig>;
 }

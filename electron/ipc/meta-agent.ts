@@ -27,7 +27,7 @@ import {
   triggerManualHeartbeat, getHeartbeatLogs,
 } from '../engine/meta-agent-daemon';
 import { backupConversation } from '../engine/conversation-backup';
-import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
+import { getToolsForRole, executeTool, executeToolAsync, isAsyncTool, TOOL_DEFINITIONS, type ToolContext, type ToolCall, type ToolResult } from '../engine/tool-system';
 import { guardToolCall } from '../engine/guards';
 import fs from 'fs';
 import path from 'path';
@@ -62,6 +62,8 @@ export interface MetaAgentConfig {
   autoMemory: boolean;        // 是否自动积累记忆 (默认 true)
   memoryInjectLimit: number;  // 每次对话注入记忆条数上限 (默认 30)
   greeting: string;           // 自定义开场白
+  /** v23.0: 允许管家访问 git 历史/仓库信息 (默认关闭, 防止信息泄露) */
+  allowGitAccess: boolean;
   /** v22.0: 各模式独立参数覆盖 (未设置的字段取全局值) */
   modeConfigs: Record<string, ModeConfig>;
 }
@@ -93,6 +95,7 @@ const DEFAULT_CONFIG: MetaAgentConfig = {
   autoMemory: true,
   memoryInjectLimit: 30,
   greeting: '',  // 空 = 使用内置默认
+  allowGitAccess: false,  // v23.0: 默认禁止管家访问 git 信息
   modeConfigs: {
     work: { maxReactIterations: 50, maxResponseTokens: 128000 },
     chat: { maxReactIterations: 5, maxResponseTokens: 32000, contextHistoryLimit: 30 },
@@ -839,6 +842,20 @@ export function setupMetaAgentHandlers() {
       });
     }
 
+    // v23.0: 用户手动授权 git 访问时，动态注入 git_log 工具
+    if (config.allowGitAccess) {
+      const gitLogDef = TOOL_DEFINITIONS.find(t => t.name === 'git_log');
+      if (gitLogDef) {
+        const alreadyHas = tools.some(t => (t.function as Record<string, unknown>).name === 'git_log');
+        if (!alreadyHas) {
+          tools.push({
+            type: 'function',
+            function: { name: gitLogDef.name, description: gitLogDef.description, parameters: gitLogDef.parameters },
+          } as (typeof tools)[number]);
+        }
+      }
+    }
+
     const toolCtx: ToolContext = {
       workspacePath,
       projectId: projectId || '',
@@ -846,7 +863,8 @@ export function setupMetaAgentHandlers() {
       permissions: {
         readFileLineLimit: config.readFileLineLimit || 1000,
       },
-      role: 'meta-agent',  // v23.0: 路径安全防护标识
+      role: 'meta-agent',
+      metaAgentAllowGit: config.allowGitAccess ?? false,  // v23.0: 用户手动授权
     };
 
     let totalIn = 0;

@@ -48,6 +48,7 @@ export function MetaAgentSettings({ onClose }: Props) {
     autoMemory: true,
     memoryInjectLimit: 30,
     greeting: '',
+    allowGitAccess: false,
     modeConfigs: {
       work: { maxReactIterations: 50, maxResponseTokens: 128000 },
       chat: { maxReactIterations: 5, maxResponseTokens: 32000, contextHistoryLimit: 30 },
@@ -411,6 +412,32 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
+        </div>
+      </section>
+
+      {/* Security & Permissions — v23.0 */}
+      <section>
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">安全 & 权限</h3>
+        <div className="bg-slate-800/30 border border-slate-800 rounded-xl px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex-1 min-w-0 mr-4">
+              <div className="text-xs text-slate-200 font-medium">GitHub / Git 访问权限</div>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+                允许管家访问 Git 仓库历史、提交记录等信息。关闭时管家无法查看 git log 和 .git 目录内容，以防止敏感信息泄露。
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => update('allowGitAccess', !config.allowGitAccess)}
+                className={`relative w-10 h-5 rounded-full transition-colors ${config.allowGitAccess ? 'bg-amber-600' : 'bg-slate-700'}`}
+              >
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.allowGitAccess ? 'left-[22px]' : 'left-0.5'}`} />
+              </button>
+              <span className={`text-[11px] ${config.allowGitAccess ? 'text-amber-400' : 'text-slate-500'}`}>
+                {config.allowGitAccess ? '已授权' : '已禁止'}
+              </span>
+            </div>
+          </div>
         </div>
       </section>
 

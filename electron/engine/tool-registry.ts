@@ -78,6 +78,8 @@ export interface ToolContext {
   permissions?: AgentPermissions;
   /** v23.0: 当前调用角色 — 用于 meta-agent 路径安全防护 */
   role?: import('./tool-permissions').AgentRole;
+  /** v23.0: meta-agent 是否被允许访问 git 信息 (用户手动授权) */
+  metaAgentAllowGit?: boolean;
 }
 
 // ═══════════════════════════════════════
