@@ -7,7 +7,7 @@
  * 条目数量始终与团队人数保持一致。
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { toast } from '../stores/toast-store';
 
@@ -17,6 +17,7 @@ import { toast } from '../stores/toast-store';
 // 角色图标 & 颜色映射
 // ═══════════════════════════════════════
 const ROLE_META: Record<string, { icon: string; color: string; bgGlow: string }> = {
+  'meta-agent': { icon: '🤖', color: 'text-forge-400', bgGlow: 'from-forge-500/10' },
   pm: { icon: '👔', color: 'text-violet-400', bgGlow: 'from-violet-500/10' },
   architect: { icon: '🏗️', color: 'text-blue-400', bgGlow: 'from-blue-500/10' },
   tech_lead: { icon: '🎯', color: 'text-indigo-400', bgGlow: 'from-indigo-500/10' },
@@ -24,6 +25,8 @@ const ROLE_META: Record<string, { icon: string; color: string; bgGlow: string }>
   qa: { icon: '🔍', color: 'text-amber-400', bgGlow: 'from-amber-500/10' },
   devops: { icon: '🚀', color: 'text-cyan-400', bgGlow: 'from-cyan-500/10' },
 };
+
+const META_AGENT_MEMBER_ID = '__meta-agent__';
 const DEFAULT_ROLE_META = { icon: '🤖', color: 'text-slate-400', bgGlow: 'from-slate-500/10' };
 
 function getRoleMeta(role: string) {
@@ -369,6 +372,132 @@ function MemberContextCard({
 }
 
 // ═══════════════════════════════════════
+// MetaAgentBaselinePanel — 管家 Agent 的上下文配置预览
+// ═══════════════════════════════════════
+function MetaAgentBaselinePanel() {
+  const meta = getRoleMeta('meta-agent');
+  const [config, setConfig] = useState<MetaAgentConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    window.automater.metaAgent
+      .getConfig()
+      .then(c => setConfig(c))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const budget = config?.contextTokenLimit || 512000;
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {/* 成员信息头 */}
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-10 h-10 rounded-xl bg-gradient-to-br ${meta.bgGlow} to-transparent flex items-center justify-center text-2xl border border-slate-700/30`}
+        >
+          {meta.icon}
+        </div>
+        <div>
+          <h2 className={`text-base font-bold ${meta.color}`}>{config?.name || '元Agent · 管家'}</h2>
+          <p className="text-[10px] text-slate-500">META-AGENT · 全局管家 · 上下文配置概览</p>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="text-center text-sm text-slate-500 py-4">
+          <div className="inline-block w-4 h-4 border-2 border-slate-600 border-t-cyan-400 rounded-full animate-spin mr-2" />
+          正在加载管家配置...
+        </div>
+      )}
+
+      {config && (
+        <>
+          {/* Token 预算概览 */}
+          <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">
+                上下文 Token 上限: <span className="text-slate-200 font-mono">{formatTokens(budget)}</span>
+              </span>
+              <span className="text-[10px] text-slate-500">管家对话使用独立上下文窗口</span>
+            </div>
+            <div className="h-5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+              <div className="h-full bg-forge-500/30" style={{ width: '0%' }} />
+            </div>
+            <div className="text-[10px] text-slate-500">管家当前待机，无活跃上下文快照。发起对话后将产生快照。</div>
+          </div>
+
+          {/* 配置详情 */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-slate-300">上下文配置参数</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Token 上限', value: formatTokens(config.contextTokenLimit) },
+                { label: '历史消息条数', value: String(config.contextHistoryLimit) },
+                { label: '最大回复 Token', value: formatTokens(config.maxResponseTokens) },
+                { label: 'ReAct 最大轮次', value: String(config.maxReactIterations) },
+                { label: '记忆注入条数', value: String(config.memoryInjectLimit) },
+                { label: 'read_file 行数上限', value: String(config.readFileLineLimit) },
+              ].map(item => (
+                <div key={item.label} className="bg-slate-900/30 rounded-lg border border-slate-800 px-3 py-2">
+                  <div className="text-[10px] text-slate-500">{item.label}</div>
+                  <div className="text-xs font-mono text-slate-200 mt-0.5">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 模式配置 */}
+          {config.modeConfigs && Object.keys(config.modeConfigs).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-medium text-slate-300">模式覆盖配置</h3>
+              {Object.entries(config.modeConfigs).map(([mode, mc]) => (
+                <div key={mode} className="bg-slate-900/30 rounded-lg border border-slate-800 px-3 py-2">
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                    {mode === 'chat' ? '💬 闲聊' : mode === 'deep' ? '🔬 深度' : mode === 'admin' ? '⚙️ 管理' : mode}
+                  </div>
+                  <div className="flex gap-3 flex-wrap text-[10px]">
+                    {mc.maxReactIterations !== undefined && (
+                      <span className="text-slate-400">
+                        轮次: <span className="text-slate-200 font-mono">{mc.maxReactIterations}</span>
+                      </span>
+                    )}
+                    {mc.contextHistoryLimit !== undefined && (
+                      <span className="text-slate-400">
+                        历史: <span className="text-slate-200 font-mono">{mc.contextHistoryLimit}条</span>
+                      </span>
+                    )}
+                    {mc.maxResponseTokens !== undefined && (
+                      <span className="text-slate-400">
+                        回复: <span className="text-slate-200 font-mono">{formatTokens(mc.maxResponseTokens)}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 其他标志 */}
+          <div className="flex flex-wrap gap-2 text-[10px]">
+            <span
+              className={`px-2 py-1 rounded-lg border ${config.autoMemory ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-slate-700 bg-slate-800/50 text-slate-500'}`}
+            >
+              {config.autoMemory ? '✅' : '❌'} 自动记忆
+            </span>
+            <span
+              className={`px-2 py-1 rounded-lg border ${config.allowGitAccess ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-slate-700 bg-slate-800/50 text-slate-500'}`}
+            >
+              {config.allowGitAccess ? '✅' : '❌'} Git 访问
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════
 // BaselinePanel — 待机时展示基线上下文预览（可展开查看内容）
 // ═══════════════════════════════════════
 function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: string }) {
@@ -542,6 +671,7 @@ function findAgentStatusForMember(
 ) {
   // Match by role prefix: pm-xxx → pm, arch-xxx → architect, dev-xxx → developer, qa-xxx → qa
   const rolePrefixes: Record<string, string[]> = {
+    'meta-agent': ['meta-agent'],
     pm: ['pm-'],
     architect: ['arch-'],
     developer: ['dev-'],
@@ -597,21 +727,53 @@ export function ContextPage() {
       .finally(() => setLoading(false));
   }, [currentProjectId]);
 
+  // 虚拟管家成员 — 始终在最前面
+  const metaAgentVirtualMember: TeamMember = useMemo(
+    () => ({
+      id: META_AGENT_MEMBER_ID,
+      project_id: currentProjectId || '',
+      role: 'meta-agent',
+      name: '元Agent · 管家',
+      model: null,
+      capabilities: JSON.stringify(['对话', '工具调用', '记忆', '需求创建']),
+      system_prompt: null,
+      context_files: '[]',
+      max_context_tokens: 512000,
+      created_at: '',
+      llm_config: null,
+      mcp_servers: null,
+      skills: null,
+      max_iterations: null,
+    }),
+    [currentProjectId],
+  );
+
   // 按角色排序: pm → architect → tech_lead → developer → qa → devops → 其他
   const ROLE_ORDER = ['pm', 'architect', 'tech_lead', 'developer', 'qa', 'devops'];
   const sortedMembers = useMemo(() => {
-    return [...members].sort((a, b) => {
+    const sorted = [...members].sort((a, b) => {
       const ia = ROLE_ORDER.indexOf(a.role);
       const ib = ROLE_ORDER.indexOf(b.role);
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
-  }, [members]);
+    // 管家 agent 始终在最前面
+    return [metaAgentVirtualMember, ...sorted];
+  }, [members, metaAgentVirtualMember]);
 
   // 选中的成员
   const selected = sortedMembers.find(m => m.id === selectedMemberId) ?? sortedMembers[0] ?? null;
+  const isMetaAgentSelected = selected?.id === META_AGENT_MEMBER_ID;
   // 尝试匹配 context snapshot — snapshot 的 agentId 可能是成员名或成员id
   const selectedSnapshot = useMemo(() => {
     if (!selected) return null;
+    // 管家 agent: 按 'meta-agent' 前缀匹配
+    if (isMetaAgentSelected) {
+      if (contextSnapshots.has('meta-agent')) return contextSnapshots.get('meta-agent');
+      for (const [aid, snap] of contextSnapshots) {
+        if (aid.startsWith('meta-agent')) return snap;
+      }
+      return null;
+    }
     // 1. 精确匹配 member.id
     if (contextSnapshots.has(selected.id)) return contextSnapshots.get(selected.id);
     // 2. 按名称匹配
@@ -621,7 +783,7 @@ export function ContextPage() {
       if (aid.includes(selected.name) || aid.includes(selected.role)) return snap;
     }
     return null;
-  }, [selected, contextSnapshots]);
+  }, [selected, isMetaAgentSelected, contextSnapshots]);
 
   // 统计
   const totalActive = useMemo(() => {
@@ -673,7 +835,7 @@ export function ContextPage() {
           <div>
             <h1 className="text-lg font-bold text-slate-100">🧠 上下文资产管理器</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              团队 {members.length} 人 · {totalActive} 人活跃 · 总 Token: {formatTokens(totalTokens)}
+              团队 {members.length} 人 + 管家 · {totalActive} 活跃 · 总 Token: {formatTokens(totalTokens)}
             </p>
           </div>
           {selectedSnapshot && (
@@ -702,10 +864,21 @@ export function ContextPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧: 团队成员列表 */}
         <div className="w-72 shrink-0 border-r border-slate-800 overflow-y-auto p-2 space-y-1">
-          {sortedMembers.map(member => {
+          {sortedMembers.map((member, idx) => {
             // 查找匹配快照
             let snap: ContextSnapshot | null = null;
-            if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id) ?? null;
+            if (member.id === META_AGENT_MEMBER_ID) {
+              // 管家 agent: 按 'meta-agent' 前缀匹配
+              if (contextSnapshots.has('meta-agent')) snap = contextSnapshots.get('meta-agent') ?? null;
+              else {
+                for (const [aid, s] of contextSnapshots) {
+                  if (aid.startsWith('meta-agent')) {
+                    snap = s;
+                    break;
+                  }
+                }
+              }
+            } else if (contextSnapshots.has(member.id)) snap = contextSnapshots.get(member.id) ?? null;
             else if (contextSnapshots.has(member.name)) snap = contextSnapshots.get(member.name) ?? null;
             else {
               for (const [aid, s] of contextSnapshots) {
@@ -716,17 +889,19 @@ export function ContextPage() {
               }
             }
             return (
-              <MemberContextCard
-                key={member.id}
-                member={member}
-                snapshot={snap}
-                agentStatus={findAgentStatusForMember(member, agentStatuses)}
-                isSelected={selected?.id === member.id}
-                onSelect={() => {
-                  setSelectedMemberId(member.id);
-                  setPreviewSection(null);
-                }}
-              />
+              <React.Fragment key={member.id}>
+                {idx === 1 && members.length > 0 && <div className="border-t border-slate-800/50 my-1" />}
+                <MemberContextCard
+                  member={member}
+                  snapshot={snap}
+                  agentStatus={findAgentStatusForMember(member, agentStatuses)}
+                  isSelected={selected?.id === member.id}
+                  onSelect={() => {
+                    setSelectedMemberId(member.id);
+                    setPreviewSection(null);
+                  }}
+                />
+              </React.Fragment>
             );
           })}
         </div>
@@ -801,6 +976,8 @@ export function ContextPage() {
               </div>
             )}
           </div>
+        ) : selected && isMetaAgentSelected ? (
+          <MetaAgentBaselinePanel />
         ) : selected ? (
           <BaselinePanel member={selected} projectId={currentProjectId} />
         ) : null}

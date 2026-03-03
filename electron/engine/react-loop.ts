@@ -157,7 +157,7 @@ export function getContextSnapshots(projectId: string): Map<string, ContextSnaps
   return contextSnapshotCache.get(projectId) ?? new Map();
 }
 
-function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
+export function cacheContextSnapshot(projectId: string, snapshot: ContextSnapshot) {
   if (!contextSnapshotCache.has(projectId)) {
     contextSnapshotCache.set(projectId, new Map());
   }

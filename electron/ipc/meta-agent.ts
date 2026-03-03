@@ -50,6 +50,8 @@ import type { DaemonConfig } from '../engine/meta-agent-daemon';
 
 const log = createLogger('ipc:meta-agent');
 import { toErrorMessage, createLogger } from '../engine/logger';
+import { cacheContextSnapshot } from '../engine/react-loop';
+import type { ContextSection, ContextSnapshot } from '../engine/context-collector';
 
 // ═══════════════════════════════════════
 // Types
@@ -1212,6 +1214,59 @@ export function setupMetaAgentHandlers() {
         agentId,
         content: `🔄 元Agent 开始 ReAct 对话循环 (最多 ${MAX_REACT_ITERATIONS} 轮)`,
       });
+
+      // v30.0: 构建并缓存管家上下文快照，供 ContextPage 展示
+      if (projectId) {
+        try {
+          const tokenBudget = config.contextTokenLimit || 512000;
+          const sections: ContextSection[] = [];
+          let totalChars = 0;
+          let totalTokens = 0;
+          for (const m of messages) {
+            const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            const chars = text.length;
+            const tokens = Math.ceil(chars / 1.5);
+            const sourceMap: Record<string, ContextSection['source']> = {
+              system: 'project-config',
+              user: 'keyword-match',
+              assistant: 'plan',
+            };
+            sections.push({
+              id: `meta-${m.role}-${sections.length}`,
+              name:
+                m.role === 'system' && sections.length === 0
+                  ? 'System Prompt'
+                  : m.role === 'system'
+                    ? '项目上下文'
+                    : m.role === 'user'
+                      ? '用户消息'
+                      : '助手回复',
+              source: sourceMap[m.role as string] ?? 'project-config',
+              content: text.slice(0, 2000),
+              chars,
+              tokens,
+              truncated: text.length > 2000,
+            });
+            totalChars += chars;
+            totalTokens += tokens;
+          }
+          const snapshot: ContextSnapshot = {
+            agentId: 'meta-agent',
+            featureId: `mode:${mode}`,
+            timestamp: Date.now(),
+            sections,
+            totalChars,
+            totalTokens,
+            tokenBudget,
+            contextText: '',
+            filesIncluded: 0,
+          };
+          cacheContextSnapshot(projectId, snapshot);
+          sendToUI(win, 'agent:context-snapshot', { projectId, snapshot });
+        } catch {
+          // 快照生成非关键路径，静默失败
+        }
+      }
 
       try {
         for (let iter = 1; iter <= MAX_REACT_ITERATIONS; iter++) {
