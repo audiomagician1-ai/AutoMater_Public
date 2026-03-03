@@ -319,11 +319,12 @@ export async function spawnSubAgent(
   logMsg(`启动 — 任务: ${task.slice(0, 80)}... 模型: ${model} 最大轮次: ${maxIter}`);
 
   // 构建 system prompt
-  const systemPrompt = [
+  // v10.2: 子 Agent 也遵守全局上下文管理纪律
+  const systemPrompt = withContextDiscipline([
     preset.systemPrompt,
     config.extraPrompt ? `\n## 额外指令\n${config.extraPrompt}` : '',
     `\n## 环境信息\n- 工作区: ${ctx.workspacePath}\n- 子Agent ID: ${agentId}\n- 最大轮次: ${maxIter}`,
-  ].join('');
+  ].join(''));
 
   // 构建工具列表 (从已注册的 TOOL_DEFINITIONS 中过滤)
   const allowedTools = new Set(preset.tools);
