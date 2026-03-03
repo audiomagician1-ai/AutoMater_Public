@@ -27,7 +27,7 @@
 
 import { callLLM } from './llm-client';
 import { createLogger } from './logger';
-import type { AppSettings, LLMMessage } from './types';
+import type { AppSettings } from './types';
 
 const log = createLogger('blackbox-test');
 
@@ -233,8 +233,8 @@ ${config.appUrl ? `\nApp URL for E2E: ${config.appUrl}` : ''}
 async function executeTestCase(
   test: TestCase,
   config: BlackboxTestConfig,
-  settings: AppSettings,
-  signal: AbortSignal,
+  _settings: AppSettings,
+  _signal: AbortSignal,
 ): Promise<TestCaseResult> {
   const start = Date.now();
 

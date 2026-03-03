@@ -255,7 +255,7 @@ export function getAgentSessionStats(agentId: string): AgentSessionStats | null 
  */
 export function getCostBreakdown(projectId?: string): CostBreakdown {
   const relevant = projectId
-    ? _llmRecords.filter(r => {
+    ? _llmRecords.filter(_r => {
         // 需要关联 tool records 找 projectId — 简化: 使用全部记录
         return true; // TODO: 如果需要 projectId 过滤，需要在 LLMCallRecord 中加 projectId
       })

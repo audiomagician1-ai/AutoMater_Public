@@ -13,8 +13,6 @@
  */
 
 import { getDb } from '../db';
-import fs from 'fs';
-import path from 'path';
 
 // ═══════════════════════════════════════
 // Types

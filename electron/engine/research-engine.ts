@@ -15,7 +15,7 @@
  * @since v8.0.0
  */
 
-import { search, searchBoost, readUrl, type SearchResult, type SearchResponse } from './search-provider';
+import { search, readUrl, type SearchResult, type SearchResponse } from './search-provider';
 import { callLLM } from './llm-client';
 import { createLogger } from './logger';
 import type { AppSettings } from './types';

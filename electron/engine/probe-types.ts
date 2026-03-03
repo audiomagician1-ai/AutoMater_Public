@@ -8,7 +8,7 @@
  */
 
 import type { CodeGraph, CommunityInfo, HubFile, ProjectProfile } from './code-graph';
-import type { ProjectSkeleton, ModuleSummary } from './project-importer';
+import type { ProjectSkeleton } from './project-importer';
 
 // ═══════════════════════════════════════
 // Probe Configuration

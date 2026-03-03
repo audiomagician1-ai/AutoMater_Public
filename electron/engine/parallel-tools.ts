@@ -9,7 +9,6 @@
  * v1.0 — 2026-03-02
  */
 
-import { isAsyncTool } from './tool-registry';
 
 // ═══════════════════════════════════════
 // Types

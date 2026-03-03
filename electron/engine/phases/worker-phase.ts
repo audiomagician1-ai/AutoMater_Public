@@ -23,7 +23,7 @@ import {
   type AppSettings, type CountResult, type EnrichedFeature, type FeatureRow, type GitProviderConfig,
 } from './shared';
 import {
-  createBranch, switchBranch, gitPush, createPR, addIssueComment, closeIssue, getCurrentBranch,
+  createBranch, switchBranch, gitPush, createPR, addIssueComment, getCurrentBranch,
 } from '../git-provider';
 import { harvestPostFeature } from '../experience-harvester';
 import { addInstance, compactProjectMemory } from '../experience-library';

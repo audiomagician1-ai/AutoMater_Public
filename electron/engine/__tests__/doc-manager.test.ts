@@ -1,7 +1,7 @@
 /**
  * Tests for doc-manager.ts — 文档管理 CRUD + 一致性检查
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';

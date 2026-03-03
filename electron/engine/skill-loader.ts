@@ -361,7 +361,7 @@ async function executeHttpSkill(
 function executeScriptSkill(
   exec: SkillExecution,
   args: Record<string, unknown>,
-  timeout: number,
+  _timeout: number,
 ): { success: boolean; output: string } {
   try {
     // 创建沙盒化的函数 (不能访问 require/import, 只接收 args)

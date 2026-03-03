@@ -2,7 +2,7 @@
  * llm-client extended tests — 覆盖 normalizeBaseUrl, sleep, anySignal,
  * getSettings (mock DB), callLLM (mock fetch), throwOnHttpError 等
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 // Mock DB before importing module
 vi.mock('../../db', () => ({
@@ -30,7 +30,6 @@ import {
   type ToolCallMessage,
 } from '../llm-client';
 import { NetworkError, type AppSettings } from '../types';
-import { getDb } from '../../db';
 
 // ═══════════════════════════════════════
 // normalizeBaseUrl (private, tested indirectly via callLLM)

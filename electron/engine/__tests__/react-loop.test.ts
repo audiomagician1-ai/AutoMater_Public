@@ -11,7 +11,7 @@
  *     这里通过 mock 测试其子组件。
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ── Mock 所有重量级依赖 ──
 
@@ -129,8 +129,7 @@ import {
   type MessageTokenBreakdown,
   type ReactIterationState,
   type AgentReactState,
-  type GenericReactConfig,
-  type GenericReactResult,
+    type GenericReactResult,
 } from '../react-loop';
 
 // ═══════════════════════════════════════

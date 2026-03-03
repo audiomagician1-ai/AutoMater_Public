@@ -5,7 +5,7 @@
  */
 
 import {
-  BrowserWindow, getDb, createLogger, execSync, execAsync, fs, path,
+  BrowserWindow, getDb, createLogger, execAsync, fs, path,
   callLLM, calcCost, sendToUI,
   spawnAgent, updateAgentStats, resolveMemberModel,
   writeDoc, readDoc, buildDesignContext, checkConsistency,

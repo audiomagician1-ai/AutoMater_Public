@@ -25,7 +25,7 @@ const dbMock = vi.hoisted(() => {
     reset: () => { nextRunResult = undefined; },
     getMock: () => ({
       prepare: vi.fn(() => ({
-        run: vi.fn((...args: any[]) => {
+        run: vi.fn((..._args: any[]) => {
           const r = nextRunResult;
           nextRunResult = undefined;
           return r || { lastInsertRowid: 1, changes: 1 };

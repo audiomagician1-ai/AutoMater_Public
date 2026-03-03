@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
+import { ContextMenu } from '../components/ContextMenu';
 import { createLogger } from '../utils/logger';
 import { toast } from '../stores/toast-store';
 import { renderMarkdown } from '../utils/markdown';
@@ -325,7 +325,7 @@ export function DocsPage() {
     setVersionModal({ item, versions: versions.length > 0 ? versions : [{ version: item.version, action: 'create', summary: '当前版本', date: new Date().toISOString(), agent: 'system' }] });
   };
 
-  const handleRollbackDoc = (item: DocTreeItem, version: number) => {
+  const handleRollbackDoc = (_item: DocTreeItem, _version: number) => {
     // TODO: 实现文档版本回退
     toast.info('文档版本回退功能即将上线');
     setVersionModal(null);

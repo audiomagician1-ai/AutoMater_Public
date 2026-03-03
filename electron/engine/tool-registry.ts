@@ -147,7 +147,7 @@ export function getToolsForLLM(gitMode: string = 'local'): OpenAIFunctionTool[] 
  * 从 MCP Manager 获取外部工具 (OpenAI format)。
  * 使用延迟 require 避免模块初始化时的循环依赖。
  */
-function getExternalMcpTools(role?: string): OpenAIFunctionTool[] {
+function getExternalMcpTools(_role?: string): OpenAIFunctionTool[] {
   try {
     // Lazy import to avoid circular dependency
 

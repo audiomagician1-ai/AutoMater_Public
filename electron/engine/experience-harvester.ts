@@ -14,7 +14,7 @@
  * v1.0.0: 初始实现 (D4+D5+D9)
  */
 
-import { callLLM, calcCost } from './llm-client';
+import { callLLM } from './llm-client';
 import { selectModelTier, resolveModel } from './model-selector';
 import { appendProjectMemory } from './memory-system';
 import { contributeKnowledge } from './cross-project';

@@ -14,7 +14,7 @@ import { runTest as sbRunTest, runLint as sbRunLint, type SandboxConfig } from '
 import { parseStructuredOutput, QA_VERDICT_SCHEMA } from './output-parser';
 import { programmaticQACheck } from './guards';
 import { getTeamPrompt, getTeamMemberLLMConfig } from './agent-manager';
-import type { AppSettings, FeatureRow, QAIssueItem } from './types';
+import type { AppSettings, FeatureRow } from './types';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger';

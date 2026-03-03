@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, globalShortcut, session } from 'electron';
+﻿import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { setupLLMHandlers } from './ipc/llm';
 import { setupProjectHandlers } from './ipc/project';

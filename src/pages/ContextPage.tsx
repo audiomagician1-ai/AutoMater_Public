@@ -9,7 +9,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { filterByProject } from '../stores/slices/agent-slice';
 import { toast } from '../stores/toast-store';
 
 // Types: ContextSection, ContextSnapshot, TeamMember are global (src/types/api.d.ts)

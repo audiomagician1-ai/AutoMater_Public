@@ -8,8 +8,7 @@ import {
   failCurrentStep,
   getPlanSummary,
   type FeaturePlan,
-  type PlanStep,
-} from '../planner';
+  } from '../planner';
 
 // ═══════════════════════════════════════
 // parsePlanFromLLM

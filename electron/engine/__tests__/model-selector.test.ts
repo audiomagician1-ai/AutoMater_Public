@@ -14,8 +14,7 @@ import {
   resolveModel,
   estimateFeatureComplexity,
   type TaskComplexity,
-  type ModelTier,
-} from '../model-selector';
+  } from '../model-selector';
 import type { FeatureRow } from '../types';
 
 describe('model-selector', () => {

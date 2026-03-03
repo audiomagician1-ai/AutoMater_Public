@@ -7,9 +7,6 @@
  * 闭环: 操作 → 截图 → 视觉验证 → 发现问题 → 修复 → 再验证
  */
 
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import { createLogger } from './logger';
 
 const log = createLogger('visual-tools');

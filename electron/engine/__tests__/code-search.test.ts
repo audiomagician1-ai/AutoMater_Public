@@ -4,9 +4,8 @@
  * 测试 ripgrep 搜索、文件搜索、批量读取、流式大文件读取、repo-map、code-graph 包装
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import path from 'path';
-import fs from 'fs';
 import {
   codeSearch,
   formatSearchResult,

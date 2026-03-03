@@ -80,7 +80,7 @@ export async function initRepo(config: GitProviderConfig): Promise<boolean> {
       const remoteUrl = `https://${githubToken}@github.com/${githubRepo}.git`;
       try {
         await execAsync(`git remote remove origin`, { cwd: workspacePath });
-      } catch (err) {
+      } catch (_err) {
         log.debug('No existing origin remote to remove');
       }
       await execAsync(`git remote add origin ${remoteUrl}`, { cwd: workspacePath });
@@ -135,7 +135,7 @@ export async function getLog(workspacePath: string, maxCount: number = 20): Prom
   try {
     const { stdout } = await execAsync(`git log --oneline -${maxCount}`, { cwd: workspacePath, encoding: 'utf-8' });
     return stdout.trim().split('\n').filter(Boolean);
-  } catch (err) {
+  } catch (_err) {
     log.debug('Git log retrieval failed');
     return [];
   }
@@ -147,7 +147,7 @@ export async function getDiff(workspacePath: string, commitRange?: string): Prom
     const cmd = commitRange ? `git diff ${commitRange}` : 'git diff HEAD';
     const { stdout } = await execAsync(cmd, { cwd: workspacePath, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
     return stdout;
-  } catch (err) {
+  } catch (_err) {
     log.debug('Git diff retrieval failed');
     return '';
   }
@@ -222,7 +222,7 @@ export async function closeIssue(
       { state: 'closed' }
     );
     return true;
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub close issue failed', { issueNumber });
     return false;
   }
@@ -246,7 +246,7 @@ export async function listIssues(
       labels: (d.labels || []).map((l: GitHubApiLabel) => l.name),
       html_url: d.html_url,
     }));
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub list issues failed');
     return [];
   }
@@ -266,7 +266,7 @@ export async function addIssueComment(
       { body }
     );
     return true;
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub add comment failed', { issueNumber });
     return false;
   }
@@ -451,7 +451,7 @@ export async function getIssue(
       labels: ((d.labels || []) as GitHubApiLabel[]).map(l => l.name),
       html_url: d.html_url as string,
     };
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub get issue failed', { issueNumber });
     return null;
   }
@@ -508,7 +508,7 @@ export async function listPRs(
       config.githubToken,
     );
     return ((data || []) as Record<string, unknown>[]).map(parsePR);
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub list PRs failed');
     return [];
   }
@@ -525,7 +525,7 @@ export async function getPR(
       config.githubToken,
     );
     return parsePR(data);
-  } catch (err) {
+  } catch (_err) {
     log.warn('GitHub get PR failed', { prNumber });
     return null;
   }

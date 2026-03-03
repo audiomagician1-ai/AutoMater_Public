@@ -12,7 +12,7 @@
  */
 
 import {
-  BrowserWindow, getDb, createLogger, execAsync, fs, path,
+  BrowserWindow, createLogger, execAsync, fs, path,
   sendToUI, addLog,
   type AppSettings,
 } from './shared';
@@ -172,7 +172,7 @@ export async function phaseEnvironmentBootstrap(
       await initRepo(gitConfig);
       result.gitConfigured = true;
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `  🔗 Git 远程已配置: ${gitConfig.githubRepo}` });
-    } catch (err) {
+    } catch (_err) {
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ⚠️ Git 远程配置失败 (非致命)' });
     }
   }

@@ -40,8 +40,7 @@ import {
   phaseArchitect,
   phaseReqsAndTestSpecs, phaseIncrementalDocSync,
   workerLoop,
-  phaseDevOpsBuild,
-  phaseDeployPipeline,
+    phaseDeployPipeline,
   phaseFinalize,
   phaseEnvironmentBootstrap,
 } from './phases';

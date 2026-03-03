@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { createLogger } from './logger';
-import type { ProbeReport, ProbeConfig, ModuleGraph, ModuleGraphNode, ModuleGraphEdge } from './probe-types';
+import type { ProbeReport, ProbeConfig, ModuleGraph, ModuleGraphNode } from './probe-types';
 import { safeJsonParse } from './safe-json';
 
 const log = createLogger('probe-cache');

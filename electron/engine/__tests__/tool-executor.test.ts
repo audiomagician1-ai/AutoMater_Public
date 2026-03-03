@@ -197,7 +197,7 @@ vi.mock('../skill-loader', () => ({
 
 // Now import the module under test
 import { executeTool, executeToolAsync } from '../tool-executor';
-import type { ToolCall, ToolResult, ToolContext } from '../tool-registry';
+import type { ToolCall, ToolContext } from '../tool-registry';
 
 // ── Helpers ──
 

@@ -16,8 +16,8 @@ import {
   type CodeGraphNode,
 } from '../code-graph';
 import { planProbes, mergeFindings } from '../probe-orchestrator';
-import { extractJSON, extractBlock, grepFiles, getExports } from '../probes/base-probe';
-import type { ScanResult, ProbeReport, Finding } from '../probe-types';
+import { extractJSON, extractBlock } from '../probes/base-probe';
+import type { ScanResult, ProbeReport } from '../probe-types';
 
 // ═══════════════════════════════════════
 // Test Helpers

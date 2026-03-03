@@ -13,8 +13,7 @@ import {
   assertNonEmptyString,
   assertString,
   assertObject,
-  assertOptionalString,
-} from './ipc-validator';
+  } from './ipc-validator';
 import {
   runOrchestrator,
   stopOrchestrator,

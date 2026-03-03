@@ -4,7 +4,7 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import { toErrorMessage, createLogger } from '../engine/logger';
-import { assertProjectId, assertNonEmptyString, assertOptionalString } from './ipc-validator';
+import { assertProjectId, assertNonEmptyString } from './ipc-validator';
 import {
   createMission, getMission, listMissions, getMissionTasks,
   runMission, cancelMission, cleanupMission, deleteMission,

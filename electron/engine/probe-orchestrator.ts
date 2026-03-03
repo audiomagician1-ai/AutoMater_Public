@@ -9,7 +9,6 @@
  * @module probe-orchestrator
  */
 
-import path from 'path';
 import type {
   ProbeConfig,
   ProbeReport,
@@ -18,8 +17,7 @@ import type {
   ExplorationPlan,
   MergedFindings,
   Finding,
-  ProbeProgress,
-  ImportLogCallback,
+    ImportLogCallback,
 } from './probe-types';
 import type { CommunityInfo, HubFile } from './code-graph';
 import { EntryProbe, ModuleProbe, APIBoundaryProbe, DataModelProbe, ConfigInfraProbe, SmellProbe } from './probes';

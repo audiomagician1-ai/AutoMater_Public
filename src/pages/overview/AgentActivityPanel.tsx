@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppStore } from '../../stores/app-store';
-import { filterByProject } from '../../stores/slices/agent-slice';
 import { AgentWorkFeed } from '../../components/AgentWorkFeed';
 
 const AGENT_ROLE_TAB_INFO: Record<string, { icon: string; label: string }> = {

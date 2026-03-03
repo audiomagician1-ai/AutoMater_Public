@@ -22,7 +22,7 @@ vi.mock('../ui-bridge', () => ({
 vi.mock('../../db', () => ({
   getDb: () => ({
     prepare: () => ({
-      run: (...args: any[]) => ({ lastInsertRowid: 1, changes: 1 }),
+      run: (..._args: any[]) => ({ lastInsertRowid: 1, changes: 1 }),
       get: () => undefined,
       all: () => [],
     }),

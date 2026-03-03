@@ -32,7 +32,7 @@ import {
 } from './tool-system';
 import { safeJsonParse } from './safe-json';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
-import { DEVELOPER_REACT_PROMPT, getCategoryGuidance } from './prompts';
+import { DEVELOPER_REACT_PROMPT, getCategoryGuidance, withContextDiscipline } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
 import {
   guardToolCall,
@@ -431,7 +431,10 @@ export async function reactDeveloperLoop(
   const baseDevPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
   // v20.0: 按 feature category 注入特定指导
   const categoryGuidance = getCategoryGuidance(feature.category || '');
-  const devSystemPrompt = categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt;
+  // v10.2: 全局上下文管理纪律
+  const devSystemPrompt = withContextDiscipline(
+    categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt,
+  );
 
   const messages: LLMMessage[] = [
     { role: 'system', content: devSystemPrompt },
@@ -1399,8 +1402,11 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     hasWrittenFiles: false, hasRunVerification: false, role,
   };
 
+  // v10.2: 全局上下文管理纪律
+  const enhancedSystemPrompt = withContextDiscipline(systemPrompt);
+
   const messages: LLMMessage[] = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: enhancedSystemPrompt },
     { role: 'user', content: userMessage },
   ];
 

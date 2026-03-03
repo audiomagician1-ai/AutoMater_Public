@@ -1,7 +1,7 @@
 /**
  * Tests for sub-agent-framework.ts — PRESETS data + active agent tracking
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock heavy dependencies to isolate the pure data / tracking functions
 vi.mock('../llm-client', () => ({ callLLMWithTools: vi.fn(), calcCost: () => 0, NonRetryableError: class extends Error {} }));

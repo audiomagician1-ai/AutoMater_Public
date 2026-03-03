@@ -911,3 +911,71 @@ export const PM_WISH_TRIAGE_PROMPT = `你是一位资深产品经理。你的任
 - **不要**因为新功能看起来独立就忽略潜在的数据模型/接口影响
 - **必须**仔细阅读每个现有 Feature 的验收标准，判断新需求是否与之矛盾
 - 如果新需求与现有 Feature 的验收标准直接矛盾，必须在 conflicts 中列出`;
+
+// ═══════════════════════════════════════
+// v10.2: 全局上下文管理纪律 — 所有 Agent 角色共用
+// ═══════════════════════════════════════
+
+/**
+ * 通用的上下文管理纪律指令。
+ * 
+ * 这是底层工作模式，不是某个角色的特权。所有使用工具的 Agent
+ * （Developer、QA、PM ReAct、Sub-Agent）都必须遵守。
+ * 
+ * 灵感来源：Anthropic Context Engineering — proactive note-taking,
+ * summarize-then-discard, sub-agent isolation。
+ */
+export const CONTEXT_MANAGEMENT_DIRECTIVE = `
+
+## 📝 上下文管理纪律 (底层工作模式 — 必须遵守)
+
+**你的对话上下文有限且不可逆。旧的工具输出会被系统自动压缩或丢弃。
+你必须像维护笔记本一样主动管理自己的工作记忆，而非依赖回看历史消息。**
+
+### 规则 1: 读后即记 — 不要指望回看原文
+每次 \`read_file\` / \`code_search\` / \`search_files\` / \`web_search\` 返回信息后，
+**立即**用 \`scratchpad_write\` 提炼并记录关键发现：
+- 文件路径 + 行号 + 关键签名/接口
+- 与当前任务直接相关的核心逻辑或数据结构
+- 发现的约束、问题或依赖关系
+
+示例: 读完一个文件后 →
+\`\`\`
+scratchpad_write(category="discovery", content="src/engine/react-loop.ts L430-440: devSystemPrompt 由 getTeamPrompt() 构建, fallback 到 DEVELOPER_REACT_PROMPT; messages 初始化为 [system, user]")
+\`\`\`
+
+**反模式**: ❌ 读完代码不记笔记 → 后面压缩后忘了 → 浪费迭代重新读
+
+### 规则 2: 关键决策必须入库
+当你做出设计/实现决策时（选择了某个方案而非另一个），用 \`scratchpad_write(category="decision")\` 记录：
+- 决策内容 + 理由 + 排除了什么替代方案
+- 这确保即使对话被压缩，你仍记得为什么这样做
+
+### 规则 3: 阶段切换时回顾笔记
+在从"理解"转入"实现"、或从"实现"转入"验证"时，先 \`scratchpad_read\` 回顾已记录的发现和决策，
+避免遗漏之前发现的关键信息。
+
+### 规则 4: 大范围探索用子代理
+如果需要理解大型模块（>500 行或 >5 个文件），优先用 \`spawn_sub_agent(preset="researcher")\` 委托：
+\`\`\`
+spawn_sub_agent(preset="researcher", task="分析 src/engine/ 的模块依赖，列出每个文件的核心 export 和调用关系")
+\`\`\`
+你只接收子代理的结论摘要（几十行），而非自己逐文件阅读（几千行），**大幅节省上下文空间**。
+`;
+
+/**
+ * 将角色专属 system prompt 与全局上下文管理纪律合并。
+ * 
+ * 所有构建 system prompt 的入口都应调用此函数，确保纪律统一注入。
+ * 纪律追加在角色 prompt 末尾，不改变角色定义和工作流指令。
+ * 
+ * @param rolePrompt 角色专属的 system prompt
+ * @param options.skipForShortLived 对于超短生命周期调用（如单次 callLLM 不走 react loop）可跳过
+ */
+export function withContextDiscipline(
+  rolePrompt: string,
+  options?: { skipForShortLived?: boolean },
+): string {
+  if (options?.skipForShortLived) return rolePrompt;
+  return rolePrompt + CONTEXT_MANAGEMENT_DIRECTIVE;
+}

@@ -5,8 +5,7 @@ import {
   QA_VERDICT_SCHEMA,
   PLAN_STEPS_SCHEMA,
   PM_ACCEPTANCE_SCHEMA,
-  type SchemaSpec,
-} from '../output-parser';
+  } from '../output-parser';
 
 // Helper types for test assertions
 type FeatureItem = Record<string, unknown>;

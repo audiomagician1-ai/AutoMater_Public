@@ -31,7 +31,6 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { createLogger } from './logger';
-import type { AppSettings } from './types';
 
 const log = createLogger('experience-library');
 
@@ -241,7 +240,7 @@ export function addInstance(
  * 如果同 domain 已有相似 pattern → 合并(追加子项)
  * 如果超容量 → 淘汰 use_count 最低的
  */
-export function addOrMergePattern(workspacePath: string, domain: string, text: string, derivedFrom?: string): Pattern {
+export function addOrMergePattern(workspacePath: string, domain: string, text: string, _derivedFrom?: string): Pattern {
   const lib = loadProjectLibrary(workspacePath);
 
   // 查找同 domain 的现有 pattern

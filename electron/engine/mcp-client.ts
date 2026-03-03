@@ -283,7 +283,7 @@ export class McpConnection {
       try {
         const msg = JSON.parse(line) as JsonRpcResponse;
         this.handleResponse(msg);
-      } catch (err) {
+      } catch (_err) {
         log.debug('Non-JSON line from MCP server', { line: line.slice(0, 200) });
       }
     }

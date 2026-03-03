@@ -19,7 +19,7 @@ const log = createLogger('ui-bridge');
 export function sendToUI(win: BrowserWindow | null, channel: string, data: unknown) {
   try {
     win?.webContents.send(channel, data);
-  } catch (err) {
+  } catch (_err) {
     log.debug('sendToUI failed (window likely closed)', { channel });
   }
   // v5.4: agent:log 消息自动持久化到 DB
@@ -45,7 +45,7 @@ export function addLog(projectId: string, agentId: string, type: string, content
   try {
     const db = getDb();
     db.prepare('INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, ?, ?, ?)').run(projectId, agentId, type, content);
-  } catch (err) {
+  } catch (_err) {
     log.warn('Failed to write agent log to DB', { projectId, agentId, type });
   }
 }
@@ -59,7 +59,7 @@ export function notify(title: string, body: string) {
     if (Notification.isSupported()) {
       new Notification({ title, body, silent: false }).show();
     }
-  } catch (err) {
+  } catch (_err) {
     log.debug('Native notification failed', { title });
   }
 }

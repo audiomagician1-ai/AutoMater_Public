@@ -3,10 +3,10 @@
  */
 
 import { ipcMain } from 'electron';
-import { queryEvents, getFeatureTimeline, getRecentEvents, getProjectEventStats, exportEventsNDJSON } from '../engine/event-store';
+import { queryEvents, getFeatureTimeline, getProjectEventStats, exportEventsNDJSON } from '../engine/event-store';
 import { getMissionStatus, getCheckpoints, generateProgressReport, detectResumableProjects } from '../engine/mission';
 import { getKnowledgeStats, queryKnowledge } from '../engine/cross-project';
-import { assertNonEmptyString, assertProjectId, assertArray, assertOptionalNumber, assertOptionalString } from './ipc-validator';
+import { assertNonEmptyString, assertProjectId, assertArray } from './ipc-validator';
 
 export function setupEventHandlers() {
   // ── Events ──

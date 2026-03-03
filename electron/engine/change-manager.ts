@@ -18,13 +18,13 @@ import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { callLLM, calcCost, getSettings } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
-import { spawnAgent, updateAgentStats, getTeamPrompt } from './agent-manager';
+import { spawnAgent, updateAgentStats } from './agent-manager';
 import { writeDoc, readDoc, buildDesignContext, listDocs, checkConsistency } from './doc-manager';
 import { PM_IMPACT_ANALYSIS_PROMPT, PM_UPDATE_DESIGN_PROMPT, QA_UPDATE_TEST_SPEC_PROMPT, PM_WISH_TRIAGE_PROMPT } from './prompts';
 import { parseStructuredOutput } from './output-parser';
 import { emitEvent } from './event-store';
 import { createCheckpoint } from './mission';
-import type { AppSettings, FeatureRow, ProjectRow } from './types';
+import type { AppSettings, ProjectRow } from './types';
 
 // ═══════════════════════════════════════
 // Types

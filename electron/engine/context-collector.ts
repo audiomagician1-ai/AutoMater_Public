@@ -21,10 +21,10 @@ import { readDirectoryTree, readWorkspaceFile, type FileNode } from './file-writ
 import { getDb } from '../db';
 import { generateRepoMap } from './repo-map';
 import { readMemoryForRole, readProjectMemory } from './memory-system';
-import { buildCodeGraph, traverseGraph, inferSeedFiles, graphSummary, type CodeGraph } from './code-graph';
+import { buildCodeGraph, traverseGraph, inferSeedFiles } from './code-graph';
 import { buildCrossProjectContext } from './cross-project';
 import type { FeatureRow } from './types';
-import type { ModuleGraph, ModuleGraphNode, ModuleGraphEdge } from './probe-types';
+import type { ModuleGraph, ModuleGraphNode } from './probe-types';
 import { buildHotMemory, buildWarmMemory, selectColdModules, loadColdMemory, extractKeywords } from './memory-layers';
 import { extractRecentFeatureLessons } from './experience-harvester';
 
@@ -73,7 +73,7 @@ export function loadKnownIssues(workspacePath: string): string | null {
 }
 
 /** Score a module node against a feature for relevance */
-function scoreModuleRelevance(node: ModuleGraphNode, keywords: string[], feature: FeatureRow): number {
+function scoreModuleRelevance(node: ModuleGraphNode, keywords: string[], _feature: FeatureRow): number {
   let score = 0;
   const haystack = [
     node.id, node.responsibility, node.path,

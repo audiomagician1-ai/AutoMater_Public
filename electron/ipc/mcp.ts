@@ -20,11 +20,11 @@
 
 import { ipcMain } from 'electron';
 import { getDb } from '../db';
-import { mcpManager, type McpServerConfig, type McpToolInfo } from '../engine/mcp-client';
+import { mcpManager, type McpServerConfig } from '../engine/mcp-client';
 import { skillManager, type SkillScanResult } from '../engine/skill-loader';
 import { skillEvolution } from '../engine/skill-evolution';
 import { createLogger, toErrorMessage } from '../engine/logger';
-import { assertNonEmptyString, assertObject, assertOptionalString } from './ipc-validator';
+import { assertNonEmptyString, assertObject } from './ipc-validator';
 
 const log = createLogger('ipc:mcp');
 

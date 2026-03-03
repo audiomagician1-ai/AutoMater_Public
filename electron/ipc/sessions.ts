@@ -12,14 +12,13 @@
  */
 
 import { ipcMain, shell } from 'electron';
-import { assertProjectId, assertNonEmptyString, assertOptionalString, assertOptionalNumber } from './ipc-validator';
+import { assertProjectId, assertNonEmptyString, assertOptionalNumber } from './ipc-validator';
 import {
   createSession, switchSession, listSessions, listAllSessions,
   getActiveSession, readSessionBackup, getBackupStats, cleanupOldBackups,
   getSessionsForFeature, getFeaturesForSession, listFeatureSessionLinks,
   batchGetFeatureSessionSummaries,
-  type SessionInfo,
-} from '../engine/conversation-backup';
+  } from '../engine/conversation-backup';
 
 export function setupSessionHandlers() {
 

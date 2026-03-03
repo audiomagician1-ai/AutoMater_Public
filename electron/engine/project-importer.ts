@@ -1474,8 +1474,8 @@ export async function incrementalUpdate(
   workspacePath: string,
   changedFiles: string[],
   skeleton: ProjectSkeleton,
-  signal?: AbortSignal,
-  onProgress?: ImportProgressCallback,
+  _signal?: AbortSignal,
+  _onProgress?: ImportProgressCallback,
 ): Promise<{ updatedModules: string[] }> {
   log.info('incrementalUpdate', { changedFileCount: changedFiles.length });
 

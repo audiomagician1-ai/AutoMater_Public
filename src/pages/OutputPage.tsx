@@ -1,6 +1,6 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { ContextMenu, type ContextMenuItem } from '../components/ContextMenu';
+import { ContextMenu } from '../components/ContextMenu';
 import { createLogger } from '../utils/logger';
 import { toast } from '../stores/toast-store';
 import { EmptyState } from '../components/EmptyState';
@@ -95,7 +95,7 @@ function TreeNode({
 }
 
 // ── 轻量语法高亮 ──
-function highlightCode(line: string, lang: string): string {
+function highlightCode(line: string, _lang: string): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let html = esc(line);
 
@@ -462,12 +462,12 @@ export function OutputPage() {
     }
   };
 
-  const handleViewVersions = async (filePath: string) => {
+  const handleViewVersions = async (_filePath: string) => {
     // TODO: 实现真正的 git log 版本查询 — 暂时隐藏此功能
     toast.info('版本历史功能即将上线');
   };
 
-  const handleRollback = async (filePath: string, hash: string) => {
+  const handleRollback = async (_filePath: string, _hash: string) => {
     // TODO: 实现 git checkout <hash> -- <file>
     toast.info('版本回退功能即将上线');
   };

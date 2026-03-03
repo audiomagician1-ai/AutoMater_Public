@@ -5,11 +5,11 @@
  * API Key 安全地存在主进程侧，渲染进程无法直接访问
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { getDb } from '../db';
 import type { AppSettings } from '../engine/types';
 import { toErrorMessage } from '../engine/logger';
-import { assertObject, assertString } from './ipc-validator';
+import { assertObject } from './ipc-validator';
 import { safeJsonParse } from '../engine/safe-json';
 
 interface LLMProvider {

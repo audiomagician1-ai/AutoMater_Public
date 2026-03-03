@@ -5,7 +5,7 @@
  * 结果按项目分组，点击结果跳转到对应项目的产出页。
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
 
 interface GlobalMatch {

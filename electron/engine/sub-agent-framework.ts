@@ -14,14 +14,14 @@
  * @since v7.0.0
  */
 
-import { callLLMWithTools, calcCost, NonRetryableError, type StreamCallback } from './llm-client';
+import { callLLMWithTools, calcCost, NonRetryableError } from './llm-client';
 import { TOOL_DEFINITIONS, isAsyncTool, type ToolContext, type ToolCall, type ToolResult } from './tool-registry';
 import { executeTool, executeToolAsync } from './tool-executor';
 import { resolveModel } from './model-selector';
-import { acquireFileLock, releaseWorkerLocks } from './file-lock';
-import { sendToUI, addLog } from './ui-bridge';
+import { releaseWorkerLocks } from './file-lock';
 import { createLogger } from './logger';
 import { maskOldToolOutputs } from './scratchpad';
+import { withContextDiscipline } from './prompts';
 import type { AppSettings, LLMMessage } from './types';
 
 const log = createLogger('sub-agent');

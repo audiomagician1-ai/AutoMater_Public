@@ -9,8 +9,7 @@ import {
   parseToolCalls,
   isAsyncTool,
   type AgentRole,
-  type ToolDefinition,
-} from '../tool-registry';
+  } from '../tool-registry';
 
 // Mock MCP and Skill to prevent lazy require from failing
 vi.mock('../mcp-client', () => ({

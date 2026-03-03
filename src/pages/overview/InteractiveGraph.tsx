@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '../../stores/app-store';
-import { filterByProject } from '../../stores/slices/agent-slice';
 import {
   type Feature,
   type ViewLevel,
@@ -48,7 +47,7 @@ function MiniProgressBar({ counts, width }: { counts: Record<string, number>; wi
 
 export function InteractiveGraph({
   features,
-  onDrillDown,
+  onDrillDown: _onDrillDown,
 }: {
   features: Feature[];
   onDrillDown: (level: ViewLevel, value: string) => void;

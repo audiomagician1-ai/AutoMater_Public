@@ -9,7 +9,7 @@
  *  4. 结构化输出不崩溃 (data / error / stack)
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { createLogger, setLogLevel, toErrorMessage, type LogLevel } from '../logger';
+import { createLogger, setLogLevel, toErrorMessage } from '../logger';
 
 describe('logger', () => {
   // 保存 + 恢复原始 console 方法

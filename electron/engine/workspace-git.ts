@@ -15,7 +15,6 @@ import { promisify } from 'util';
 
 const execAsync = promisify(execCb);
 import fs from 'fs';
-import path from 'path';
 import { initRepo, commit as gpCommit, getLog as gpGetLog, type GitProviderConfig } from './git-provider';
 import { createLogger } from './logger';
 

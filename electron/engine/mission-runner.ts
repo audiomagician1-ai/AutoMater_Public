@@ -13,7 +13,7 @@
 
 import { getDb } from '../db';
 import { callLLM, getSettings } from './llm-client';
-import { sendToUI, addLog } from './ui-bridge';
+import { sendToUI } from './ui-bridge';
 import { createLogger } from './logger';
 import type { MissionRow, MissionTaskRow, ProjectRow } from './types';
 import { BrowserWindow } from 'electron';

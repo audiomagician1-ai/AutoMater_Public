@@ -7,7 +7,7 @@
  * v6.0
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface MetricHistory {
   /** 最近 N 次采样的值 (0~100) */

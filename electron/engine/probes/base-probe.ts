@@ -15,13 +15,12 @@ import fs from 'fs';
 import path from 'path';
 import type { CodeGraph } from '../code-graph';
 import { traverseGraph } from '../code-graph';
-import { callLLM, getSettings } from '../llm-client';
+import { callLLM } from '../llm-client';
 import type { AppSettings } from '../types';
 import type {
   ProbeConfig,
   ProbeReport,
-  ProbeType,
-  Finding,
+    Finding,
   ProbeDepEdge,
   ProbeIssue,
   ScanResult,

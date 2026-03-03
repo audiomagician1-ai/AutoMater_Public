@@ -13,8 +13,7 @@ import {
   sendToUI,
   addLog,
   notify,
-  createStreamCallback,
-  spawnAgent,
+    spawnAgent,
   updateAgentStats,
   getTeamPrompt,
   getTeamMemberLLMConfig,
@@ -324,7 +323,7 @@ export async function phaseIncrementalPM(
   settings: AppSettings,
   win: BrowserWindow | null,
   signal: AbortSignal,
-  workspacePath: string | null,
+  _workspacePath: string | null,
 ): Promise<ParsedFeature[] | null> {
   const db = getDb();
   const pmId = 'pm-0'; // 固定 ID: 增量分析复用 PM Agent

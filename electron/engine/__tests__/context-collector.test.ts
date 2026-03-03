@@ -5,8 +5,6 @@
  * 我们 mock 所有外部依赖, 只测试内部逻辑和导出类型。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import path from 'path';
-import fs from 'fs';
 
 // Mock heavy dependencies
 vi.mock('../../db', () => ({
@@ -62,8 +60,7 @@ import {
   collectDeveloperContext,
   type ContextSection,
   type ContextSnapshot,
-  type ContextResult,
-} from '../context-collector';
+  } from '../context-collector';
 import { readDirectoryTree, readWorkspaceFile } from '../file-writer';
 import { readMemoryForRole } from '../memory-system';
 
