@@ -1,15 +1,25 @@
 /**
- * ChatInput v28.0 — 可复用的聊天输入组件
+ * ChatInput v29.0 — 可复用的聊天输入组件
  *
  * 支持:
  * - 文本输入 (Enter发送, Shift+Enter换行)
  * - 📎 附件按钮 (图片/文件)
- * - 拖拽上传
- * - 粘贴上传 (图片)
+ * - 拖拽上传 (输入栏 + 父组件委托整面板拖拽)
+ * - 粘贴上传 (图片, textarea + 父组件委托整面板粘贴)
  * - 附件预览条 (图片缩略图 + 文件图标)
+ * - useImperativeHandle 暴露 addFilesFromDrop / addImageFromClipboard 供父组件调用
  */
 
-import { useState, useRef, useCallback, type DragEvent, type ClipboardEvent, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+  type DragEvent,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from 'react';
 
 export interface ChatAttachment {
   type: 'image' | 'file';
@@ -17,6 +27,16 @@ export interface ChatAttachment {
   data: string; // base64 data URL for images, file path for files
   mimeType: string;
   size?: number;
+}
+
+/** 父组件可通过 ref 调用的方法 */
+export interface ChatInputHandle {
+  /** 从 DragEvent.dataTransfer.files 添加附件 (Electron file.path) */
+  addFilesFromDrop: (files: FileList) => Promise<void>;
+  /** 从 ClipboardEvent.clipboardData.items 添加图片 */
+  addImageFromClipboard: (items: DataTransferItemList) => void;
+  /** 聚焦输入框 */
+  focus: () => void;
 }
 
 interface ChatInputProps {
@@ -34,7 +54,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export function ChatInput({ onSend, sending, placeholder, compact, disabled }: ChatInputProps) {
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
+  { onSend, sending, placeholder, compact, disabled },
+  ref,
+) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -62,6 +85,57 @@ export function ChatInput({ onSend, sending, placeholder, compact, disabled }: C
       setAttachments(prev => [...prev, ...newAtts].slice(0, 10)); // max 10
     }
   }, []);
+
+  /** 从 FileList 提取 Electron file.path 并添加附件 */
+  const addFilesFromDrop = useCallback(
+    async (files: FileList) => {
+      const paths: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i] as File & { path?: string };
+        if (f.path) paths.push(f.path);
+      }
+      if (paths.length > 0) {
+        await addAttachments(paths);
+      }
+    },
+    [addAttachments],
+  );
+
+  /** 从 DataTransferItemList 提取第一张图片并添加为附件 */
+  const addImageFromClipboard = useCallback((items: DataTransferItemList) => {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const att: ChatAttachment = {
+            type: 'image',
+            name: `clipboard-${Date.now()}.png`,
+            data: dataUrl,
+            mimeType: item.type,
+            size: blob.size,
+          };
+          setAttachments(prev => [...prev, att].slice(0, 10));
+        };
+        reader.readAsDataURL(blob);
+        return; // Only handle first image
+      }
+    }
+  }, []);
+
+  // 暴露给父组件的命令式方法
+  useImperativeHandle(
+    ref,
+    () => ({
+      addFilesFromDrop,
+      addImageFromClipboard,
+      focus: () => textareaRef.current?.focus(),
+    }),
+    [addFilesFromDrop, addImageFromClipboard],
+  );
 
   const handlePickFiles = async () => {
     try {
@@ -126,15 +200,7 @@ export function ChatInput({ onSend, sending, placeholder, compact, disabled }: C
     setDragOver(false);
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      // In Electron, dropped files have .path
-      const paths: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const f = files[i] as File & { path?: string };
-        if (f.path) paths.push(f.path);
-      }
-      if (paths.length > 0) {
-        await addAttachments(paths);
-      }
+      await addFilesFromDrop(files);
     }
   };
 
@@ -142,27 +208,12 @@ export function ChatInput({ onSend, sending, placeholder, compact, disabled }: C
   const handlePaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    // 检查是否有图片
     for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.type.startsWith('image/')) {
+      if (items[i].type.startsWith('image/')) {
         e.preventDefault();
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        // Convert blob to base64
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const att: ChatAttachment = {
-            type: 'image',
-            name: `clipboard-${Date.now()}.png`,
-            data: dataUrl,
-            mimeType: item.type,
-            size: blob.size,
-          };
-          setAttachments(prev => [...prev, att].slice(0, 10));
-        };
-        reader.readAsDataURL(blob);
-        return; // Only handle first image
+        addImageFromClipboard(items);
+        return;
       }
     }
   };
@@ -263,4 +314,4 @@ export function ChatInput({ onSend, sending, placeholder, compact, disabled }: C
       </div>
     </div>
   );
-}
+});

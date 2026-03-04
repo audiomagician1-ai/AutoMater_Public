@@ -20,7 +20,7 @@ import { toast, confirm } from '../stores/toast-store';
 import { renderMarkdown } from '../utils/markdown';
 import { EmptyState } from '../components/EmptyState';
 import { MSG_STYLES } from '../components/AgentWorkFeed';
-import { ChatInput, type ChatAttachment } from '../components/ChatInput';
+import { ChatInput, type ChatAttachment, type ChatInputHandle } from '../components/ChatInput';
 import { MessageAttachments } from '../components/MessageAttachments';
 
 // ═══════════════════════════════════════
@@ -757,6 +757,8 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const [agentName, setAgentName] = useState('元Agent · 项目管家');
   const [greetingText, setGreetingText] = useState(GREETING.content);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
+  const [panelDragOver, setPanelDragOver] = useState(false);
 
   // 思维过程 (工作消息)
   const metaCK = currentProjectId ? currentProjectId + ':meta-agent' : 'meta-agent';
@@ -853,6 +855,51 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, metaAgentWorkMsgs.length]);
+
+  // ── 全面板拖拽/粘贴 → 委托给 ChatInput ──
+  const dragCounterRef = useRef(0);
+  const handlePanelDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes('Files')) setPanelDragOver(true);
+  }, []);
+  const handlePanelDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+  const handlePanelDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setPanelDragOver(false);
+    }
+  }, []);
+  const handlePanelDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setPanelDragOver(false);
+    if (e.dataTransfer.files.length > 0 && chatInputRef.current) {
+      await chatInputRef.current.addFilesFromDrop(e.dataTransfer.files);
+      chatInputRef.current.focus();
+    }
+  }, []);
+  const handlePanelPaste = useCallback((e: React.ClipboardEvent) => {
+    if ((e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault();
+        chatInputRef.current?.addImageFromClipboard(items);
+        chatInputRef.current?.focus();
+        return;
+      }
+    }
+  }, []);
 
   const handleSend = async (inputText: string, inputAttachments: ChatAttachment[]) => {
     if ((!inputText.trim() && inputAttachments.length === 0) || sending) return;
@@ -988,7 +1035,14 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       {!compact && <SessionListPanel />}
 
       {/* 右侧: 对话区 */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div
+        className="flex-1 flex flex-col min-w-0 relative"
+        onDragEnter={handlePanelDragEnter}
+        onDragOver={handlePanelDragOver}
+        onDragLeave={handlePanelDragLeave}
+        onDrop={handlePanelDrop}
+        onPaste={handlePanelPaste}
+      >
         {/* 模式切换 Toast */}
         {modeToast && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[80] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl text-[11px] text-slate-200 whitespace-nowrap animate-fade-in">
@@ -1084,6 +1138,17 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           </div>
         )}
 
+        {/* 拖拽覆盖层 */}
+        {panelDragOver && (
+          <div className="absolute inset-0 z-[70] bg-forge-600/10 border-2 border-dashed border-forge-500/50 rounded-lg flex items-center justify-center pointer-events-none">
+            <div className="bg-slate-900/90 border border-forge-500/40 rounded-xl px-5 py-4 text-center shadow-2xl">
+              <div className="text-3xl mb-1.5">📎</div>
+              <div className="text-sm text-forge-400">松开以添加附件</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">支持图片和文件</div>
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
           {displayMessages.map((msg, idx) => (
@@ -1159,8 +1224,9 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input — v28.0: 支持附件上传 */}
+        {/* Input — v29.0: 支持附件上传 + 全面板拖拽/粘贴 */}
         <ChatInput
+          ref={chatInputRef}
           onSend={handleSend}
           sending={sending}
           placeholder={compact ? '发消息...' : `${modeInfo.icon} ${modeInfo.label}模式 — 发消息...`}
