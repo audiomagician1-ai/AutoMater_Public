@@ -1,27 +1,36 @@
 /**
- * Session Scheduler — 事件驱动的自动调度引擎 (v28.0)
+ * Session Scheduler — Session 驱动的并发调度引擎 (v30.0)
  *
  * 核心职责:
- *   1. 监听 SchedulerBus 事件，在关键时刻自动调度
- *   2. 扫描看板上可执行的 Feature，为空闲 Agent slot spawn Session
- *   3. 提供 fallbackCheck 供 daemon 定时兜底调用
+ *   1. 成为 Dev+QA 阶段的 **唯一** 调度入口
+ *   2. 扫描看板上可执行的 Feature，为空闲 Agent slot spawn Session + workerLoop
+ *   3. 监听 SchedulerBus 事件，在 Feature 完成/失败时自动补充调度
+ *   4. 提供 awaitAllFeaturesDone 阻塞式等待，供 orchestrator 使用
+ *   5. 提供 fallbackCheck 供 daemon 定时兜底调用
  *
- * 调度模型:
- *   team_members 行 = Agent 类定义
- *   sessions 行    = Agent 实例 (由 Scheduler spawn)
+ * 调度模型 (v30.0 — Session 即并发单元):
+ *   team_members 行 = Agent 类定义 (角色模板)
+ *   sessions 行    = Agent 实例 (由 Scheduler spawn, 绑定 Feature)
  *   一个 Agent 可同时有 N 个 running session (N = max_concurrent_sessions)
+ *
+ * 与 orchestrator 的关系:
+ *   orchestrator 负责 pre-dev (PM/Architect/Docs) 和 post-dev (PM验收/文档同步/DevOps)
+ *   orchestrator 在进入 Dev+QA 阶段时调用 runSessionDrivenDevPhase()
+ *   scheduler 接管所有 Feature 的并发调度 → 全部完成后返回控制权给 orchestrator
  */
 
 import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { createLogger } from './logger';
-import { getSettings } from './llm-client';
+import { getSettings, sleep } from './llm-client';
 import { lockNextFeature, spawnAgent } from './agent-manager';
 import { createSessionForFeature, transitionSession, getRunningSessionCount } from './conversation-backup';
 import { onScheduleEvent, emitScheduleEvent, type ScheduleEventPayload } from './scheduler-bus';
-import { getHotJoinContext } from './orchestrator';
 import { workerLoop, type WorkerLoopOptions } from './phases';
-import type { TeamMemberRow, FeatureRow, PhaseResult } from './types';
+import { sendToUI } from './ui-bridge';
+import type { TeamMemberRow, FeatureRow, PhaseResult, AppSettings, CountResult } from './types';
+import type { AgentPermissions } from './tool-registry';
+import type { GitProviderConfig } from './git-provider';
 
 const log = createLogger('session-scheduler');
 
@@ -46,11 +55,42 @@ export function isSchedulerEnabled(): boolean {
 // Active session tracking (in-memory)
 // ═══════════════════════════════════════
 
-/** sessionId → AbortController，用于停止特定 session */
+/** sessionId → Promise，用于追踪 workerLoop 生命周期 */
 const activeSessions = new Map<string, AbortController>();
+/** 活跃的 workerLoop Promise 集合 (projectId → Set<Promise>) */
+const activeWorkerPromises = new Map<string, Set<Promise<void | PhaseResult>>>();
 
 export function getActiveSessions(): Map<string, AbortController> {
   return activeSessions;
+}
+
+// ═══════════════════════════════════════
+// Dev Phase Context — scheduler 自己管理运行上下文
+// ═══════════════════════════════════════
+
+/**
+ * v30.0: Dev 阶段运行上下文 — 由 orchestrator 注入，scheduler 管理
+ * 替代旧的 HotJoinContext (orchestrator 不再直接 spawn worker)
+ */
+export interface DevPhaseContext {
+  projectId: string;
+  qaId: string;
+  settings: AppSettings;
+  win: BrowserWindow | null;
+  signal: AbortSignal;
+  workspacePath: string | null;
+  gitConfig: GitProviderConfig;
+  permissions?: AgentPermissions;
+  /** 递增 worker ID 编号器 */
+  nextWorkerSeq: number;
+}
+
+/** 活跃的 Dev 阶段上下文 (projectId → DevPhaseContext) */
+const devPhaseContexts = new Map<string, DevPhaseContext>();
+
+/** 获取项目的 Dev 阶段上下文 — 供外部（如 HotJoin listener）访问 */
+export function getDevPhaseContext(projectId: string): DevPhaseContext | undefined {
+  return devPhaseContexts.get(projectId);
 }
 
 // ═══════════════════════════════════════
@@ -60,158 +100,275 @@ export function getActiveSessions(): Map<string, AbortController> {
 /**
  * 为指定项目执行一轮调度:
  * 扫描 todo feature → 匹配有空闲 slot 的 Agent → spawn session → 启动 workerLoop
+ *
+ * v30.0: scheduler 自持 DevPhaseContext, 不再依赖 orchestrator 的 HotJoinContext
  */
 export async function scheduleProject(projectId: string): Promise<{ spawned: number }> {
   if (!_enabled) return { spawned: 0 };
 
-  const settings = getSettings();
-  if (!settings?.apiKey) return { spawned: 0 };
-
-  // v28.0: 必须有 orchestrator 上下文才能真正启动 workerLoop
-  const hjCtx = getHotJoinContext(projectId);
-  if (!hjCtx || hjCtx.signal.aborted) {
-    // 没有 developing 上下文 → 仅创建 session 记录（不启动 workerLoop）
-    return scheduleProjectSessionOnly(projectId, settings);
+  const ctx = devPhaseContexts.get(projectId);
+  if (!ctx || ctx.signal.aborted) {
+    // 没有活跃的 Dev 阶段上下文 — 无法启动 workerLoop
+    log.debug('scheduleProject: no active DevPhaseContext, skipping', { projectId });
+    return { spawned: 0 };
   }
 
   const db = getDb();
 
-  // 1. 查询所有 developer 角色的 Agent（按创建顺序）
+  // 1. 查询所有 developer 角色的 Agent (按创建顺序)
   const members = db
     .prepare("SELECT * FROM team_members WHERE project_id = ? AND role = 'developer' ORDER BY created_at ASC")
     .all(projectId) as TeamMemberRow[];
 
-  if (members.length === 0) return { spawned: 0 };
+  // 如果没有自定义 developer 成员 → 使用默认配额 (settings.workerCount 或 3)
+  const settings = ctx.settings;
+  const DEFAULT_MAX_WORKERS = 3;
+  const maxWorkers = settings.workerCount > 0 ? settings.workerCount : DEFAULT_MAX_WORKERS;
 
   let spawned = 0;
 
-  for (const member of members) {
-    // 2. 检查该 Agent 当前有几个 running/created session
-    const runningCount = getRunningSessionCount(member.id);
-    const maxConcurrency = member.max_concurrent_sessions || 1;
-    const availableSlots = maxConcurrency - runningCount;
+  if (members.length > 0) {
+    // ── 有自定义团队成员: 按 member 的 max_concurrent_sessions 分配 ──
+    for (const member of members) {
+      const runningCount = getRunningSessionCount(member.id);
+      const maxConcurrency = member.max_concurrent_sessions || 1;
+      const availableSlots = maxConcurrency - runningCount;
+      if (availableSlots <= 0) continue;
 
-    if (availableSlots <= 0) continue;
+      for (let i = 0; i < availableSlots; i++) {
+        const feature = lockNextFeature(projectId, member.id);
+        if (!feature) break;
 
-    // 3. 为每个空闲 slot 尝试锁定一个 feature 并 spawn session + workerLoop
-    for (let i = 0; i < availableSlots; i++) {
-      const feature = lockNextFeature(projectId, member.id);
-      if (!feature) break; // 没有更多可锁定的 feature
-
-      try {
-        const session = createSessionForFeature(member.id, feature.id, projectId, member.name, member.role);
-
-        emitScheduleEvent('schedule:session_created', {
-          projectId,
-          sessionId: session.id,
-          memberId: member.id,
-          featureId: feature.id,
-        });
-
-        // v28.0: 分配 worker ID 并启动真正的 workerLoop
-        hjCtx.nextWorkerSeq += 1;
-        const workerId = `dev-sched-${hjCtx.nextWorkerSeq}`;
-        spawnAgent(projectId, workerId, 'developer', hjCtx.win);
-        db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-
-        const workerOpts: WorkerLoopOptions = {
-          member,
-          preCreatedSessionId: session.id,
-        };
-
-        const promise = workerLoop(
-          projectId,
-          workerId,
-          hjCtx.qaId,
-          hjCtx.settings,
-          hjCtx.win,
-          hjCtx.signal,
-          hjCtx.workspacePath,
-          hjCtx.gitConfig,
-          hjCtx.permissions,
-          workerOpts,
-        );
-        hjCtx.workerPromises.add(promise);
-        promise.finally(() => {
-          hjCtx.workerPromises.delete(promise);
-          activeSessions.delete(session.id);
-        });
-
-        // 追踪 active session (暂无 AbortController, 因为共用 orchestrator signal)
-        activeSessions.set(session.id, new AbortController());
-
-        log.info('Worker session spawned via scheduler', {
-          sessionId: session.id,
-          workerId,
-          memberId: member.id,
-          memberName: member.name,
-          featureId: feature.id,
-          projectId,
-        });
-
-        spawned++;
-      } catch (err) {
-        log.error('Failed to spawn worker session', err, { memberId: member.id, featureId: feature.id });
-        // 释放锁：将 feature 重置为 todo
-        db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE id = ? AND project_id = ?").run(
-          feature.id,
-          projectId,
-        );
+        const result = spawnSessionWorker(ctx, feature, member);
+        if (result) spawned++;
       }
+    }
+  } else {
+    // ── 无自定义团队: 使用默认 worker pool ──
+    const workerPromises = activeWorkerPromises.get(projectId);
+    const currentRunning = workerPromises?.size ?? 0;
+    const availableSlots = maxWorkers - currentRunning;
+
+    for (let i = 0; i < availableSlots; i++) {
+      const lockId = `sched-default-${projectId}`;
+      const feature = lockNextFeature(projectId, lockId);
+      if (!feature) break;
+
+      const result = spawnSessionWorker(ctx, feature, undefined);
+      if (result) spawned++;
     }
   }
 
   if (spawned > 0) {
-    log.info(`Scheduled ${spawned} worker sessions for project ${projectId}`);
+    log.info(`Scheduled ${spawned} session workers for project ${projectId}`);
+    sendToUI(ctx.win, 'agent:log', {
+      projectId,
+      agentId: 'scheduler',
+      content: `📋 调度器分配了 ${spawned} 个新任务 Session`,
+    });
   }
 
   return { spawned };
 }
 
 /**
- * 仅创建 session 记录（不启动 workerLoop）
- * 用于 orchestrator 不在运行时的预创建场景
+ * 为一个 Feature spawn 一个 Session + workerLoop
+ * 返回 sessionId (成功) 或 null (失败)
  */
-function scheduleProjectSessionOnly(projectId: string, settings: import('./types').AppSettings): { spawned: number } {
+function spawnSessionWorker(
+  ctx: DevPhaseContext,
+  feature: FeatureRow,
+  member: TeamMemberRow | undefined,
+): string | null {
   const db = getDb();
-  const members = db
-    .prepare("SELECT * FROM team_members WHERE project_id = ? AND role = 'developer' ORDER BY created_at ASC")
-    .all(projectId) as TeamMemberRow[];
+  const { projectId, qaId, settings, win, signal, workspacePath, gitConfig, permissions } = ctx;
 
-  if (members.length === 0) return { spawned: 0 };
-  let spawned = 0;
+  try {
+    // 1. 分配 worker ID
+    ctx.nextWorkerSeq += 1;
+    const workerId = `dev-sess-${ctx.nextWorkerSeq}`;
 
-  for (const member of members) {
-    const runningCount = getRunningSessionCount(member.id);
-    const maxConcurrency = member.max_concurrent_sessions || 1;
-    const availableSlots = maxConcurrency - runningCount;
-    if (availableSlots <= 0) continue;
+    // 2. 创建 Session 记录
+    const memberId = member?.id ?? workerId;
+    const memberName = member?.name ?? workerId;
+    const memberRole = member?.role ?? 'developer';
+    const session = createSessionForFeature(memberId, feature.id, projectId, memberName, memberRole);
 
-    for (let i = 0; i < availableSlots; i++) {
-      const feature = lockNextFeature(projectId, member.id);
-      if (!feature) break;
+    emitScheduleEvent('schedule:session_created', {
+      projectId,
+      sessionId: session.id,
+      memberId,
+      featureId: feature.id,
+    });
 
-      try {
-        const session = createSessionForFeature(member.id, feature.id, projectId, member.name, member.role);
-        emitScheduleEvent('schedule:session_created', {
-          projectId,
-          sessionId: session.id,
-          memberId: member.id,
-          featureId: feature.id,
-        });
-        log.info('Session pre-created (no active orchestrator)', { sessionId: session.id, featureId: feature.id });
-        spawned++;
-      } catch (err) {
-        log.error('Failed to pre-create session', err, { memberId: member.id, featureId: feature.id });
-        db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE id = ? AND project_id = ?").run(
-          feature.id,
-          projectId,
-        );
-      }
+    // 3. Spawn Agent DB 记录
+    spawnAgent(projectId, workerId, 'developer', win);
+    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
+
+    // 4. 启动 workerLoop
+    const workerOpts: WorkerLoopOptions = {
+      member,
+      preCreatedSessionId: session.id,
+    };
+
+    const promise = workerLoop(
+      projectId,
+      workerId,
+      qaId,
+      settings,
+      win,
+      signal,
+      workspacePath,
+      gitConfig,
+      permissions,
+      workerOpts,
+    );
+
+    // 5. 追踪 Promise
+    let promiseSet = activeWorkerPromises.get(projectId);
+    if (!promiseSet) {
+      promiseSet = new Set();
+      activeWorkerPromises.set(projectId, promiseSet);
+    }
+    promiseSet.add(promise);
+    promise.finally(() => {
+      promiseSet!.delete(promise);
+      activeSessions.delete(session.id);
+    });
+
+    activeSessions.set(session.id, new AbortController());
+
+    log.info('Session worker spawned', {
+      sessionId: session.id,
+      workerId,
+      memberId,
+      memberName,
+      featureId: feature.id,
+      projectId,
+    });
+
+    return session.id;
+  } catch (err) {
+    log.error('Failed to spawn session worker', err, { featureId: feature.id });
+    // 释放锁
+    db.prepare(
+      "UPDATE features SET status = 'todo', locked_by = NULL, locked_at = NULL WHERE id = ? AND project_id = ?",
+    ).run(feature.id, projectId);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// v30.0: Session-Driven Dev Phase — 主入口
+// ═══════════════════════════════════════
+
+/**
+ * Session 驱动的 Dev+QA 阶段
+ *
+ * 由 orchestrator 在进入 developing 阶段时调用。
+ * 1. 注册 DevPhaseContext
+ * 2. 启用 scheduler
+ * 3. 首轮调度 (填满所有 slot)
+ * 4. 阻塞等待所有 Feature 完成 (通过事件驱动 + 轮询兜底)
+ * 5. 清理上下文并返回
+ */
+export async function runSessionDrivenDevPhase(params: {
+  projectId: string;
+  qaId: string;
+  settings: AppSettings;
+  win: BrowserWindow | null;
+  signal: AbortSignal;
+  workspacePath: string | null;
+  gitConfig: GitProviderConfig;
+  permissions?: AgentPermissions;
+}): Promise<void> {
+  const { projectId, signal } = params;
+
+  // 1. 注册 Dev 阶段上下文
+  const ctx: DevPhaseContext = {
+    ...params,
+    nextWorkerSeq: 0,
+  };
+  devPhaseContexts.set(projectId, ctx);
+  activeWorkerPromises.set(projectId, new Set());
+
+  // 2. 启用 scheduler (如果还没启用)
+  const wasEnabled = _enabled;
+  _enabled = true;
+
+  sendToUI(params.win, 'agent:log', {
+    projectId,
+    agentId: 'scheduler',
+    content: '🚀 Session 调度器启动 — 开始分配开发任务',
+  });
+
+  try {
+    // 3. 首轮调度 — 填满所有 slot
+    const initialResult = await scheduleProject(projectId);
+    log.info(`Initial scheduling: ${initialResult.spawned} sessions spawned`, { projectId });
+
+    // 4. 阻塞等待所有 Feature 处理完毕
+    await awaitAllFeaturesDone(projectId, signal, params.win);
+  } finally {
+    // 5. 清理
+    devPhaseContexts.delete(projectId);
+    activeWorkerPromises.delete(projectId);
+    if (!wasEnabled) _enabled = false;
+
+    sendToUI(params.win, 'agent:log', {
+      projectId,
+      agentId: 'scheduler',
+      content: '✅ Session 调度器: 所有 Feature 已处理完毕',
+    });
+  }
+}
+
+/**
+ * 阻塞等待项目所有 Feature 完成/失败/暂停
+ * 使用轮询 + 事件驱动混合策略:
+ *   - 事件驱动: Feature 完成/失败时 scheduleProject 自动触发新调度
+ *   - 轮询兜底: 每 2s 检查一次是否还有活跃 worker 或 todo feature
+ */
+async function awaitAllFeaturesDone(projectId: string, signal: AbortSignal, win: BrowserWindow | null): Promise<void> {
+  const db = getDb();
+  const POLL_INTERVAL_MS = 2000;
+
+  while (!signal.aborted) {
+    const promiseSet = activeWorkerPromises.get(projectId);
+    const activeCount = promiseSet?.size ?? 0;
+
+    // 检查是否有 todo feature 尚未调度
+    const todoCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status = 'todo'")
+        .get(projectId) as CountResult
+    ).c;
+
+    // 检查是否有 in_progress/reviewing feature (活跃工作中)
+    const workingCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')")
+        .get(projectId) as CountResult
+    ).c;
+
+    if (activeCount === 0 && todoCount === 0 && workingCount === 0) {
+      // 全部完成
+      break;
+    }
+
+    // 如果有 todo 但没有 active worker → 补充调度
+    if (todoCount > 0 && activeCount < 3) {
+      await scheduleProject(projectId);
+    }
+
+    // 等待: race 任一 worker 完成 或 超时轮询
+    if (activeCount > 0 && promiseSet) {
+      const timeoutPromise = sleep(POLL_INTERVAL_MS);
+      await Promise.race([...promiseSet, timeoutPromise]);
+    } else {
+      await sleep(POLL_INTERVAL_MS);
     }
   }
-
-  return { spawned };
 }
 
 // ═══════════════════════════════════════
@@ -243,7 +400,6 @@ async function onWishCreated(payload: ScheduleEventPayload): Promise<void> {
     projectId: payload.projectId,
     wishId: payload.wishId,
   });
-  // TODO: 如果项目处于 paused 状态且有自动调度开关，可以自动触发 PM 分析
 }
 
 /**
@@ -261,7 +417,7 @@ async function onSessionFailed(payload: ScheduleEventPayload): Promise<void> {
     activeSessions.delete(payload.sessionId);
     transitionSession(payload.sessionId, 'failed', 'Session abnormally terminated');
   }
-  // 重新调度（可能有释放出的 feature 需要重分配）
+  // 重新调度
   await scheduleProject(payload.projectId);
 }
 
@@ -280,11 +436,8 @@ export async function fallbackCheck(): Promise<void> {
   const projects = db.prepare("SELECT id FROM projects WHERE status = 'developing'").all() as Array<{ id: string }>;
 
   for (const p of projects) {
-    // 检查是否有 todo feature 且有 Agent 有空闲 slot
     const todoCount = (
-      db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status = 'todo'").get(p.id) as {
-        c: number;
-      }
+      db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status = 'todo'").get(p.id) as CountResult
     ).c;
 
     if (todoCount > 0) {
@@ -324,5 +477,4 @@ export function registerSchedulerListeners(): void {
  */
 export function unregisterSchedulerListeners(): void {
   _registered = false;
-  // clearScheduleListeners() 在 scheduler-bus.ts 中
 }

@@ -2,13 +2,11 @@
  * Orchestrator — Agent 编排引擎 (5 阶段流水线) — Entry Point
  *
  * Phase functions are extracted to phases/ directory for maintainability.
- * This file retains only: runOrchestrator (main entry), HotJoin, workflow resolver, ensureAgentsMd.
- *
- * v5.0→v6.2: 1884→~600 lines via phases/ extraction.
+ * v30.0: Dev+QA 阶段完全委托给 Session Scheduler 驱动。
+ * This file retains: runOrchestrator (main entry), workflow resolver, ensureAgentsMd.
  */
 
 import { BrowserWindow } from 'electron';
-import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db';
@@ -17,7 +15,7 @@ import { createLogger } from './logger';
 const log = createLogger('orchestrator');
 
 // ── Core engine imports (used directly in runOrchestrator) ──
-import { getSettings, sleep, validateModel } from './llm-client';
+import { getSettings, validateModel } from './llm-client';
 import { sendToUI, notify } from './ui-bridge';
 import {
   registerOrchestrator,
@@ -36,6 +34,7 @@ import { cleanExpiredLocks } from './file-lock';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import type { AppSettings, ProjectRow, CountResult, WorkflowStage, WorkflowStageId, PhaseResult } from './types';
 import type { GitProviderConfig } from './git-provider';
+import { runSessionDrivenDevPhase, getDevPhaseContext } from './session-scheduler';
 
 // ── Phase modules (all logic extracted) ──
 import {
@@ -45,14 +44,12 @@ import {
   phaseArchitect,
   phaseReqsAndTestSpecs,
   phaseIncrementalDocSync,
-  workerLoop,
-  type WorkerLoopOptions,
   phaseDeployPipeline,
   phaseFinalize,
   phaseEnvironmentBootstrap,
 } from './phases';
 import { WorkflowEngine, PRESET_FULL_DEVELOPMENT } from './workflow-engine';
-import type { PMPhaseResult, TeamMemberRow } from './types';
+import type { PMPhaseResult } from './types';
 
 // ═══════════════════════════════════════
 // Workflow Preset Resolver
@@ -106,138 +103,37 @@ export type {
 } from './react-loop';
 
 // ═══════════════════════════════════════
-// Hot-Join: 运行中的 Worker Pool 上下文
+// Hot-Join: v30.0 — 统一由 session-scheduler 管理
+// 旧 HotJoinContext 已迁移到 session-scheduler.ts 的 DevPhaseContext
 // ═══════════════════════════════════════
 
-/** 每个 developing 项目的热加入上下文 */
-export interface HotJoinContext {
-  projectId: string;
-  qaId: string;
-  settings: AppSettings;
-  win: BrowserWindow | null;
-  signal: AbortSignal;
-  workspacePath: string | null;
-  gitConfig: GitProviderConfig;
-  workerPromises: Set<Promise<void | PhaseResult>>;
-  /** 已分配的最大 worker 编号 (用于生成唯一 workerId) */
-  nextWorkerSeq: number;
-  /** v16.0: 项目级权限开关 */
-  permissions?: import('./tool-registry').AgentPermissions;
-}
+/** v30.0: 向后兼容 — HotJoinContext 类型别名 (已迁移到 session-scheduler) */
+export type HotJoinContext = import('./session-scheduler').DevPhaseContext;
 
-/** 活跃的热加入上下文表 (projectId → HotJoinContext) */
-const hotJoinContexts = new Map<string, HotJoinContext>();
-
-/**
- * v28.0: 导出 hot-join 上下文访问器 — 供 session-scheduler 使用
- * 允许 scheduler 通过 orchestrator 的运行上下文启动真正的 workerLoop
- */
+/** v30.0: 向后兼容 — 获取项目的 Dev 阶段上下文 */
 export function getHotJoinContext(projectId: string): HotJoinContext | undefined {
-  return hotJoinContexts.get(projectId);
+  return getDevPhaseContext(projectId);
 }
 
 /**
- * 注册热加入上下文 — 在进入 developing 阶段时调用。
- * orchestrator 结束后自动清理。
+ * v30.0: 热加入 — 委托给 scheduler-bus 的 member_added 事件
+ * project.ts 调用此函数触发热加入事件
  */
-function registerHotJoinContext(ctx: HotJoinContext) {
-  hotJoinContexts.set(ctx.projectId, ctx);
-}
-
-function unregisterHotJoinContext(projectId: string) {
-  hotJoinContexts.delete(projectId);
-}
-
-/**
- * v9.0: 热加入 IPC 事件监听器 (仅需注册一次)
- * 当 team:add 成功后，project.ts 调用 emitMemberAdded() 触发此监听。
- * 如果该项目当前处于 developing 阶段，立即 spawn 新 worker。
- */
-const orchestratorBus = new EventEmitter();
-orchestratorBus.setMaxListeners(20);
-let hotJoinListenerRegistered = false;
-
-/** project.ts 调用此函数触发热加入事件 */
 export function emitMemberAdded(payload: { projectId: string; memberId: string; role: string; name: string }) {
-  orchestratorBus.emit('team:member-added', payload);
+  // 只对 developer 角色触发调度
+  if (payload.role !== 'developer') return;
+  // 通过 scheduler-bus 触发 → session-scheduler 自动处理
+  import('./scheduler-bus').then(({ emitScheduleEvent }) => {
+    emitScheduleEvent('schedule:member_added', {
+      projectId: payload.projectId,
+      memberId: payload.memberId,
+    });
+  });
 }
 
+/** v30.0: 向后兼容 (no-op，scheduler 自动注册监听器) */
 export function ensureHotJoinListener() {
-  if (hotJoinListenerRegistered) return;
-  hotJoinListenerRegistered = true;
-
-  orchestratorBus.on(
-    'team:member-added',
-    (payload: { projectId: string; memberId: string; role: string; name: string }) => {
-      const { projectId, memberId, role, name } = payload;
-
-      // 只对 developer 角色做热加入 spawn
-      if (role !== 'developer') {
-        log.debug(`Hot-join: ignoring non-developer role "${role}" for project ${projectId}`);
-        return;
-      }
-
-      const ctx = hotJoinContexts.get(projectId);
-      if (!ctx) {
-        log.debug(`Hot-join: no active developing context for project ${projectId}`);
-        return;
-      }
-
-      if (ctx.signal.aborted) {
-        log.debug(`Hot-join: orchestrator already aborted for project ${projectId}`);
-        return;
-      }
-
-      // 验证项目确实在 developing 阶段
-      const db = getDb();
-      const project = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as
-        | { status: string }
-        | undefined;
-      if (project?.status !== 'developing') {
-        log.debug(`Hot-join: project ${projectId} not in developing phase (status=${project?.status})`);
-        return;
-      }
-
-      // 分配 worker ID
-      ctx.nextWorkerSeq += 1;
-      const workerId = `dev-hot-${ctx.nextWorkerSeq}`;
-
-      log.info(`Hot-join: spawning new worker "${workerId}" for project ${projectId} (member: ${name} [${memberId}])`);
-      sendToUI(ctx.win, 'agent:log', {
-        projectId,
-        agentId: 'system',
-        content: `🔥 热加入: "${name}" 已上线为 ${workerId}，立即投入开发`,
-      });
-
-      spawnAgent(projectId, workerId, 'developer', ctx.win);
-      db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-
-      // v28.0: 查询 member 信息用于 session 生命周期管理
-      const memberRow = db
-        .prepare('SELECT * FROM team_members WHERE id = ? AND project_id = ?')
-        .get(memberId, projectId) as TeamMemberRow | undefined;
-      const hotJoinOpts: WorkerLoopOptions | undefined = memberRow ? { member: memberRow } : undefined;
-
-      // 启动 workerLoop — 它会自动从 lockNextFeature 领取任务
-      const promise = workerLoop(
-        projectId,
-        workerId,
-        ctx.qaId,
-        ctx.settings,
-        ctx.win,
-        ctx.signal,
-        ctx.workspacePath,
-        ctx.gitConfig,
-        ctx.permissions,
-        hotJoinOpts,
-      );
-      ctx.workerPromises.add(promise);
-      // 当 workerLoop 结束（正常完成或异常），从集合中移除
-      promise.finally(() => {
-        ctx.workerPromises.delete(promise);
-      });
-    },
-  );
+  // no-op: session-scheduler.registerSchedulerListeners() 已取代此功能
 }
 
 // ═══════════════════════════════════════
@@ -689,7 +585,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
 
   // ═══════════════════════════════════════
-  // Phase 4a: Developer 实现 + QA 代码审查 (v5.0: 原 Phase 5)
+  // Phase 4a: Developer 实现 + QA 代码审查
+  // v30.0: 完全由 Session Scheduler 驱动并发
   // ═══════════════════════════════════════
   if (signal.aborted) {
     unregisterOrchestrator(projectId);
@@ -697,18 +594,6 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   }
   db.prepare("UPDATE projects SET status = 'developing', updated_at = datetime('now') WHERE id = ?").run(projectId);
   sendToUI(win, 'project:status', { projectId, status: 'developing' });
-
-  const featureCount = (
-    db
-      .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status != 'arch_node'")
-      .get(projectId) as CountResult
-  ).c;
-  // v29.1: workerCount=0 时默认上限 3 (非 featureCount)
-  // 原逻辑：为每个 Feature 创建一个 Developer Worker → 20个feature=20个worker=20个LLM并发
-  // 修复：合理默认值，避免创建大量不必要的虚拟员工
-  const DEFAULT_MAX_WORKERS = 3;
-  const maxWorkers = settings.workerCount > 0 ? settings.workerCount : DEFAULT_MAX_WORKERS;
-  const workerCount = Math.min(maxWorkers, featureCount);
 
   const qaId = 'qa-0'; // 固定 ID: 复用同一 QA Agent
   spawnAgent(projectId, qaId, 'qa', win);
@@ -723,10 +608,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     githubToken: project2.github_token ?? undefined,
   };
 
-  // v9.0: 注册热加入上下文 — 支持 developing 阶段动态添加 worker
-  ensureHotJoinListener();
-  const workerPromiseSet = new Set<Promise<void | PhaseResult>>();
-  const hotJoinCtx: HotJoinContext = {
+  // v30.0: 委托给 Session Scheduler 驱动整个 Dev+QA 阶段
+  // scheduler 自动管理: member 匹配 → session 创建 → workerLoop spawn → 等待全部完成
+  await runSessionDrivenDevPhase({
     projectId,
     qaId,
     settings,
@@ -734,48 +618,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     signal,
     workspacePath,
     gitConfig,
-    workerPromises: workerPromiseSet,
-    nextWorkerSeq: workerCount, // 从已有 worker 数量开始编号
     permissions,
-  };
-  registerHotJoinContext(hotJoinCtx);
-
-  // v28.0: 查询 team_members 表中的 developer 成员，按索引匹配 worker
-  const developerMembers = db
-    .prepare("SELECT * FROM team_members WHERE project_id = ? AND role = 'developer' ORDER BY created_at ASC")
-    .all(projectId) as TeamMemberRow[];
-
-  for (let i = 0; i < workerCount; i++) {
-    const workerId = `dev-${i + 1}`;
-    spawnAgent(projectId, workerId, 'developer', win);
-    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    // 传递 member 信息（如果 team_members 表有对应行）
-    const member = developerMembers[i] ?? undefined;
-    const workerOpts: WorkerLoopOptions | undefined = member ? { member } : undefined;
-    const p = workerLoop(
-      projectId,
-      workerId,
-      qaId,
-      settings,
-      win,
-      signal,
-      workspacePath,
-      gitConfig,
-      permissions,
-      workerOpts,
-    );
-    workerPromiseSet.add(p);
-    p.finally(() => workerPromiseSet.delete(p));
-  }
-  // 等待所有 worker (含热加入的) 完成
-  // 使用轮询而非 Promise.all, 因为热加入会动态添加 promise
-  while (workerPromiseSet.size > 0 && !signal.aborted) {
-    await Promise.race([...workerPromiseSet]);
-    // race 返回时至少一个 worker 完成/移除了, 继续等待剩余的
-    // 如果热加入又加了新 worker, 下一轮 while 会 pick up
-    await sleep(100); // 微等以允许 finally 清理
-  }
-  unregisterHotJoinContext(projectId);
+  });
 
   if (signal.aborted) {
     unregisterOrchestrator(projectId);

@@ -56,8 +56,12 @@ export function stopOrchestrator(projectId: string) {
   const row = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
   const newStatus = row?.status === 'analyzing' ? 'analyzing' : 'paused';
   db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, projectId);
-  db.prepare("UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").run(projectId);
-  db.prepare("UPDATE agents SET status = 'idle', current_task = NULL WHERE project_id = ? AND status = 'working'").run(projectId);
+  db.prepare(
+    "UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status IN ('in_progress', 'reviewing')",
+  ).run(projectId);
+  db.prepare("UPDATE agents SET status = 'idle', current_task = NULL WHERE project_id = ? AND status = 'working'").run(
+    projectId,
+  );
 }
 
 // ═══════════════════════════════════════
@@ -67,14 +71,26 @@ export function stopOrchestrator(projectId: string) {
 export function spawnAgent(projectId: string, id: string, role: string, win: BrowserWindow | null) {
   const db = getDb();
   // 先尝试插入（如果不存在），再更新状态为 working（保留累计的 stats）
-  db.prepare('INSERT OR IGNORE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(id, projectId, role, 'working');
+  db.prepare('INSERT OR IGNORE INTO agents (id, project_id, role, status) VALUES (?, ?, ?, ?)').run(
+    id,
+    projectId,
+    role,
+    'working',
+  );
   db.prepare("UPDATE agents SET status = 'working', role = ? WHERE id = ? AND project_id = ?").run(role, id, projectId);
   sendToUI(win, 'agent:spawned', { projectId, agentId: id, role });
 }
 
-export function updateAgentStats(agentId: string, projectId: string, inputTokens: number, outputTokens: number, cost: number) {
+export function updateAgentStats(
+  agentId: string,
+  projectId: string,
+  inputTokens: number,
+  outputTokens: number,
+  cost: number,
+) {
   const db = getDb();
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE agents SET
       session_count = session_count + 1,
       total_input_tokens = total_input_tokens + ?,
@@ -82,7 +98,8 @@ export function updateAgentStats(agentId: string, projectId: string, inputTokens
       total_cost_usd = total_cost_usd + ?,
       last_active_at = datetime('now')
     WHERE id = ? AND project_id = ?
-  `).run(inputTokens, outputTokens, cost, agentId, projectId);
+  `,
+  ).run(inputTokens, outputTokens, cost, agentId, projectId);
 }
 
 // ═══════════════════════════════════════
@@ -95,7 +112,9 @@ export function updateAgentStats(agentId: string, projectId: string, inputTokens
  */
 export function checkBudget(projectId: string, settings: AppSettings): { ok: boolean; spent: number; budget: number } {
   const db = getDb();
-  const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as { total: number | null } | undefined;
+  const row = db.prepare('SELECT SUM(total_cost_usd) as total FROM agents WHERE project_id = ?').get(projectId) as
+    | { total: number | null }
+    | undefined;
   const spent = row?.total ?? 0;
   const budget = settings.dailyBudgetUsd ?? 0;
   // 0 = 无上限
@@ -117,9 +136,9 @@ export function checkBudget(projectId: string, settings: AppSettings): { ok: boo
 export function getTeamPrompt(projectId: string, role: string, agentIndex: number = 0): string | null {
   try {
     const db = getDb();
-    const members = db.prepare(
-      'SELECT system_prompt FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
-    ).all(projectId) as Array<{ system_prompt: string | null }>;
+    const members = db
+      .prepare('SELECT system_prompt FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC')
+      .all(projectId) as Array<{ system_prompt: string | null }>;
 
     if (members.length === 0) return null;
 
@@ -127,7 +146,8 @@ export function getTeamPrompt(projectId: string, role: string, agentIndex: numbe
     const member = members[Math.min(agentIndex, members.length - 1)];
     const prompt = member?.system_prompt?.trim();
     return prompt && prompt.length > 10 ? prompt : null;
-  } catch { /* silent: DB/team lookup fallback */
+  } catch {
+    /* silent: DB/team lookup fallback */
     return null;
   }
 }
@@ -147,9 +167,8 @@ export function getTeamMemberLLMConfig(
   agentIndex: number = 0,
   globalSettings: AppSettings,
 ): { provider: string; apiKey: string; baseUrl: string; model: string } {
-  const defaultModel = (role === 'developer' || role === 'devops')
-    ? globalSettings.workerModel
-    : globalSettings.strongModel;
+  const defaultModel =
+    role === 'developer' || role === 'devops' ? globalSettings.workerModel : globalSettings.strongModel;
 
   const fallback = {
     provider: globalSettings.llmProvider,
@@ -160,9 +179,9 @@ export function getTeamMemberLLMConfig(
 
   try {
     const db = getDb();
-    const members = db.prepare(
-      'SELECT llm_config, model FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
-    ).all(projectId) as Array<{ llm_config: string | null; model: string | null }>;
+    const members = db
+      .prepare('SELECT llm_config, model FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC')
+      .all(projectId) as Array<{ llm_config: string | null; model: string | null }>;
 
     if (members.length === 0) return fallback;
 
@@ -178,7 +197,9 @@ export function getTeamMemberLLMConfig(
           baseUrl: cfg.baseUrl || fallback.baseUrl,
           model: cfg.model || fallback.model,
         };
-      } catch { /* JSON parse error — fallback */ }
+      } catch {
+        /* JSON parse error — fallback */
+      }
     }
 
     // 向后兼容: 旧版 model 字段 (直接文本)
@@ -187,7 +208,8 @@ export function getTeamMemberLLMConfig(
     }
 
     return fallback;
-  } catch { /* silent: model config parse fallback */
+  } catch {
+    /* silent: model config parse fallback */
     return fallback;
   }
 }
@@ -196,17 +218,22 @@ export function getTeamMemberLLMConfig(
  * 获取成员级 MCP 服务器列表 (返回 JSON 解析后的数组)。
  * 为空时返回 [] (表示只用全局 MCP)。
  */
-export function getTeamMemberMcpServers(projectId: string, role: string, agentIndex: number = 0): Record<string, unknown>[] {
+export function getTeamMemberMcpServers(
+  projectId: string,
+  role: string,
+  agentIndex: number = 0,
+): Record<string, unknown>[] {
   try {
     const db = getDb();
-    const members = db.prepare(
-      'SELECT mcp_servers FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
-    ).all(projectId) as Array<{ mcp_servers: string | null }>;
+    const members = db
+      .prepare('SELECT mcp_servers FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC')
+      .all(projectId) as Array<{ mcp_servers: string | null }>;
     if (members.length === 0) return [];
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.mcp_servers) return [];
     return JSON.parse(member.mcp_servers);
-  } catch { /* silent: mcp_servers JSON parse fallback */
+  } catch {
+    /* silent: mcp_servers JSON parse fallback */
     return [];
   }
 }
@@ -218,14 +245,15 @@ export function getTeamMemberMcpServers(projectId: string, role: string, agentIn
 export function getTeamMemberSkills(projectId: string, role: string, agentIndex: number = 0): string[] {
   try {
     const db = getDb();
-    const members = db.prepare(
-      'SELECT skills FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
-    ).all(projectId) as Array<{ skills: string | null }>;
+    const members = db
+      .prepare('SELECT skills FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC')
+      .all(projectId) as Array<{ skills: string | null }>;
     if (members.length === 0) return [];
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.skills) return [];
     return JSON.parse(member.skills);
-  } catch { /* silent: skills JSON parse fallback */
+  } catch {
+    /* silent: skills JSON parse fallback */
     return [];
   }
 }
@@ -237,50 +265,64 @@ export function getTeamMemberSkills(projectId: string, role: string, agentIndex:
 export function getTeamMemberMaxIterations(projectId: string, role: string, agentIndex: number = 0): number | null {
   try {
     const db = getDb();
-    const members = db.prepare(
-      'SELECT max_iterations FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC'
-    ).all(projectId) as Array<{ max_iterations: number | null }>;
+    const members = db
+      .prepare('SELECT max_iterations FROM team_members WHERE project_id = ? AND role = ? ORDER BY created_at ASC')
+      .all(projectId) as Array<{ max_iterations: number | null }>;
     if (members.length === 0) return null;
     const member = members[Math.min(agentIndex, members.length - 1)];
     return member.max_iterations ?? null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export function lockNextFeature(projectId: string, workerId: string): FeatureRow | null {
   const db = getDb();
   const tryLock = db.transaction(() => {
-    const passedRows = db.prepare("SELECT id FROM features WHERE project_id = ? AND status = 'passed'").all(projectId) as { id: string }[];
+    const passedRows = db
+      .prepare("SELECT id FROM features WHERE project_id = ? AND status = 'passed'")
+      .all(projectId) as { id: string }[];
     const passedSet = new Set(passedRows.map(r => r.id));
 
     // v6.0 (G10): 两层索引 — 优先从同 group 中选择 feature
     // 先检查当前 worker 正在处理的 group (如有)
-    const currentGroup = db.prepare(
-      "SELECT group_id FROM features WHERE project_id = ? AND locked_by = ? AND status = 'in_progress' LIMIT 1"
-    ).get(projectId, workerId) as { group_id: string } | undefined;
+    const currentGroup = db
+      .prepare(
+        "SELECT group_id FROM features WHERE project_id = ? AND locked_by = ? AND status = 'in_progress' LIMIT 1",
+      )
+      .get(projectId, workerId) as { group_id: string } | undefined;
 
     // 查询所有 todo features, 按 group 亲和力 + priority 排序
     let todos: FeatureRow[];
     if (currentGroup?.group_id) {
       // 同 group 优先 (group affinity ordering)
-      todos = db.prepare(
-        `SELECT * FROM features WHERE project_id = ? AND status = 'todo'
-         ORDER BY CASE WHEN group_id = ? THEN 0 ELSE 1 END, priority ASC, id ASC`
-      ).all(projectId, currentGroup.group_id) as FeatureRow[];
+      todos = db
+        .prepare(
+          `SELECT * FROM features WHERE project_id = ? AND status = 'todo'
+         ORDER BY CASE WHEN group_id = ? THEN 0 ELSE 1 END, priority ASC, id ASC`,
+        )
+        .all(projectId, currentGroup.group_id) as FeatureRow[];
     } else {
-      todos = db.prepare(
-        "SELECT * FROM features WHERE project_id = ? AND status = 'todo' ORDER BY priority ASC, id ASC"
-      ).all(projectId) as FeatureRow[];
+      todos = db
+        .prepare("SELECT * FROM features WHERE project_id = ? AND status = 'todo' ORDER BY priority ASC, id ASC")
+        .all(projectId) as FeatureRow[];
     }
 
     for (const f of todos) {
       let deps: string[] = [];
-      try { deps = JSON.parse(f.depends_on || '[]'); } catch { /* */ }
+      try {
+        deps = JSON.parse(f.depends_on || '[]');
+      } catch {
+        /* */
+      }
       const depsOk = deps.every((d: string) => passedSet.has(d));
       if (!depsOk) continue;
 
-      const result = db.prepare(
-        "UPDATE features SET status = 'in_progress', locked_by = ? WHERE id = ? AND project_id = ? AND status = 'todo'"
-      ).run(workerId, f.id, projectId);
+      const result = db
+        .prepare(
+          "UPDATE features SET status = 'in_progress', locked_by = ?, locked_at = datetime('now') WHERE id = ? AND project_id = ? AND status = 'todo'",
+        )
+        .run(workerId, f.id, projectId);
 
       if (result.changes > 0) {
         return { ...f, status: 'in_progress' as const, locked_by: workerId };
@@ -304,7 +346,9 @@ export function getFeatureGroupSummary(projectId: string): Array<{
   failed: number;
 }> {
   const db = getDb();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
       COALESCE(group_id, 'default') as group_id,
       COUNT(*) as total,
@@ -314,7 +358,15 @@ export function getFeatureGroupSummary(projectId: string): Array<{
     FROM features WHERE project_id = ?
     GROUP BY group_id
     ORDER BY group_id
-  `).all(projectId) as Array<{ group_id: string | null; total: number; done: number; in_progress: number; failed: number }>;
+  `,
+    )
+    .all(projectId) as Array<{
+    group_id: string | null;
+    total: number;
+    done: number;
+    in_progress: number;
+    failed: number;
+  }>;
 
   return rows.map(r => ({
     groupId: r.group_id ?? '',
