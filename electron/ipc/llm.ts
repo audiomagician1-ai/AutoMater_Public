@@ -33,9 +33,15 @@ interface ChatRequest {
  */
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
-  // 去掉末尾的 /v1
-  if (u.endsWith('/v1')) u = u.slice(0, -3);
+  // 去掉用户误加的 API 路径后缀 (常见: /v1/chat/completions, /v1/models, /v1/messages 等)
+  u = u.replace(/\/v1(\/(?:chat\/completions|models|messages|completions|embeddings))?$/, '');
   return u;
+}
+
+/** 检查 HTTP 响应是否为 JSON (而非 HTML 页面等) */
+function isJsonResponse(res: Response): boolean {
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') || ct.includes('text/json');
 }
 
 function getSettings() {
@@ -78,14 +84,26 @@ export function setupLLMHandlers() {
             messages: [{ role: 'user', content: 'hi' }],
           }),
         });
-        return { success: res.ok, status: res.status, message: res.ok ? 'Connected!' : await res.text() };
+        if (res.ok && !isJsonResponse(res)) {
+          return {
+            success: false,
+            status: res.status,
+            message: 'URL 错误: 服务器返回了 HTML 而非 JSON。请检查 Base URL 是否正确 (不需要包含 /v1/messages)',
+          };
+        }
+        return {
+          success: res.ok,
+          status: res.status,
+          message: res.ok ? 'Connected!' : (await res.text()).slice(0, 300),
+        };
       } else {
         // OpenAI 兼容 — 先尝试 /v1/models，失败则用轻量 chat 测试
         try {
           const res = await fetch(`${base}/v1/models`, {
             headers: { Authorization: `Bearer ${provider.apiKey}` },
           });
-          if (res.ok) return { success: true, status: res.status, message: 'Connected!' };
+          if (res.ok && isJsonResponse(res)) return { success: true, status: res.status, message: 'Connected!' };
+          // 200 but not JSON = wrong URL (e.g. HTML page); fall through to chat test
         } catch {
           /* models endpoint not available, try chat */
         }
@@ -106,7 +124,18 @@ export function setupLLMHandlers() {
           }),
         });
         // 即使模型名不对，只要认证通过 (非 401/403) 就算连通
-        if (res.ok) return { success: true, status: res.status, message: 'Connected!' };
+        // 但必须验证返回的是 JSON 而非 HTML (URL 错误时 OpenRouter 等会返回 HTML 200)
+        if (res.ok) {
+          if (!isJsonResponse(res)) {
+            return {
+              success: false,
+              status: res.status,
+              message:
+                'URL 错误: 服务器返回了 HTML 而非 JSON API 响应。请检查 Base URL (通常为 https://openrouter.ai/api 或 https://api.openai.com)',
+            };
+          }
+          return { success: true, status: res.status, message: 'Connected!' };
+        }
         const text = await res.text();
         if (res.status === 401 || res.status === 403) {
           return { success: false, status: res.status, message: `认证失败 (${res.status}): ${text.slice(0, 200)}` };

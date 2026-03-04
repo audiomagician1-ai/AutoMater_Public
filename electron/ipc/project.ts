@@ -727,7 +727,10 @@ export function setupProjectHandlers() {
       };
       const provider = config.provider || globalSettings.llmProvider;
       const apiKey = config.apiKey || globalSettings.apiKey;
-      const baseUrl = (config.baseUrl || globalSettings.baseUrl).trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+      const baseUrl = (config.baseUrl || globalSettings.baseUrl)
+        .trim()
+        .replace(/\/+$/, '')
+        .replace(/\/v1(\/(?:chat\/completions|models|messages|completions|embeddings))?$/, '');
       const model =
         config.model ||
         (provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : globalSettings.strongModel || 'gpt-4o-mini');
@@ -751,7 +754,13 @@ export function setupProjectHandlers() {
               messages: [{ role: 'user', content: 'hi' }],
             }),
           });
-          if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          if (res.ok) {
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.includes('application/json') && !ct.includes('text/json')) {
+              return { success: false, message: `❌ URL 错误: 服务器返回了 HTML 而非 JSON。请检查 Base URL`, model };
+            }
+            return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          }
           const text = await res.text();
           return { success: false, message: `❌ ${res.status}: ${text.slice(0, 200)}`, model };
         } else {
@@ -768,7 +777,13 @@ export function setupProjectHandlers() {
               messages: [{ role: 'user', content: 'hi' }],
             }),
           });
-          if (res.ok) return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          if (res.ok) {
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.includes('application/json') && !ct.includes('text/json')) {
+              return { success: false, message: `❌ URL 错误: 服务器返回了 HTML 而非 JSON API 响应`, model };
+            }
+            return { success: true, message: `✅ 模型 ${model} 连通成功!`, model };
+          }
           const text = await res.text();
           if (res.status === 401 || res.status === 403) {
             return { success: false, message: `❌ 认证失败 (${res.status}): ${text.slice(0, 200)}`, model };
