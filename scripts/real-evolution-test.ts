@@ -336,9 +336,8 @@ describe('Real Evolution Engine Integration', { timeout: 600_000 }, () => {
     // 首先检查 decision-log.ts 是否存在且被测试覆盖
     const testBreakTargetPath = path.join(SOURCE_ROOT, TEST_BREAK_TARGET);
     if (!fs.existsSync(testBreakTargetPath)) {
-      console.log(`   ⚠️ ${TEST_BREAK_TARGET} not found, using alternative target`);
-      // 使用一个肯定存在的文件
-      return; // skip this test if file doesn't exist
+      console.log(`   ⚠️ ${TEST_BREAK_TARGET} not found, skipping`);
+      return;
     }
 
     const engine = new SelfEvolutionEngine({ sourceRoot: SOURCE_ROOT });
@@ -346,38 +345,33 @@ describe('Real Evolution Engine Integration', { timeout: 600_000 }, () => {
     const pre = await engine.preflight();
     expect(pre.ok).toBe(true);
 
-    // 修改一个被测试覆盖的模块，但保持 tsc 通过
-    // 策略: 将一个导出函数的返回值改为不同的值
+    // 注入一个会让现有测试失败的修改:
+    // 在 claimFiles() 函数体开头注入 return [], 使其不写 claim 记录
+    // 这样 decision-log.test.ts 的 "单 worker claim 后可查到活跃声明" 会失败
+    // 因为 expect(claims.size).toBe(2) 会得到 0
     const result = await engine.runSingleIteration(
-      'Break test by modifying decision-log behavior',
+      'Break test by neutering claimFiles() in decision-log.ts',
       async (workingDir: string) => {
         const targetPath = path.join(workingDir, TEST_BREAK_TARGET);
         const original = fs.readFileSync(targetPath, 'utf-8');
 
-        // 在文件开头添加一个会被测试检测到的行为变更
-        // 替换策略: 找到第一个导出函数，在其开头插入 throw
-        // 实际上更安全的方式是添加一个新的导出测试用的函数
-        // 但要破坏现有测试，我们需要改变现有行为
+        // 在 claimFiles 函数体开头注入 early return
+        // 查找 claimFiles 函数体内的第一行: "const normalizedFiles = ..."
+        const needle = 'const normalizedFiles = plannedFiles.map';
+        const idx = original.indexOf(needle);
 
-        // 简单方法: 找一个测试会检查的常量/函数并修改
-        // 如果找不到好的注入点，就添加一个会在 import 时 throw 的语句
-        const broken = original.replace(
-          /export /,
-          `
-// [evo-test] Injected test-breaking code
-if (typeof globalThis !== 'undefined' && (globalThis as Record<string, unknown>).__evo_test_break !== true) {
-  // 只在测试环境中生效: 添加一个 side-effect 让测试失败
-}
+        if (idx !== -1) {
+          const broken = original.slice(0, idx)
+            + '/* [evo-test] Neutered */ return [];\n  '
+            + original.slice(idx);
+          fs.writeFileSync(targetPath, broken, 'utf-8');
+        } else {
+          // 备选: 在文件末尾添加一个会在 import 时 throw 的语句
+          console.log('   ⚠️ Primary injection failed, using fallback');
+          const fallback = original + '\n\nthrow new Error("EVO_TEST_BREAK");\n';
+          fs.writeFileSync(targetPath, fallback, 'utf-8');
+        }
 
-export const __evoTestBreakSentinel = (() => {
-  // 此函数在 import 时执行, 修改 module 行为
-  return 'BREAK_SENTINEL';
-})();
-
-export `,
-        );
-
-        fs.writeFileSync(targetPath, broken, 'utf-8');
         return [TEST_BREAK_TARGET];
       },
     );
@@ -391,15 +385,25 @@ export `,
       console.log(`   failed: ${result.entry.fitness.failedTests}`);
       console.log(`   status: ${result.entry.status}`);
     }
+    if (result.error) {
+      console.log(`   error: ${result.error}`);
+    }
 
-    // 结果应该是 rejected (不论是 tsc 失败还是测试失败)
+    // 结果应该是 rejected (测试失败)
     expect(result.success).toBe(false);
-    expect(result.entry).toBeDefined();
-    expect(result.entry!.status).toBe('rejected');
+    if (result.entry) {
+      expect(result.entry.status).toBe('rejected');
+      // 测试应该有失败
+      expect(result.entry.fitness.failedTests).toBeGreaterThan(0);
+    } else {
+      // 也可能走了 error 路径 (例如 import 时 throw)
+      expect(result.rolledBack).toBe(true);
+    }
 
     // 验证工作区恢复
     const content = fs.readFileSync(testBreakTargetPath, 'utf-8');
-    expect(content).not.toContain('__evoTestBreakSentinel');
+    expect(content).not.toContain('evo-test');
+    expect(content).not.toContain('EVO_TEST_BREAK');
     expect(getCurrentBranch()).toBe(ORIGINAL_BRANCH);
 
     console.log('   ✅ test-breaking modification correctly rejected');
