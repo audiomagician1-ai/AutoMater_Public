@@ -3,8 +3,8 @@
 # 使用: GITHUB_TOKEN=xxx bash .github/scripts/setup-labels.sh
 # 或在 PowerShell 中: 见下方 PowerShell 版本
 
-OWNER="audiomagician1-ai"
-REPO="AgentForge"
+OWNER="${GITHUB_OWNER:-your-org}"
+REPO="${GITHUB_REPO:-AgentForge}"
 
 # ============ 类型标签 ============
 declare -A TYPE_LABELS=(

@@ -449,9 +449,8 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 ### 必读文件
 1. `CLAUDE.md` (本文件 — 项目大脑, **单一事实源**)
-2. `docs/agent-capability-gap-analysis-2026-03.md` (Agent 能力差距分析, v20.0 改进基准)
-3. `docs/CODE-QUALITY-REVIEW-2026-03-02.md` (代码质量复盘)
-4. `docs/ARCHITECTURE-AUDIT-2026-03-02.md` (架构审计报告)
+2. `ARCHITECTURE.md` (架构文档 — 模块图、数据流、修改热点)
+3. `MEMO.md` (开发备忘录 — 架构决策、踩坑记录、自修改检查清单)
 
 ### 提交规范
 - `feat:` 新功能 | `fix:` 修复 | `refactor:` 重构 | `docs:` 文档 | `test:` 测试
@@ -493,7 +492,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 ## 6. CODE HEALTH (2026-03-04 快照)
 
-> 详见 `docs/CODE-QUALITY-REVIEW-2026-03-02.md`
+> 详见 `MEMO.md` §2 技术债
 
 | 指标 | 值 | 备注 |
 |------|-----|------|

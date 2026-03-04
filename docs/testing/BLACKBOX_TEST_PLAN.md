@@ -4,7 +4,7 @@
 > **日期**: 2026-03-02  
 > **适用范围**: AutoMater v6.0+ (含 v7.0~v12.1 暂存功能)  
 > **测试方法**: 手动黑盒测试 + 结果记录到 GitHub Issues  
-> **仓库**: `audiomagician1-ai/AgentForge`
+> **仓库**: `AutoMater`
 
 ---
 

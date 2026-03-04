@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📖 黑盒测试计划
-    url: https://github.com/audiomagician1-ai/AgentForge/blob/main/docs/testing/BLACKBOX_TEST_PLAN.md
+    url: https://github.com/user/AutoMater/blob/main/docs/testing/BLACKBOX_TEST_PLAN.md
     about: 查看完整的测试用例清单和执行策略
   - name: 📋 测试工作流手册
-    url: https://github.com/audiomagician1-ai/AgentForge/blob/main/docs/testing/TESTING_WORKFLOW.md
+    url: https://github.com/user/AutoMater/blob/main/docs/testing/TESTING_WORKFLOW.md
     about: 测试执行、Bug 管理和验收流程说明

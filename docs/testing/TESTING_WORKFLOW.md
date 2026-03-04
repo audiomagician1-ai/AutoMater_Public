@@ -1,7 +1,7 @@
 # 智械母机 AutoMater — 测试工作流操作手册
 
 > **版本**: v1.0 | **日期**: 2026-03-02  
-> **仓库**: `audiomagician1-ai/AgentForge`
+> **仓库**: `AutoMater`
 
 ---
 
@@ -26,7 +26,7 @@
 # 获取 GitHub 凭据
 $token = (echo "protocol=https`nhost=github.com`n" | git credential fill | Select-String "password" | % { ($_ -split "=",2)[1] })
 $headers = @{ "Authorization"="Bearer $token"; "Accept"="application/vnd.github+json" }
-$base = "https://api.github.com/repos/audiomagician1-ai/AgentForge"
+$base = "https://api.github.com/repos/{OWNER}/{REPO}"
 
 # 创建标签函数
 function New-GitHubLabel($name, $color, $desc) {
@@ -76,7 +76,7 @@ foreach ($m in $milestones) {
 ### 2.3 构建与启动
 
 ```powershell
-cd D:\EchoAgent\projects\AgentForge
+cd /path/to/AutoMater
 pnpm install
 pnpm test                 # 确认71个单元测试通过
 pnpm run dev              # 开发模式启动
@@ -170,7 +170,7 @@ fix(settings): 防止空API Key保存 (fixes #15)
 | 当前轮次 | `is:open label:round-1` |
 | 已验证可关闭 | `is:open label:verified` |
 
-**快速链接**: `https://github.com/audiomagician1-ai/AgentForge/issues?q=is:open+label:{标签名}`
+**快速链接**: `https://github.com/{OWNER}/{REPO}/issues?q=is:open+label:{标签名}`
 
 ---
 

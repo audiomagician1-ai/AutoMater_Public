@@ -317,7 +317,7 @@ function ConfigTab({
               value={config.userNickname}
               onChange={e => update('userNickname', e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
-              placeholder="老板 / Tim / 你..."
+              placeholder="老板 / Boss / 你..."
             />
           </Field>
         </div>
