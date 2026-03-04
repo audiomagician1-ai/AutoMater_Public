@@ -290,85 +290,125 @@ const PRODUCT_KNOWLEDGE = `
 用户通过自然语言描述需求，由一支虚拟 Agent 团队自动完成软件开发全流程。
 技术栈: Electron 33 + React 19 + TypeScript + Vite + Zustand + better-sqlite3，完全本地离线运行（仅调用 LLM API 需要网络）。
 
+## 设计理念
+
+### 多 Agent 协作架构
+AutoMater 借鉴真实软件公司的协作模式：PM 分析需求 → 架构师设计方案 → 开发者并行编码 → QA 审查质量 → DevOps 构建验证。
+每个 Agent 都是独立的 LLM 会话(Session)，拥有**角色专属工具集**（最小权限原则）和**独立上下文窗口**。
+
+### ReAct 循环引擎
+每个 Agent 在执行任务时运行 ReAct 循环：思考(Think) → 调用工具(Act) → 观察结果(Observe) → 迭代，直到任务完成。
+循环次数可配置（默认 50 轮），超时或失败会自动报告并触发恢复机制。
+
+### 分层记忆系统
+- **项目记忆**: 存储在工作区 .automater/ 目录，跟随项目走
+- **管家记忆**: 存储在本地 DB，按项目隔离（v29.0），跨会话持久化
+- **会话上下文**: 每次对话带入最近 N 条历史消息
+- **技能系统**: Agent 在工作中积累的可复用经验片段
+
+### Session-Agent 调度
+每个 Agent 实例对应一个 Session。系统支持并发调度：多个 Developer 可以并行工作在不同 Feature 上。
+Session 生命周期: created → running → suspended → completed/failed。
+
 ## 核心页面与操作指引
 
 ### 🗺️ 全景 (Overview)
-- 进入项目后的总控制台。展示**实时运行状态**、Agent 工作图谱、Feature 进度条、Token/费用实时图表、系统资源监控。
-- 右上角有"▶ 启动"/"⏹ 停止"控制按钮。
-- 如果进度卡住，检查 LLM 配置和网络。
+进入项目后的总控制台。展示**实时运行状态**、Agent 工作图谱、Feature 进度条、Token/费用实时图表、系统资源监控。
+右上角有"▶ 启动"/"⏹ 停止"控制按钮。
 
 ### ✨ 许愿 (Wish)
-- **左侧**: 会话历史列表（支持置顶📌、重命名✏️、隐藏🙈功能——右键操作）。
+- **左侧**: 会话历史列表（支持置顶📌、重命名✏️、隐藏🙈——右键操作）。
 - **右侧**: 与管家对话。四种模式:
-  - 💼 工作模式: 提需求 → 管家自动 create_wish 派发任务给团队。
-  - 💬 闲聊模式: 自由对话，不触发任何开发操作。
+  - 🔧 工作模式: 提需求 → 管家自动 create_wish 派发任务给团队。
+  - 💬 闲聊模式: 自由对话，不触发任何开发操作，不加载项目记忆。
   - 🔬 深度讨论: 管家亲自读代码、写分析报告、可直接修改文件或派发任务。
   - 🛠️ 管理模式: 通过对话管理团队成员、工作流配置、项目设置。
-- 点击 "+ 新对话" 选择模式创建新会话，或在已有会话上切换模式。
+- 点击模式指示器切换模式（已有对话也可以切换）。
 
 ### 📋 看板 (Board)
-- Kanban 风格的 Feature 任务看板。列: pending → developing → qa → done / failed。
-- 每张卡片显示标题、优先级、分类、关联的 Agent 和 Session。
-- 可拖动排列优先级。
+Kanban 风格 Feature 任务看板。列: pending → developing → qa → done / failed。可拖动调整优先级。
 
 ### 📄 文档 (Docs)
-- 浏览 Agent 自动生成的设计文档: 总览设计、系统级设计、每个 Feature 的需求文档和测试规格。
-- 支持版本历史查看和回退（右键文件 → 查看历史版本）。
+浏览 Agent 自动生成的设计文档。支持版本历史查看和回退。
 
 ### 🔄 工作流 (Workflow)
-- 选择开发流水线预设: 完整开发(9阶段)、快速迭代(5阶段)、质量加固(6阶段)。
-- 支持自定义工作流——添加/移除/重排阶段。
+选择开发流水线预设: 完整开发(9阶段)、快速迭代(5阶段)、质量加固(6阶段)。支持自定义。
 
 ### 👥 团队 (Team)
-- 查看所有 Agent 卡片（PM/Architect/Developer×N/QA/DevOps）。
-- 可编辑每个 Agent 的: 系统提示词、AI 模型、上下文 Token 限制、MCP 服务器、技能。
-- **动态添加成员**: 添加 developer 角色成员时，如果项目正在开发阶段，新成员会**自动热加入并立即领取任务**。
+查看所有 Agent 卡片（PM/Architect/Developer×N/QA/DevOps）。可编辑提示词、模型、Token限制、MCP服务器、技能。
+**动态添加成员**: 添加 developer 时可自动热加入并领取任务。
 
-### 🧠 上下文 (Context)
-- 查看每个 Agent 当前的上下文 Token 使用量、信息构成比例、基线预览。
+### 🧠 上下文 (Context) / ⏳ 时间线 / 📼 会话 / 📦 产出 / 🔀 版本 / 📜 日志
+这些页面分别提供: 上下文 Token 分析、事件回溯、Session 记录、源代码浏览(含搜索Ctrl+P/Ctrl+Shift+F)、Git 版本管理(支持 diff/回退/手动提交)、实时日志流。
 
-### ⏳ 时间线 (Timeline)
-- 事件重放和历史回溯，展示开发过程中所有关键事件。
+### ⚙️ 设置
+LLM 配置（API Key/地址/模型选择）、MCP 服务器扩展、管家设置（名称/性格/记忆管理）。
 
-### 📼 会话 (Sessions)
-- 查看所有 Agent 的 Session 记录、备份、Feature-Session 关联。
+### 📖 教程
+内置文档中心，覆盖从快速上手到进阶配置的完整指南。
 
-### 📦 产出 (Output)
-- 浏览生成的源代码文件树。
-- 在线预览代码（语法高亮）。内置文件搜索(Ctrl+P)和内容搜索(Ctrl+Shift+F)。
-- 右键文件可: 查看历史版本、版本回退、在文件管理器中打开、复制路径。
-- 顶部"📂 打开文件夹"和"📦 导出 zip"按钮。
+## 工具能力全景
 
-### 🔀 版本 (Git)
-- 本地 Git 版本管理页面。
-- 左侧: 提交历史时间线（hash/author/date/message），点击查看该 commit 的文件变更和 diff。
-- "工作区变更"项: 显示当前未提交的修改，彩色 diff 预览。
-- **手动提交**: 有未提交变更时，顶部出现快速提交区(输入 commit message → Ctrl+Enter 提交)。
-- **文件版本历史**: 点击变更文件的📜按钮 → 弹窗展示文件完整历史，可预览任意版本内容、可回退到指定版本。
-- 顶栏显示当前分支名和分支数量。
+AutoMater 共内置 **130 个工具**，按角色分配（最小权限原则）：
 
-### 📜 日志 (Logs)
-- 实时运行日志流，可按 Agent 过滤。
+### 🗂️ 文件系统 (12 个)
+read_file, write_file, edit_file, batch_edit, list_files, glob_files, search_files, code_search, code_search_files, read_many_files, repo_map, code_graph_query
+**用途**: 代码读写、搜索、结构分析。code_graph_query 可查询模块间依赖关系。
 
-### ⚙️ 设置 (Settings)
-- **LLM 配置**: API Key、API 地址、模型选择。支持 OpenAI、Anthropic、兼容 API。
-- **MCP 服务器**: 扩展 Agent 能力的外部工具。
-- **管家配置**: 名称、性格、用户昵称、自定义系统提示词。
+### 🐚 Shell (5 个)
+run_command, run_test, run_lint, check_process, wait_for_process
+**用途**: 执行命令、运行测试套件、代码检查。
 
-### 📖 教程 (Guide)
-- 内置教程文档中心: 快速上手、导入已有项目、LLM 配置、GitHub 配置、MCP 配置、许愿指南、团队管理、文档产出、FAQ。
+### 🌿 Git (19 个)
+git_commit/diff/log, git_create_branch/switch_branch/list_branches/delete_branch, git_pull/push/fetch, github_create_issue/list_issues/close_issue/add_comment/get_issue, github_create_pr/list_prs/get_pr/merge_pr
+**用途**: 本地版本控制 + GitHub 全流程操作。
+
+### 🌐 Web (8 个)
+web_search, fetch_url, http_request, download_file, search_images, web_search_boost, deep_research, configure_search
+**用途**: 网络搜索、API 调用、深度调研。deep_research 可进行多轮自动搜索。
+
+### 🖥️ Computer Use (26 个)
+screenshot, mouse_click/move, keyboard_type/hotkey, browser_launch/navigate/screenshot/snapshot/click/type/evaluate/wait/network/close/hover/select_option/press_key/fill_form/drag/tabs/file_upload/console, analyze_image, compare_screenshots, visual_assert
+**用途**: 浏览器自动化、UI 测试、截图验证。基于 Playwright 的完整浏览器控制。
+
+### 🤖 Agent 协作 (14 个)
+spawn_agent, spawn_parallel, list_sub_agents, cancel_sub_agent, skill_acquire/search/improve/record_usage, sandbox_init/exec/write/read/destroy, run_blackbox_tests
+**用途**: Agent 可以生成子 Agent 协作、管理技能库、在 Docker sandbox 中运行隔离测试。
+
+### ☁️ 部署 (23 个)
+generate_image, edit_image, configure_image_gen, deploy_dockerfile_generate/compose_generate/compose_down, deploy_pm2_start/status, deploy_nginx_generate/find_port, supabase_status/migration_create/migration_push/db_pull/deploy_function/gen_types/set_secret, cloudflare_deploy_pages/deploy_worker/set_secret/dns_list/dns_create/status
+**用途**: 部署配置生成、Docker/PM2/Nginx 管理、Supabase 数据库、Cloudflare 部署。
+
+### 🧠 记忆与协调 (12 个)
+think, task_complete, memory_read/append, todo_write/read, scratchpad_write/read, spawn_researcher, report_blocked, rfc_propose, create_wish
+**用途**: 思考、任务管理、持久记忆、研究协调、需求派发。
+
+### 🛠️ 管理 (9 个)
+admin_list_members/add_member/update_member/remove_member, admin_list_workflows/activate_workflow/update_workflow/update_project/get_available_stages
+**用途**: 管家专属，管理团队成员、工作流、项目配置。
+
+### 📼 Session (2 个)
+list_conversation_sessions, read_conversation_history
+**用途**: 浏览 Agent 间的会话记录。
+
+### 各角色工具数量
+| 角色 | 工具数 | 核心能力 |
+|------|--------|----------|
+| PM | 30 | 需求分析、搜索调研、图片生成、阻塞上报 |
+| 架构师 | 31 | 架构设计、技术选型、RFC 提案、写文件 |
+| 开发者 | 108 | 全栈开发、测试、部署、浏览器自动化、子Agent |
+| QA | 65 | 代码审查、测试运行、浏览器测试、截图对比 |
+| DevOps | 80 | 部署、Docker、CI/CD、Supabase、Cloudflare |
+| 研究员 | 16 | 深度搜索、资料下载（spawn_researcher 创建） |
+| 管家 | 33 | 读代码、搜索、管理团队、需求派发 |
 
 ## 项目创建与导入
 
 ### 新建项目
 项目列表页 → "+ 新建项目" → 输入项目名 → 选择版本控制模式(本地Git/GitHub) → 创建。
-创建后自动 git init + .gitignore。
 
 ### 导入已有项目
-项目列表页 → "📥 导入已有项目" → 选择代码目录 → 自动执行三阶段分析:
-1. Phase 0 骨架扫描(~1-2秒): 目录结构、技术栈检测、依赖图
-2. Phase 1 并行探测(~30秒-3分钟): 多AI探针并行分析(入口追踪/模块纵深/API边界/数据模型/配置基础设施/异常检测)
-3. Phase 2 拼图合成(~10-30秒): 综合生成 ARCHITECTURE.md + module-graph.json + KNOWN-ISSUES.md
+项目列表页 → "📥 导入已有项目" → 选择代码目录 → 自动三阶段分析(骨架扫描→并行探测→拼图合成)。
 
 ## 开发流程
 
@@ -383,20 +423,16 @@ const PRODUCT_KNOWLEDGE = `
 ## 常见问题解答
 
 - **启动后没反应**: 检查 LLM API Key 是否配置(设置页，绿色圆点表示已配置)、网络是否通畅。
-- **费用控制**: 使用更便宜的模型(如 GPT-4o-mini)、缩小单次需求范围、降低 max token。一个中等项目约 $0.5-$5。
-- **代码质量不好**: 提供更详细的需求描述、指定技术栈、分步迭代。
-- **可以手动改代码吗**: 可以，在产出页找到工作区路径用编辑器打开。但 Agent 运行中可能覆盖改动。
-- **如何暂停**: 全景页面控制栏有暂停/继续按钮。
-- **支持什么语言**: 理论上所有主流语言。默认推荐 TypeScript/React，可在需求中指定。
-- **导入项目不准确**: 先小范围测试、确保 .gitignore 排除了 node_modules 等无关目录。
+- **费用控制**: 使用更便宜的模型、缩小需求范围、降低 max token。一个中等项目约 $0.5-$5。
+- **可以手动改代码吗**: 可以，在产出页找到工作区路径用编辑器打开。Agent 运行中可能覆盖改动。
+- **支持什么语言**: 理论上所有主流语言，默认推荐 TypeScript/React。
 
 ## 快捷键
 
-- Ctrl+K: 全局搜索(跨项目)
+- Ctrl+K: 全局搜索
 - Ctrl+Shift+F: 产出页内容搜索
 - Ctrl+P: 产出页文件名搜索
-- Ctrl+Enter: 快速提交(许愿页发送消息、版本页提交commit)
-`;
+- Ctrl+Enter: 快速提交`;
 
 // ═══════════════════════════════════════
 // Build System Prompt (dynamic, config-aware)
