@@ -407,6 +407,44 @@ const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_meta_memories_project ON meta_agent_memories(project_id)');
     },
   },
+  {
+    version: 19,
+    description: 'v29.2: 自我进化基础设施 — evolution_archive + evolution_memories 表',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS evolution_archive (
+          id TEXT PRIMARY KEY,
+          parent_id TEXT,
+          generation INTEGER NOT NULL,
+          branch TEXT NOT NULL,
+          fitness_score REAL NOT NULL DEFAULT 0,
+          fitness_json TEXT NOT NULL DEFAULT '{}',
+          description TEXT NOT NULL DEFAULT '',
+          modified_files TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_evo_archive_gen ON evolution_archive(generation);
+        CREATE INDEX IF NOT EXISTS idx_evo_archive_status ON evolution_archive(status);
+
+        CREATE TABLE IF NOT EXISTS evolution_memories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pattern TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          module TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          fitness_impact REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_evo_memories_outcome ON evolution_memories(outcome);
+
+        CREATE TABLE IF NOT EXISTS evolution_config (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */

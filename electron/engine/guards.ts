@@ -65,7 +65,9 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'offset', type: 'number', required: false, min: 1, max: 100000 },
       { name: 'limit', type: 'number', required: false, min: 1, max: 500 },
     ],
-    sideEffect: 'none', rateLimit: 60, requiresWorkspace: true,
+    sideEffect: 'none',
+    rateLimit: 60,
+    requiresWorkspace: true,
   },
   write_file: {
     name: 'write_file',
@@ -73,7 +75,9 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'path', type: 'string', required: true, maxLength: 500, validate: validateRelativePath },
       { name: 'content', type: 'string', required: true, maxLength: 1_000_000 },
     ],
-    sideEffect: 'write', rateLimit: 30, requiresWorkspace: true,
+    sideEffect: 'write',
+    rateLimit: 30,
+    requiresWorkspace: true,
   },
   edit_file: {
     name: 'edit_file',
@@ -82,7 +86,9 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'old_string', type: 'string', required: true, maxLength: 100_000 },
       { name: 'new_string', type: 'string', required: true, maxLength: 200_000 },
     ],
-    sideEffect: 'write', rateLimit: 30, requiresWorkspace: true,
+    sideEffect: 'write',
+    rateLimit: 30,
+    requiresWorkspace: true,
   },
   batch_edit: {
     name: 'batch_edit',
@@ -90,14 +96,16 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'path', type: 'string', required: true, maxLength: 500, validate: validateRelativePath },
       { name: 'edits', type: 'array', required: true },
     ],
-    sideEffect: 'write', rateLimit: 20, requiresWorkspace: true,
+    sideEffect: 'write',
+    rateLimit: 20,
+    requiresWorkspace: true,
   },
   run_command: {
     name: 'run_command',
-    params: [
-      { name: 'command', type: 'string', required: true, maxLength: 2000 },
-    ],
-    sideEffect: 'execute', rateLimit: 15, requiresWorkspace: true,
+    params: [{ name: 'command', type: 'string', required: true, maxLength: 2000 }],
+    sideEffect: 'execute',
+    rateLimit: 15,
+    requiresWorkspace: true,
   },
   web_search: {
     name: 'web_search',
@@ -105,7 +113,9 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'query', type: 'string', required: true, maxLength: 500 },
       { name: 'max_results', type: 'number', required: false, min: 1, max: 20 },
     ],
-    sideEffect: 'network', rateLimit: 10, requiresWorkspace: false,
+    sideEffect: 'network',
+    rateLimit: 10,
+    requiresWorkspace: false,
   },
   fetch_url: {
     name: 'fetch_url',
@@ -113,7 +123,9 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'url', type: 'string', required: true, maxLength: 2000, validate: validateUrl },
       { name: 'max_length', type: 'number', required: false, min: 100, max: 100_000 },
     ],
-    sideEffect: 'network', rateLimit: 10, requiresWorkspace: false,
+    sideEffect: 'network',
+    rateLimit: 10,
+    requiresWorkspace: false,
   },
   http_request: {
     name: 'http_request',
@@ -122,28 +134,30 @@ const TOOL_GUARD_SPECS: Record<string, ToolGuardSpec> = {
       { name: 'method', type: 'string', required: false, enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
       { name: 'timeout', type: 'number', required: false, min: 1000, max: 60000 },
     ],
-    sideEffect: 'network', rateLimit: 10, requiresWorkspace: false,
+    sideEffect: 'network',
+    rateLimit: 10,
+    requiresWorkspace: false,
   },
   screenshot: {
     name: 'screenshot',
-    params: [
-      { name: 'scale', type: 'number', required: false, min: 0.1, max: 2.0 },
-    ],
-    sideEffect: 'system', rateLimit: 10, requiresWorkspace: false,
+    params: [{ name: 'scale', type: 'number', required: false, min: 0.1, max: 2.0 }],
+    sideEffect: 'system',
+    rateLimit: 10,
+    requiresWorkspace: false,
   },
   keyboard_type: {
     name: 'keyboard_type',
-    params: [
-      { name: 'text', type: 'string', required: true, maxLength: 5000 },
-    ],
-    sideEffect: 'system', rateLimit: 20, requiresWorkspace: false,
+    params: [{ name: 'text', type: 'string', required: true, maxLength: 5000 }],
+    sideEffect: 'system',
+    rateLimit: 20,
+    requiresWorkspace: false,
   },
   keyboard_hotkey: {
     name: 'keyboard_hotkey',
-    params: [
-      { name: 'combo', type: 'string', required: true, maxLength: 100, validate: validateHotkey },
-    ],
-    sideEffect: 'system', rateLimit: 20, requiresWorkspace: false,
+    params: [{ name: 'combo', type: 'string', required: true, maxLength: 100, validate: validateHotkey }],
+    sideEffect: 'system',
+    rateLimit: 20,
+    requiresWorkspace: false,
   },
 };
 
@@ -224,11 +238,7 @@ function checkRateLimit(toolName: string, limit: number): boolean {
  * 校验工具调用: 参数类型 + 范围 + 路径安全 + 速率限制
  * 返回: { allowed, reason?, repairedArgs? }
  */
-export function guardToolCall(
-  toolName: string,
-  args: Record<string, unknown>,
-  hasWorkspace: boolean,
-): ToolGuardResult {
+export function guardToolCall(toolName: string, args: Record<string, unknown>, hasWorkspace: boolean): ToolGuardResult {
   const spec = TOOL_GUARD_SPECS[toolName];
 
   // 未注册的工具 → 允许通过 (兼容旧工具)
@@ -286,7 +296,10 @@ export function guardToolCall(
 
     // 枚举校验
     if (param.enum && !param.enum.includes(repaired[param.name] as string)) {
-      return { allowed: false, reason: `${toolName}.${param.name}: "${repaired[param.name]}" not in [${param.enum.join(', ')}]` };
+      return {
+        allowed: false,
+        reason: `${toolName}.${param.name}: "${repaired[param.name]}" not in [${param.enum.join(', ')}]`,
+      };
     }
 
     // 自定义校验
@@ -320,7 +333,7 @@ export const DEFAULT_REACT_CONFIG: ReactTerminationConfig = {
   maxIterations: 50,
   maxTotalTokens: 500_000,
   maxCostUsd: 2.0,
-  maxWallTimeMs: 10 * 60 * 1000,  // 10 minutes
+  maxWallTimeMs: 10 * 60 * 1000, // 10 minutes
   maxIdleIterations: 5,
   maxConsecutiveErrors: 3,
   maxRepeatCalls: 3,
@@ -399,22 +412,38 @@ export function checkReactTermination(
 
   const elapsed = Date.now() - state.startTimeMs;
   if (config.maxWallTimeMs > 0 && elapsed >= config.maxWallTimeMs) {
-    return { shouldContinue: false, reason: 'max_time', message: `Wall time ${Math.round(elapsed / 1000)}s exceeded ${config.maxWallTimeMs / 1000}s limit` };
+    return {
+      shouldContinue: false,
+      reason: 'max_time',
+      message: `Wall time ${Math.round(elapsed / 1000)}s exceeded ${config.maxWallTimeMs / 1000}s limit`,
+    };
   }
 
   if (state.consecutiveIdleCount >= config.maxIdleIterations) {
-    return { shouldContinue: false, reason: 'idle_loop', message: `${config.maxIdleIterations} consecutive iterations without side effects` };
+    return {
+      shouldContinue: false,
+      reason: 'idle_loop',
+      message: `${config.maxIdleIterations} consecutive iterations without side effects`,
+    };
   }
 
   if (state.consecutiveErrorCount >= config.maxConsecutiveErrors) {
-    return { shouldContinue: false, reason: 'error_loop', message: `${config.maxConsecutiveErrors} consecutive errors` };
+    return {
+      shouldContinue: false,
+      reason: 'error_loop',
+      message: `${config.maxConsecutiveErrors} consecutive errors`,
+    };
   }
 
   // 重复调用检测
   if (state.recentCallSignatures.length >= config.maxRepeatCalls) {
     const last = state.recentCallSignatures.slice(-config.maxRepeatCalls);
     if (last.every(sig => sig === last[0])) {
-      return { shouldContinue: false, reason: 'repeat_loop', message: `Same tool call repeated ${config.maxRepeatCalls} times` };
+      return {
+        shouldContinue: false,
+        reason: 'repeat_loop',
+        message: `Same tool call repeated ${config.maxRepeatCalls} times`,
+      };
     }
   }
 
@@ -433,7 +462,7 @@ export interface VerificationGateResult {
 
 /**
  * v20.0: 验证门控 — 在 Agent 调用 task_complete 前检查是否执行过验证
- * 
+ *
  * 规则:
  * - 如果 Agent 写过文件但从未执行 run_command/run_test/run_lint → 拦截
  * - 如果 Agent 没有写任何文件 → 放行 (可能是分析型任务)
@@ -449,7 +478,8 @@ export function checkVerificationGate(state: ReactState): VerificationGateResult
   if (!state.hasRunVerification) {
     return {
       allowed: false,
-      message: '⚠️ 你已经写入/修改了文件，但还没有执行任何验证命令。在调用 task_complete 之前，请先执行 run_command 验证代码能否正常编译和运行（如 `npm run build`、`tsc --noEmit`、`python -m py_compile` 等）。如果项目有测试，也请运行测试。',
+      message:
+        '⚠️ 你已经写入/修改了文件，但还没有执行任何验证命令。在调用 task_complete 之前，请先执行 run_command 验证代码能否正常编译和运行（如 `npm run build`、`tsc --noEmit`、`python -m py_compile` 等）。如果项目有测试，也请运行测试。',
     };
   }
 
@@ -468,10 +498,10 @@ export interface SemanticLoopResult {
 
 /**
  * v20.0: 语义死循环检测 — 检测 Agent 对同一文件反复使用同类工具失败
- * 
+ *
  * 场景: edit_file 反复失败 (old_string 不匹配), 同一文件 run_command 反复超时等
  * 触发条件: 同一工具 + 同一目标文件 连续失败 2 次
- * 
+ *
  * 与 repeat_loop 的区别: repeat_loop 检测完全相同的调用签名,
  * semantic_loop 检测同一工具+同一文件但参数不同的失败 (更宽泛)
  */
@@ -516,7 +546,8 @@ export function checkSemanticLoop(
     switch (toolName) {
       case 'edit_file':
       case 'batch_edit':
-        escalation = `🔴 强制策略升级: 你已经对文件 "${targetFile}" 的 edit_file/batch_edit 操作连续失败 ${failCount} 次。\n` +
+        escalation =
+          `🔴 强制策略升级: 你已经对文件 "${targetFile}" 的 edit_file/batch_edit 操作连续失败 ${failCount} 次。\n` +
           `请立即执行以下步骤:\n` +
           `1. 使用 search_files 搜索你想修改的关键内容，获取精确行号\n` +
           `2. 使用 read_file(offset=行号-5, limit=40) 只读取目标区域的最新内容\n` +
@@ -526,7 +557,8 @@ export function checkSemanticLoop(
         break;
       case 'run_command':
       case 'run_test':
-        escalation = `🔴 强制策略升级: 对 "${targetFile}" 相关的命令已连续失败 ${failCount} 次。\n` +
+        escalation =
+          `🔴 强制策略升级: 对 "${targetFile}" 相关的命令已连续失败 ${failCount} 次。\n` +
           `建议:\n` +
           `1. 检查命令拼写和参数是否正确\n` +
           `2. 如果命令超时，添加 timeout 参数或拆成更小的命令\n` +
@@ -563,10 +595,21 @@ export function toolCallSignature(name: string, args: Record<string, unknown>): 
  */
 export function hasToolSideEffect(toolNames: string[]): boolean {
   const readOnlyTools = new Set([
-    'think', 'read_file', 'read_many_files', 'list_files', 'glob_files',
-    'search_files', 'code_search', 'code_graph_query',
-    'todo_read', 'scratchpad_read', 'memory_read', 'git_diff', 'git_log',
-    'browser_snapshot', 'browser_network',
+    'think',
+    'read_file',
+    'read_many_files',
+    'list_files',
+    'glob_files',
+    'search_files',
+    'code_search',
+    'code_graph_query',
+    'todo_read',
+    'scratchpad_read',
+    'memory_read',
+    'git_diff',
+    'git_log',
+    'browser_snapshot',
+    'browser_network',
   ]);
   // task_complete / report_blocked / write / edit 等均算副作用
   return toolNames.some(name => !readOnlyTools.has(name));
@@ -623,7 +666,8 @@ export function programmaticQACheck(
   // Rule 2: 编译/测试失败
   if (testResult.ran && !testResult.passed) {
     issues.push({
-      severity: 'critical', category: 'test',
+      severity: 'critical',
+      category: 'test',
       description: `Tests failed:\n${testResult.output.slice(0, 500)}`,
     });
     deductions += 40;
@@ -631,7 +675,8 @@ export function programmaticQACheck(
 
   if (lintResult.ran && !lintResult.passed) {
     issues.push({
-      severity: 'major', category: 'lint',
+      severity: 'major',
+      category: 'lint',
       description: `Lint/type-check failed:\n${lintResult.output.slice(0, 500)}`,
     });
     deductions += 15;
@@ -649,12 +694,17 @@ export function programmaticQACheck(
 
     // 只含注释的文件 (去掉注释后为空)
     const withoutComments = trimmed
-      .replace(/\/\*[\s\S]*?\*\//g, '')  // block comments
-      .replace(/\/\/.*/g, '')             // line comments
-      .replace(/#.*/g, '')                // python comments
+      .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+      .replace(/\/\/.*/g, '') // line comments
+      .replace(/#.*/g, '') // python comments
       .trim();
     if (withoutComments === '' && content.length > 50) {
-      issues.push({ severity: 'major', category: 'empty_file', file: filePath, description: 'File contains only comments, no actual code' });
+      issues.push({
+        severity: 'major',
+        category: 'empty_file',
+        file: filePath,
+        description: 'File contains only comments, no actual code',
+      });
       deductions += 15;
     }
 
@@ -662,7 +712,9 @@ export function programmaticQACheck(
     const placeholderMatches = content.match(/\b(TODO|FIXME|HACK|XXX|PLACEHOLDER)\b/gi);
     if (placeholderMatches && placeholderMatches.length > 0) {
       issues.push({
-        severity: 'major', category: 'todo_placeholder', file: filePath,
+        severity: 'major',
+        category: 'todo_placeholder',
+        file: filePath,
         description: `Contains ${placeholderMatches.length} placeholder(s): ${placeholderMatches.slice(0, 3).join(', ')}`,
       });
       deductions += 5 * Math.min(placeholderMatches.length, 5);
@@ -672,7 +724,9 @@ export function programmaticQACheck(
     const ellipsisPatterns = content.match(/\/\/\s*\.{3}.*|#\s*\.{3}.*|\.{3}\s*(existing|rest|more|other|remaining)/gi);
     if (ellipsisPatterns && ellipsisPatterns.length > 0) {
       issues.push({
-        severity: 'critical', category: 'todo_placeholder', file: filePath,
+        severity: 'critical',
+        category: 'todo_placeholder',
+        file: filePath,
         description: `Contains ${ellipsisPatterns.length} code ellipsis/omission: ${ellipsisPatterns[0].slice(0, 60)}`,
       });
       deductions += 30;
@@ -713,9 +767,7 @@ export function gatePMToArchitect(features: ParsedFeature[]): GateCheckResult {
   }
 
   // 检查每个 feature 有 id 和 description
-  const invalidFeatures = features.filter(f =>
-    !f.id || (!f.description && !f.title)
-  );
+  const invalidFeatures = features.filter(f => !f.id || (!f.description && !f.title));
   if (invalidFeatures.length > features.length * 0.5) {
     return { passed: false, reason: `${invalidFeatures.length}/${features.length} features lack id or description` };
   }
@@ -755,7 +807,10 @@ function detectDependencyCycle(features: ParsedFeature[]): string | null {
 
   for (const f of features) {
     const deps: string[] = f.dependsOn || f.depends_on || [];
-    adj.set(f.id, deps.filter(d => ids.has(d)));
+    adj.set(
+      f.id,
+      deps.filter(d => ids.has(d)),
+    );
   }
 
   const visited = new Set<string>();
@@ -800,7 +855,7 @@ export const DEFAULT_BUDGET_LIMITS: BudgetLimits = {
   dailyBudgetUsd: 10.0,
   perFeatureMaxUsd: 2.0,
   perFeatureMaxTokens: 500_000,
-  perFeatureMaxTimeMs: 15 * 60 * 1000,  // 15 minutes
+  perFeatureMaxTimeMs: 15 * 60 * 1000, // 15 minutes
 };
 
 export interface BudgetStatus {
@@ -916,7 +971,10 @@ export function computeBudgetNudge(state: BudgetTrackerState): BudgetNudge {
     // 探索阶段: 每 5 轮轻提一次
     if (state.iteration > 0 && state.iteration % 5 === 0) {
       return {
-        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        phase,
+        shouldInject: true,
+        remainingIterations: remaining,
+        consumedRatio,
         message: `📊 进度: ${state.iteration}/${state.maxIterations} 轮 (${Math.round(consumedRatio * 100)}% 资源已消耗)。请确保你在朝目标推进。`,
       };
     }
@@ -927,18 +985,27 @@ export function computeBudgetNudge(state: BudgetTrackerState): BudgetNudge {
     const base = `⏳ 已使用 ${state.iteration}/${state.maxIterations} 轮 (${Math.round(consumedRatio * 100)}%)，剩余 ${remaining} 轮。`;
     if (isPM) {
       return {
-        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        phase,
+        shouldInject: true,
+        remainingIterations: remaining,
+        consumedRatio,
         message: `${base}请停止探索新信息，基于已有理解开始输出结构化结果。`,
       };
     }
     if (isDev && !state.hasWrittenFiles) {
       return {
-        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        phase,
+        shouldInject: true,
+        remainingIterations: remaining,
+        consumedRatio,
         message: `${base}你还没有写入任何文件。请立即开始编码实现，不要继续只读不写。`,
       };
     }
     return {
-      phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+      phase,
+      shouldInject: true,
+      remainingIterations: remaining,
+      consumedRatio,
       message: `${base}请从探索/分析转向产出收敛。${isDev ? '确保尽快完成编码并验证。' : ''}`,
     };
   }
@@ -947,26 +1014,36 @@ export function computeBudgetNudge(state: BudgetTrackerState): BudgetNudge {
     const base = `⚠️ 紧急: 仅剩 ${remaining} 轮 (${Math.round(consumedRatio * 100)}% 资源已消耗)！`;
     if (isPM) {
       return {
-        phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+        phase,
+        shouldInject: true,
+        remainingIterations: remaining,
+        consumedRatio,
         message: `${base}必须立即输出 Feature JSON 并调用 task_complete。不要再读取任何文件。`,
       };
     }
     if (isDev) {
       const parts = [base];
       if (!state.hasWrittenFiles) parts.push('你还没有写入任何文件！必须立即开始编码。');
-      if (state.hasWrittenFiles && !state.hasRunVerification) parts.push('你已写入文件但还没验证。必须立即运行验证命令。');
+      if (state.hasWrittenFiles && !state.hasRunVerification)
+        parts.push('你已写入文件但还没验证。必须立即运行验证命令。');
       parts.push('完成后立即调用 task_complete。');
       return { phase, shouldInject: true, remainingIterations: remaining, consumedRatio, message: parts.join(' ') };
     }
     return {
-      phase, shouldInject: true, remainingIterations: remaining, consumedRatio,
+      phase,
+      shouldInject: true,
+      remainingIterations: remaining,
+      consumedRatio,
       message: `${base}必须立即完成当前任务并调用 task_complete。`,
     };
   }
 
   // phase === 'final'
   return {
-    phase: 'final', shouldInject: true, remainingIterations: remaining, consumedRatio,
+    phase: 'final',
+    shouldInject: true,
+    remainingIterations: remaining,
+    consumedRatio,
     message: `🚨 最后 ${remaining} 轮！你必须在本轮或下一轮调用 task_complete 完成任务。不要做任何新操作。如果已经完成了工作，立即 task_complete；如果未完成，输出已有成果后 task_complete。`,
   };
 }
@@ -991,7 +1068,7 @@ export function computeBudgetNudge(state: BudgetTrackerState): BudgetNudge {
 
 export interface StuckDetectorEntry {
   toolName: string;
-  argsSignature: string;  // 用于精确匹配
+  argsSignature: string; // 用于精确匹配
   isReadOnly: boolean;
 }
 
@@ -1015,10 +1092,25 @@ export interface StuckResult {
 }
 
 const READ_ONLY_TOOLS = new Set([
-  'think', 'read_file', 'read_many_files', 'list_files', 'glob_files',
-  'search_files', 'code_search', 'code_search_files', 'code_graph_query', 'repo_map',
-  'todo_read', 'scratchpad_read', 'memory_read', 'git_diff', 'git_log',
-  'web_search', 'fetch_url', 'browser_snapshot', 'browser_network',
+  'think',
+  'read_file',
+  'read_many_files',
+  'list_files',
+  'glob_files',
+  'search_files',
+  'code_search',
+  'code_search_files',
+  'code_graph_query',
+  'repo_map',
+  'todo_read',
+  'scratchpad_read',
+  'memory_read',
+  'git_diff',
+  'git_log',
+  'web_search',
+  'fetch_url',
+  'browser_snapshot',
+  'browser_network',
 ]);
 
 export function recordToolCalls(
@@ -1046,16 +1138,14 @@ export function recordToolCalls(
   }
 }
 
-export function detectStuckPattern(
-  state: StuckDetectorState,
-  budgetState: BudgetTrackerState,
-): StuckResult {
+export function detectStuckPattern(state: StuckDetectorState, budgetState: BudgetTrackerState): StuckResult {
   const ok: StuckResult = { isStuck: false, pattern: null, correctionMessage: '' };
 
   // 1. Read-only loop: 5+ consecutive rounds of only read ops
   if (state.consecutiveReadOnlyRounds >= 5) {
     return {
-      isStuck: true, pattern: 'read-only-loop',
+      isStuck: true,
+      pattern: 'read-only-loop',
       correctionMessage: `🔄 检测到连续 ${state.consecutiveReadOnlyRounds} 轮只读操作（读文件/搜索），没有产出。请停止继续阅读，基于已有信息开始产出。${budgetState.role === 'developer' ? '请开始编写/修改代码。' : '请输出你的分析结果。'}`,
     };
   }
@@ -1066,7 +1156,8 @@ export function detectStuckPattern(
     const last3 = h.slice(-3);
     if (last3.every(e => e.toolName === last3[0].toolName && e.argsSignature === last3[0].argsSignature)) {
       return {
-        isStuck: true, pattern: 'exact-repeat',
+        isStuck: true,
+        pattern: 'exact-repeat',
         correctionMessage: `🔁 检测到你连续 3 次调用了完全相同的操作 (${last3[0].toolName})。这不会产生新信息。请换一种方法或工具来推进任务。`,
       };
     }
@@ -1084,7 +1175,8 @@ export function detectStuckPattern(
       });
       if (isPingPong) {
         return {
-          isStuck: true, pattern: 'ping-pong',
+          isStuck: true,
+          pattern: 'ping-pong',
           correctionMessage: `🏓 检测到你在两个操作之间反复交替 (${last8[0].toolName} ↔ ${last8[1].toolName})。请退一步，用 think 工具重新思考你的方法，然后尝试一种全新的策略。`,
         };
       }
@@ -1094,21 +1186,124 @@ export function detectStuckPattern(
   // 4. Monologue: 3+ consecutive plain text (tracked externally)
   if (state.plainTextStreak >= 3) {
     return {
-      isStuck: true, pattern: 'monologue',
-      correctionMessage: '💬 你已经连续 3 轮只输出文字而没有使用任何工具。请调用合适的工具来推进任务，或调用 task_complete 完成任务。',
+      isStuck: true,
+      pattern: 'monologue',
+      correctionMessage:
+        '💬 你已经连续 3 轮只输出文字而没有使用任何工具。请调用合适的工具来推进任务，或调用 task_complete 完成任务。',
     };
   }
 
   // 5. No-output stall (dev only): >40% budget used but zero files written
-  if ((budgetState.role === 'developer') &&
-      budgetState.iteration > 0 &&
-      (budgetState.iteration / budgetState.maxIterations) > 0.4 &&
-      !budgetState.hasWrittenFiles) {
+  if (
+    budgetState.role === 'developer' &&
+    budgetState.iteration > 0 &&
+    budgetState.iteration / budgetState.maxIterations > 0.4 &&
+    !budgetState.hasWrittenFiles
+  ) {
     return {
-      isStuck: true, pattern: 'no-output-stall',
-      correctionMessage: `⚠️ 你已使用 ${budgetState.iteration}/${budgetState.maxIterations} 轮 (${Math.round(budgetState.iteration / budgetState.maxIterations * 100)}%)，但还没有写入任何文件。请立即开始编码实现。如果你还在分析，请用 think 工具总结你的理解，然后开始写代码。`,
+      isStuck: true,
+      pattern: 'no-output-stall',
+      correctionMessage: `⚠️ 你已使用 ${budgetState.iteration}/${budgetState.maxIterations} 轮 (${Math.round((budgetState.iteration / budgetState.maxIterations) * 100)}%)，但还没有写入任何文件。请立即开始编码实现。如果你还在分析，请用 think 工具总结你的理解，然后开始写代码。`,
     };
   }
 
   return ok;
+}
+
+// ═══════════════════════════════════════
+// 8. Self-Evolution Guard — 自我修改保护
+// ═══════════════════════════════════════
+
+/**
+ * v29.2: 自我进化路径保护 — 检查目标路径是否允许被进化过程修改
+ *
+ * 三级分类:
+ *  - immutable: 绝对禁止修改 (质量门禁、进化引擎本身、测试配置)
+ *  - protected: 允许修改但需要额外标记 (核心模块: main.ts, db.ts, guards.ts)
+ *  - allowed: 允许修改
+ */
+export interface EvolutionPathCheck {
+  allowed: boolean;
+  level: 'immutable' | 'protected' | 'allowed';
+  reason?: string;
+}
+
+const EVOLUTION_IMMUTABLE_PATTERNS = [
+  /^vitest\.config\./,
+  /^tsconfig\./,
+  /^scripts\/quality-gate\./,
+  /^scripts\/evaluate-fitness\./,
+  /^electron\/engine\/self-evolution-engine\./,
+  /^electron\/engine\/__tests__\/self-evolution-engine\./,
+];
+
+const EVOLUTION_PROTECTED_PATTERNS = [
+  /^electron\/main\./,
+  /^electron\/db\./,
+  /^electron\/preload\./,
+  /^electron\/engine\/guards\./,
+  /^electron\/engine\/sandbox-executor\./,
+  /^package\.json$/,
+  /^electron-builder\./,
+];
+
+/**
+ * 检查文件路径在自我进化过程中的保护级别
+ */
+export function checkEvolutionPath(filePath: string): EvolutionPathCheck {
+  const normalized = path.normalize(filePath).replace(/\\/g, '/');
+
+  for (const pattern of EVOLUTION_IMMUTABLE_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return {
+        allowed: false,
+        level: 'immutable',
+        reason: `File ${filePath} is immutable during self-evolution`,
+      };
+    }
+  }
+
+  for (const pattern of EVOLUTION_PROTECTED_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return {
+        allowed: true,
+        level: 'protected',
+        reason: `File ${filePath} is protected — modifications require extra verification`,
+      };
+    }
+  }
+
+  return { allowed: true, level: 'allowed' };
+}
+
+/**
+ * 批量检查文件路径列表
+ */
+export function checkEvolutionPaths(filePaths: string[]): {
+  ok: boolean;
+  immutable: string[];
+  protected_: string[];
+  allowed: string[];
+} {
+  const immutable: string[] = [];
+  const protected_: string[] = [];
+  const allowed: string[] = [];
+
+  for (const fp of filePaths) {
+    const check = checkEvolutionPath(fp);
+    if (check.level === 'immutable') {
+      immutable.push(fp);
+    } else if (check.level === 'protected') {
+      protected_.push(fp);
+    } else {
+      allowed.push(fp);
+    }
+  }
+
+  return {
+    ok: immutable.length === 0,
+    immutable,
+    protected_,
+    allowed,
+  };
 }
