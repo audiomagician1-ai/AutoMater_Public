@@ -52,6 +52,13 @@ const log = createLogger('ipc:meta-agent');
 import { toErrorMessage, createLogger } from '../engine/logger';
 import { cacheContextSnapshot } from '../engine/react-loop';
 import type { ContextSection, ContextSnapshot } from '../engine/context-collector';
+import {
+  SelfEvolutionEngine,
+  ImmutableGuard,
+  FitnessEvaluator,
+  DEFAULT_IMMUTABLE_FILES,
+  DEFAULT_EVOLUTION_CONFIG,
+} from '../engine/self-evolution-engine';
 
 // ═══════════════════════════════════════
 // Types
@@ -383,9 +390,9 @@ generate_image, edit_image, configure_image_gen, deploy_dockerfile_generate/comp
 think, task_complete, memory_read/append, todo_write/read, scratchpad_write/read, spawn_researcher, report_blocked, rfc_propose, create_wish
 **用途**: 思考、任务管理、持久记忆、研究协调、需求派发。
 
-### 🛠️ 管理 (9 个)
-admin_list_members/add_member/update_member/remove_member, admin_list_workflows/activate_workflow/update_workflow/update_project/get_available_stages
-**用途**: 管家专属，管理团队成员、工作流、项目配置。
+### 🛠️ 管理 (14 个)
+admin_list_members/add_member/update_member/remove_member, admin_list_workflows/activate_workflow/update_workflow/update_project/get_available_stages, admin_evolution_status/preflight/evaluate/run/verify
+**用途**: 管家专属，管理团队成员、工作流、项目配置、自我进化。
 
 ### 📼 Session (2 个)
 list_conversation_sessions, read_conversation_history
@@ -400,7 +407,7 @@ list_conversation_sessions, read_conversation_history
 | QA | 65 | 代码审查、测试运行、浏览器测试、截图对比 |
 | DevOps | 80 | 部署、Docker、CI/CD、Supabase、Cloudflare |
 | 研究员 | 16 | 深度搜索、资料下载（spawn_researcher 创建） |
-| 管家 | 33 | 读代码、搜索、管理团队、需求派发 |
+| 管家 | 38 | 读代码、搜索、管理团队、需求派发、自我进化 |
 
 ## 项目创建与导入
 
@@ -545,6 +552,13 @@ ${PRODUCT_KNOWLEDGE}`;
 
 ### 项目配置
 - \`admin_update_project\` — 修改项目名称/需求/权限
+
+### 🧬 自我进化（⚠️ 高级功能）
+- \`admin_evolution_status\` — 查看进化引擎状态（首次使用时先调用）
+- \`admin_evolution_preflight\` — 安全预检（检查 git 状态 + 不可变文件 + 基线适应度评估）
+- \`admin_evolution_evaluate\` — 只读适应度评估（不修改代码，运行 tsc + vitest）
+- \`admin_evolution_run\` — 执行一次进化迭代（⚠️ 实际修改源代码，在独立 git 分支上进行）
+- \`admin_evolution_verify\` — 验证不可变文件 SHA256 完整性
 
 ### 辅助
 - read_file, list_files, search_files 等只读工具用于查看项目文件
@@ -1011,6 +1025,273 @@ function executeAdminTool(
 }
 
 // ═══════════════════════════════════════
+// v29.2: Evolution Admin Tool Execution (Async)
+// ═══════════════════════════════════════
+
+/** 自我进化引擎单例 (惰性初始化) */
+let _evolutionEngine: SelfEvolutionEngine | null = null;
+
+function getEvolutionEngine(): SelfEvolutionEngine {
+  if (!_evolutionEngine) {
+    // 从 __dirname (dist-electron/ipc/) 推断源码根目录
+    // 开发模式: electron/ipc/ → 项目根
+    const candidates = [path.resolve(__dirname, '..', '..'), process.env.AGENTFORGE_SOURCE_ROOT || ''].filter(Boolean);
+
+    let sourceRoot = '';
+    for (const c of candidates) {
+      if (SelfEvolutionEngine.isAgentForgeRoot(c)) {
+        sourceRoot = c;
+        break;
+      }
+    }
+    if (!sourceRoot) {
+      throw new Error('无法定位 AgentForge 源码根目录。请设置 AGENTFORGE_SOURCE_ROOT 环境变量。');
+    }
+    _evolutionEngine = new SelfEvolutionEngine({ sourceRoot });
+    log.info(`Evolution engine initialized: ${sourceRoot}`);
+  }
+  return _evolutionEngine;
+}
+
+/**
+ * 执行自我进化管理工具 (异步)
+ * 返回 null 表示不是进化工具，应交给通用 admin 处理
+ */
+async function executeEvolutionAdminTool(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<AdminToolResult | null> {
+  try {
+    switch (toolName) {
+      case 'admin_evolution_status': {
+        const eng = getEvolutionEngine();
+        const progress = eng.getProgress();
+        const version = SelfEvolutionEngine.getVersion(eng.getConfig().sourceRoot);
+        const archiveSummary = eng.getArchiveSummary();
+        const memorySummary = eng.getMemorySummary();
+
+        const lines = [
+          `## 🧬 自我进化引擎状态`,
+          '',
+          `- **状态**: ${progress.status}`,
+          `- **当前版本**: v${version}`,
+          `- **进化代数**: ${progress.generation} / ${progress.maxGenerations}`,
+          `- **基线适应度**: ${progress.baselineFitness.toFixed(4)}`,
+          `- **当前适应度**: ${progress.currentFitness.toFixed(4)}`,
+          `- **当前分支**: ${progress.currentBranch || '(无)'}`,
+          `- **进化历史**: ${progress.archive.length} 条`,
+          `- **进化记忆**: ${progress.memories.length} 条`,
+          '',
+        ];
+
+        if (archiveSummary) {
+          lines.push(archiveSummary, '');
+        }
+        if (memorySummary) {
+          lines.push(memorySummary, '');
+        }
+
+        // 最近日志
+        if (progress.logs.length > 0) {
+          lines.push('## 最近日志');
+          lines.push(...progress.logs.slice(-10));
+        }
+
+        return { success: true, output: lines.join('\n') };
+      }
+
+      case 'admin_evolution_preflight': {
+        const eng = getEvolutionEngine();
+        const result = await eng.preflight();
+
+        if (result.ok) {
+          const bf = result.baselineFitness!;
+          return {
+            success: true,
+            output: [
+              '## ✅ 进化预检通过',
+              '',
+              '所有安全检查通过，可以开始进化迭代。',
+              '',
+              `### 基线适应度`,
+              `- **综合得分**: ${bf.score.toFixed(4)}`,
+              `- **tsc**: ${bf.tscPassed ? '✅ 通过' : `❌ ${bf.tscErrors} 个错误`}`,
+              `- **测试**: ${bf.passedTests}/${bf.totalTests} 通过 (${(bf.testPassRate * 100).toFixed(1)}%)`,
+              `- **覆盖率**: ${bf.statementCoverage}%`,
+              `- **耗时**: tsc ${bf.durations.tsc}ms, vitest ${bf.durations.vitest}ms`,
+            ].join('\n'),
+          };
+        } else {
+          return {
+            success: false,
+            output: [
+              '## ❌ 进化预检失败',
+              '',
+              '以下问题需要先修复:',
+              ...result.errors.map((e: string) => `- ⚠️ ${e}`),
+            ].join('\n'),
+          };
+        }
+      }
+
+      case 'admin_evolution_evaluate': {
+        const eng = getEvolutionEngine();
+        const config = eng.getConfig();
+        const evaluator = new FitnessEvaluator(config.sourceRoot, config.fitnessWeights, config.timeouts);
+        const baseline = eng.getProgress().baselineFitness;
+        const result = evaluator.evaluate(baseline > 0 ? baseline * 100 : 0); // baseline is 0-1, coverage is 0-100
+
+        return {
+          success: true,
+          output: [
+            '## 📊 适应度评估结果',
+            '',
+            `- **综合得分**: ${result.score.toFixed(4)}`,
+            `- **tsc**: ${result.tscPassed ? '✅ 通过' : `❌ ${result.tscErrors} 个错误`}`,
+            `- **测试**: ${result.passedTests}/${result.totalTests} 通过 (${(result.testPassRate * 100).toFixed(1)}%), ${result.failedTests} 失败`,
+            `- **覆盖率**: ${result.statementCoverage}% (基线 ${result.baselineCoverage}%)`,
+            `- **耗时**: tsc ${result.durations.tsc}ms, vitest ${result.durations.vitest}ms, 总计 ${result.durations.total}ms`,
+            '',
+            '### 详细输出',
+            '```',
+            result.details,
+            '```',
+          ].join('\n'),
+        };
+      }
+
+      case 'admin_evolution_run': {
+        const description = (args.description as string) || '';
+        const fileChanges = (args.file_changes as Array<{ path: string; content?: string; action?: string }>) || [];
+
+        if (!description) {
+          return { success: false, output: '错误: description 为必填。请描述本次进化的目标。' };
+        }
+        if (fileChanges.length === 0) {
+          return { success: false, output: '错误: file_changes 不能为空。请提供要修改的文件列表。' };
+        }
+
+        const eng = getEvolutionEngine();
+        const result = await eng.runSingleIteration(description, async (workingDir: string) => {
+          const modifiedFiles: string[] = [];
+          for (const change of fileChanges) {
+            const absPath = path.resolve(workingDir, change.path);
+            if (change.action === 'delete') {
+              if (fs.existsSync(absPath)) {
+                fs.unlinkSync(absPath);
+                modifiedFiles.push(change.path);
+              }
+            } else {
+              const dir = path.dirname(absPath);
+              fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(absPath, change.content || '', 'utf-8');
+              modifiedFiles.push(change.path);
+            }
+          }
+          return modifiedFiles;
+        });
+
+        // 持久化到 DB
+        if (result.entry) {
+          try {
+            const db = getDb();
+            db.prepare(
+              `
+              INSERT OR REPLACE INTO evolution_archive
+                (id, parent_id, generation, branch, fitness_score, fitness_json, description, modified_files, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            ).run(
+              result.entry.id,
+              result.entry.parentId,
+              result.entry.generation,
+              result.entry.branch,
+              result.entry.fitnessScore,
+              JSON.stringify(result.entry.fitness),
+              result.entry.description,
+              JSON.stringify(result.entry.modifiedFiles),
+              result.entry.status,
+            );
+          } catch (dbErr: unknown) {
+            log.warn('Failed to persist evolution entry', dbErr as Record<string, unknown>);
+          }
+        }
+
+        if (result.success) {
+          const e = result.entry!;
+          return {
+            success: true,
+            output: [
+              `## ✅ 进化迭代 Gen-${e.generation} 成功！`,
+              '',
+              `**描述**: ${e.description}`,
+              `**适应度**: ${e.fitnessScore.toFixed(4)}`,
+              `**修改文件**: ${e.modifiedFiles.join(', ')}`,
+              `**分支**: ${e.branch}`,
+              `**状态**: 已合并到基线`,
+              '',
+              '### 适应度详情',
+              `- tsc: ${e.fitness.tscPassed ? '✅' : '❌'}`,
+              `- 测试: ${e.fitness.passedTests}/${e.fitness.totalTests}`,
+              `- 覆盖率: ${e.fitness.statementCoverage}%`,
+            ].join('\n'),
+          };
+        } else {
+          return {
+            success: false,
+            output: [
+              `## ❌ 进化迭代失败`,
+              '',
+              `**错误**: ${result.error || '适应度未达标'}`,
+              `**回滚**: ${result.rolledBack ? '✅ 已自动回滚到快照' : '否'}`,
+              result.entry ? `**适应度**: ${result.entry.fitnessScore.toFixed(4)}` : '',
+              result.entry ? `**状态**: ${result.entry.status}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          };
+        }
+      }
+
+      case 'admin_evolution_verify': {
+        const eng = getEvolutionEngine();
+        const config = eng.getConfig();
+        const guard = new ImmutableGuard(config.sourceRoot, config.immutableFiles);
+        guard.captureBaseline();
+        const result = guard.verify();
+        const manifest = guard.getManifest();
+
+        if (result.ok) {
+          const lines = [
+            '## ✅ 不可变文件完整性校验通过',
+            '',
+            '所有受保护文件 SHA256 一致:',
+            ...Object.entries(manifest).map(([file, hash]) => `- \`${file}\`: ${hash.slice(0, 16)}...`),
+          ];
+          return { success: true, output: lines.join('\n') };
+        } else {
+          return {
+            success: false,
+            output: [
+              '## 🚨 不可变文件完整性校验失败！',
+              '',
+              '以下文件被修改（应恢复原始版本）:',
+              ...result.violations.map(v => `- ⚠️ ${v}`),
+            ].join('\n'),
+          };
+        }
+      }
+
+      default:
+        return null; // 不是进化工具，返回 null 交给通用处理
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: `进化工具执行错误: ${errMsg}` };
+  }
+}
+
+// ═══════════════════════════════════════
 // IPC Handler Registration
 // ═══════════════════════════════════════
 
@@ -1229,6 +1510,12 @@ export function setupMetaAgentHandlers() {
           'admin_update_workflow',
           'admin_update_project',
           'admin_get_available_stages',
+          // v29.2: Self-Evolution tools
+          'admin_evolution_status',
+          'admin_evolution_preflight',
+          'admin_evolution_evaluate',
+          'admin_evolution_run',
+          'admin_evolution_verify',
         ]);
         tools = tools.filter(t => adminAllowed.has((t.function as Record<string, unknown>).name as string));
       }
@@ -1460,8 +1747,21 @@ export function setupMetaAgentHandlers() {
               continue;
             }
 
-            // ── v22.0: Admin tools (管理模式专用) ──
+            // ── v22.0: Admin tools (管理模式専用) ──
             if (tc.function.name.startsWith('admin_')) {
+              // v29.2: 进化管理工具 (异步) — 优先处理
+              if (tc.function.name.startsWith('admin_evolution_')) {
+                const evoResult = await executeEvolutionAdminTool(tc.function.name, toolArgs);
+                if (evoResult) {
+                  sendToUI(win, 'agent:log', {
+                    projectId: projectId || 'system',
+                    agentId,
+                    content: `🧬 ${tc.function.name} → ${evoResult.success ? '✅' : '❌'} ${evoResult.output.slice(0, 120)}`,
+                  });
+                  messages.push({ role: 'tool', tool_call_id: tc.id, content: evoResult.output.slice(0, 8000) });
+                  continue;
+                }
+              }
               if (!projectId) {
                 messages.push({
                   role: 'tool',

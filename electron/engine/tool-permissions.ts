@@ -420,6 +420,12 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'admin_update_workflow',
     'admin_update_project',
     'admin_get_available_stages',
+    // v29.2: Self-Evolution management tools
+    'admin_evolution_status',
+    'admin_evolution_preflight',
+    'admin_evolution_evaluate',
+    'admin_evolution_run',
+    'admin_evolution_verify',
     'list_conversation_sessions',
     'read_conversation_history', // v27.0: 对话历史浏览
   ],

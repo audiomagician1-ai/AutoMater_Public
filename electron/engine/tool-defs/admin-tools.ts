@@ -130,4 +130,62 @@ export const ADMIN_TOOLS: ToolDef[] = [
     description: '获取所有可用的工作流阶段定义列表。用于创建或修改工作流时选择阶段。',
     parameters: { type: 'object', properties: {} },
   },
+
+  // ── v29.2: Self-Evolution Tools ──
+  {
+    name: 'admin_evolution_status',
+    description:
+      '查看自我进化引擎的当前状态：进化进度、基线适应度、进化历史、进化记忆摘要。' +
+      '首次使用进化功能前，请先调用此工具了解当前状态。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'admin_evolution_preflight',
+    description:
+      '执行自我进化前的安全预检：检查 git 状态是否干净、验证不可变文件完整性、评估当前基线适应度(tsc + vitest + coverage)。' +
+      '必须在启动进化迭代之前调用，确保一切就绪。评估可能需要 1-3 分钟。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'admin_evolution_evaluate',
+    description:
+      '执行一次只读的适应度评估（不修改任何代码）：运行 tsc --noEmit + vitest run，返回综合适应度得分。' +
+      '用于在修改代码前后对比适应度变化。评估可能需要 1-2 分钟。',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'admin_evolution_run',
+    description:
+      '执行一次自我进化迭代。在独立 git 分支上应用代码修改 → 运行适应度评估(tsc + vitest) → 通过则合并到基线、失败则自动回滚。' +
+      '⚠️ 这是最核心的进化操作，会实际修改源代码。修改前会自动创建 git 快照用于灾难恢复。',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description: '本次进化的描述（如 "优化 PM 阶段 system prompt 提升需求分析质量"）',
+        },
+        file_changes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '文件路径（相对于项目根目录）' },
+              content: { type: 'string', description: '文件新内容（write 操作必填）' },
+              action: { type: 'string', enum: ['write', 'delete'], description: '操作类型（默认 write）' },
+            },
+            required: ['path'],
+          },
+          description: '要应用的文件修改列表。注意：vitest.config.ts、tsconfig.json 等不可变文件不可修改。',
+        },
+      },
+      required: ['description', 'file_changes'],
+    },
+  },
+  {
+    name: 'admin_evolution_verify',
+    description:
+      '验证不可变文件的 SHA256 完整性。检查 vitest.config.ts、tsconfig.json、quality-gate.js 等关键文件是否被意外修改。',
+    parameters: { type: 'object', properties: {} },
+  },
 ];

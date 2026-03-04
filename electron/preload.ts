@@ -402,4 +402,29 @@ contextBridge.exposeInMainWorld('automater', {
     /** 获取内置模型价格表 */
     getBuiltinPricing: () => ipcRenderer.invoke('monitor:builtin-pricing'),
   },
+
+  // v29.2: Self-Evolution API
+  evolution: {
+    /** 执行进化前安全预检 */
+    preflight: () => ipcRenderer.invoke('evolution:preflight'),
+    /** 获取当前进化进度 */
+    getProgress: () => ipcRenderer.invoke('evolution:get-progress'),
+    /** 获取进化配置 */
+    getConfig: () => ipcRenderer.invoke('evolution:get-config'),
+    /** 执行只读适应度评估 */
+    evaluate: () => ipcRenderer.invoke('evolution:evaluate'),
+    /** 执行单次进化迭代 */
+    runIteration: (
+      description: string,
+      fileChanges: Array<{ path: string; content: string; action: 'write' | 'delete' }>,
+    ) => ipcRenderer.invoke('evolution:run-iteration', description, fileChanges),
+    /** 中止当前进化 */
+    abort: () => ipcRenderer.invoke('evolution:abort'),
+    /** 获取进化历史 (DB) */
+    getArchive: () => ipcRenderer.invoke('evolution:get-archive'),
+    /** 获取进化记忆 (DB) */
+    getMemories: () => ipcRenderer.invoke('evolution:get-memories'),
+    /** 验证不可变文件完整性 */
+    verifyImmutable: () => ipcRenderer.invoke('evolution:verify-immutable'),
+  },
 });

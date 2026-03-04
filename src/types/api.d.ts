@@ -777,6 +777,51 @@ interface AutoMaterAPI {
     getBuiltinPricing(): Promise<Record<string, { input: number; output: number }>>;
   };
 
+  /** v29.2: 自我进化 API */
+  evolution: {
+    preflight(): Promise<{
+      success: boolean;
+      ok: boolean;
+      errors: string[];
+      baselineFitness?: {
+        score: number;
+        tscPassed: boolean;
+        testPassRate: number;
+        totalTests: number;
+        passedTests: number;
+        failedTests: number;
+        statementCoverage: number;
+      };
+    }>;
+    getProgress(): Promise<{
+      status: string;
+      generation: number;
+      maxGenerations: number;
+      currentBranch: string;
+      baselineFitness: number;
+      currentFitness: number;
+      archive: unknown[];
+      memories: unknown[];
+      updatedAt: number;
+      logs: string[];
+    }>;
+    getConfig(): Promise<Record<string, unknown>>;
+    evaluate(): Promise<{ success: boolean; fitness?: Record<string, unknown>; error?: string }>;
+    runIteration(
+      description: string,
+      fileChanges: Array<{ path: string; content: string; action: 'write' | 'delete' }>,
+    ): Promise<{ success: boolean; entry?: Record<string, unknown>; error?: string; rolledBack?: boolean }>;
+    abort(): Promise<{ success: boolean; error?: string }>;
+    getArchive(): Promise<{ success: boolean; archive: unknown[] }>;
+    getMemories(): Promise<{ success: boolean; memories: unknown[] }>;
+    verifyImmutable(): Promise<{
+      success: boolean;
+      ok: boolean;
+      violations: string[];
+      manifest?: Record<string, string>;
+    }>;
+  };
+
   /** v5.6: 上下文管理 */
   context: {
     previewBaseline(
