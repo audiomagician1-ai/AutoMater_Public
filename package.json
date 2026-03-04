@@ -1,6 +1,6 @@
 {
   "name": "automater",
-  "version": "25.0.0",
+  "version": "29.0.0",
   "private": true,
   "description": "智械母机 AutoMater — AI Agent 集群式软件开发桌面应用",
   "main": "dist-electron/main.js",

@@ -1,10 +1,10 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-03 | 版本: v28.1 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-04 | 版本: v29.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v28.1 — DAG工作流引擎 + 搜索引擎大修 + 思维链可视化 + 管家上下文管理 + 附件支持
+**当前阶段**: v29.0 — Session-Agent调度系统 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化
 **最高优先级**: 实际运行时全链路验证 (PM→Dev→QA 全流程) + 竞争力 5.61→7.0 路线图执行
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
@@ -23,7 +23,7 @@
 | State | Zustand 5 (单 Store, Map-based) |
 | Agent Engine | TypeScript (Electron Main Process, 全同步架构) |
 | LLM | 统一适配层: OpenAI 兼容 + Anthropic 原生双协议 |
-| Database | SQLite (better-sqlite3, 同步 API, **22 张表**, 15 版迁移) |
+| Database | SQLite (better-sqlite3, 同步 API, **22 张表**, 18 版迁移) |
 | Build | pnpm + Vite (renderer) + tsc (main/preload) + electron-builder |
 | Test | Vitest 4 + @vitest/coverage-v8 (50 测试文件, 918 tests) |
 | Lint | ESLint 10 + Prettier 3 |
@@ -36,8 +36,9 @@ AutoMater/
 ├── electron/                   # Electron 主进程
 │   ├── main.ts                 # 入口, 窗口管理, IPC 注册
 │   ├── preload.ts              # Context Bridge (22 个命名空间)
-│   ├── db.ts                   # SQLite 数据库 (19 张表, 12 版 Migration)
-│   ├── ipc/                    # IPC Handlers (11 个文件)
+│   ├── db.ts                   # SQLite 数据库 (22 张表, 18 版 Migration)
+│   ├── ipc/                    # IPC Handlers (12 个文件)
+│   │   ├── ipc-validator.ts      # IPC 输入校验 (50+ 断言)
 │   │   ├── project.ts          # project:* (CRUD, start, stop, analyze, docs, changes)
 │   │   ├── meta-agent.ts       # meta-agent:* (chat, config, memory CRUD)
 │   │   ├── missions.ts         # mission:* (CRUD, cancel, patches)
@@ -50,19 +51,25 @@ AutoMater/
 │   │   ├── monitor.ts          # monitor:* (system-metrics, activity, pricing)
 │   │   └── workspace.ts        # workspace:* (tree, read-file, get-path)
 │   └── engine/                 # Agent 引擎核心
-│       ├── phases/             # 编排器拆分阶段 (9 个文件)
+│       ├── phases/             # 编排器拆分阶段 (10 个文件)
 │       ├── probes/             # 项目分析探针 (8 个文件)
 │       │   ├── index.ts, base-probe.ts
 │       │   ├── api-boundary-probe.ts, config-infra-probe.ts
 │       │   ├── data-model-probe.ts, entry-probe.ts
 │       │   ├── module-probe.ts, smell-probe.ts
 │       │   └──
-│       ├── __tests__/          # 单元测试 (43 个文件, 817 tests)
+│       ├── tool-defs/          # 工具定义按类别拆分 (12 个文件)
+│       │   ├── index.ts, types.ts
+│       │   ├── fs-tools.ts, shell-tools.ts, git-tools.ts
+│       │   ├── web-tools.ts, memory-tools.ts, agent-tools.ts
+│       │   ├── computer-tools.ts, deploy-tools.ts
+│       │   └── admin-tools.ts, session-tools.ts
+│       ├── __tests__/          # 单元测试 (50 个文件, 918 tests)
 │       ├── orchestrator.ts     # 多阶段编排器 (入口, v12 可配置工作流)
 │       ├── react-loop.ts       # Developer ReAct 循环 (50 轮上限, 验证门控)
 │       ├── qa-loop.ts          # QA 审查 (程序化 + LLM + TDD)
 │       ├── tool-registry.ts    # 工具注册中心 + 角色权限矩阵
-│       ├── tool-definitions.ts # 84+ 工具定义 (JSON Schema)
+│       ├── tool-definitions.ts # 130 工具定义 (re-export barrel → tool-defs/)
 │       ├── tool-executor.ts    # 工具执行分发 (同步)
 │       ├── tool-handlers-async.ts  # 工具异步执行器
 │       ├── tool-handlers-external.ts # 外部工具执行器 (MCP/Skill)
@@ -90,7 +97,19 @@ AutoMater/
 │       ├── extended-tools.ts   # 扩展工具集 (部署等)
 │       ├── deploy-tools.ts     # 部署工具
 │       ├── docker-sandbox.ts   # Docker 沙箱 (预留)
-│       ├── image-gen.ts        # 图像生成工具
+│       ├── experience-harvester.ts  # 经验收割器 (失败模式提取)
+│       ├── experience-library.ts   # 经验库 (错误经验主动检索)
+│       ├── cloudflare-tools.ts     # Cloudflare部署工具
+│       ├── supabase-tools.ts       # Supabase部署工具
+│       ├── parallel-tools.ts       # 并行执行工具
+│       ├── code-search.ts          # 代码搜索工具
+│       ├── issue-watcher.ts        # Issue监控器
+│       ├── probe-cache.ts          # 探针缓存
+│       ├── probe-orchestrator.ts   # 探针编排器
+│       ├── tool-result-summarizer.ts # 工具结果摘要压缩
+│       ├── workflow-engine.ts      # DAG工作流引擎 (transition-driven)
+│       ├── safe-json.ts            # 安全JSON解析
+│       ├── image-gen.ts            # 图像生成工具
 │       ├── secret-manager.ts   # 密钥加密存储管理
 │       ├── prompts.ts          # Agent 提示词模板
 │       ├── types.ts            # 共享类型定义
@@ -106,14 +125,18 @@ AutoMater/
 │       ├── planner.ts          # 规划器
 │       ├── repo-map.ts         # 仓库结构映射
 │       ├── code-graph.ts       # 代码依赖图谱
-│       ├── search-provider.ts  # 搜索提供者
+│       ├── search-provider.ts  # 搜索提供者 (DDG/Bing/Google HTML scraping)
+│       ├── research-cache.ts   # 研究结果缓存
 │       ├── research-engine.ts  # 研究子Agent引擎
 │       ├── sub-agent.ts        # 子Agent框架
 │       ├── sub-agent-framework.ts  # 子Agent高级框架
 │       ├── git-provider.ts     # Git 操作封装
 │       ├── workspace-git.ts    # 工作区 Git 管理
 │       ├── event-store.ts      # 事件流持久化
-│       ├── conversation-backup.ts  # 会话备份/恢复
+│       ├── conversation-backup.ts  # 会话备份/恢复 + Session-Agent调度集成
+│       ├── session-scheduler.ts    # Session并发调度器 (并发上限+僵尸锁清理)
+│       ├── session-lifecycle.ts    # Session生命周期管理 (create/start/suspend/complete)
+│       ├── scheduler-bus.ts        # 调度事件总线 (发布/订阅调度事件)
 │       ├── cross-project.ts    # 跨项目经验共享
 │       ├── decision-log.ts     # 决策日志
 │       ├── file-lock.ts        # 文件级锁 (并行 Worker)
@@ -148,19 +171,27 @@ AutoMater/
 │   │   ├── TimelinePage.tsx    # 时间线 (事件重放)
 │   │   ├── GuidePage.tsx       # 8 篇新手教程
 │   │   └── SettingsPage.tsx    # LLM/MCP/密钥/模型配置
-│   └── components/             # 12 个组件
+│   └── components/             # 20 个组件
 │       ├── Sidebar.tsx         # 左侧导航
-│       ├── MetaAgentPanel.tsx  # 右侧元Agent 全局面板
-│       ├── MetaAgentSettings.tsx   # 元Agent 配置面板
+│       ├── MetaAgentPanel.tsx  # 右侧元Agent 全局面板 (v29: 模式切换增强)
+│       ├── MetaAgentSettings.tsx   # 元Agent 配置面板 (v29: 记忆项目隔离)
 │       ├── SessionManager.tsx  # 会话管理器 (v8)
+│       ├── SessionPanel.tsx    # 会话详情面板
 │       ├── AcceptancePanel.tsx # 用户验收面板
 │       ├── ActivityCharts.tsx  # 活动图表
-│       ├── AgentWorkFeed.tsx   # Agent 工作流
+│       ├── AgentWorkFeed.tsx   # Agent 工作流 (Echo风格思维链+工具diff)
+│       ├── ChatInput.tsx       # 对话输入框 (附件支持)
 │       ├── ContextMenu.tsx     # 右键菜单
+│       ├── EmptyState.tsx      # 空状态占位组件
 │       ├── ErrorBoundary.tsx   # React 错误边界
+│       ├── GlobalSearchBar.tsx # 全局搜索栏
+│       ├── MessageAttachments.tsx # 消息附件显示
+│       ├── Onboarding.tsx      # 新手引导
+│       ├── ProjectBar.tsx      # 项目切换栏
 │       ├── StatusBar.tsx       # 底部状态栏
 │       ├── SystemMonitor.tsx   # 系统监控面板
-│       └── TechBackground.tsx  # Canvas 粒子动效
+│       ├── TechBackground.tsx  # Canvas 粒子动效
+│       └── Toast.tsx           # Toast通知组件
 ├── docs/                       # 设计文档 + 审计报告
 ├── scripts/                    # 构建/质量门禁脚本
 ├── prompts/                    # 外置提示词模板
@@ -198,7 +229,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | DevOps | devops-* | 10 | 自动构建验证 (install→lint→test→build) |
 | Researcher | researcher-* | 6 | 只读子 Agent, 8 轮上限 |
 
-### 元 Agent (v5.4 → v28.1 管家4模式系统 + 上下文管理 + 附件)
+### 元 Agent (v5.4 → v29.0 管家4模式系统 + 上下文管理 + 附件 + 记忆项目隔离)
 
 - **位置**: 全局右侧可收起面板 + WishPage 右侧
 - **职责**: 跨项目路由, 需求接收转发, 工作流管理, 查询项目技术/设计细节, **团队/项目直接管理 (admin模式)**
@@ -216,7 +247,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 - **数据表**: `meta_agent_config` + `meta_agent_memories` + `meta_agent_chat_messages` + `meta_agent_heartbeat_log`
 - **模式切换**: ModeSwitchBadge UI组件, session.updateChatMode IPC, sessions.chat_mode 列持久化
 
-### 数据库 (SQLite, 22 张表, schema_version 迁移体系, 15 版)
+### 数据库 (SQLite, 22 张表, schema_version 迁移体系, 18 版)
 
 **核心建表** (initDatabase 创建):
 
@@ -229,7 +260,7 @@ v12.0 起支持 **工作流预设 (Workflow Presets)** — 用户可自定义阶
 | agents | id, project_id, role, status, token/cost 统计 | Agent 实例 |
 | agent_logs | project_id, agent_id, type, content | 持久化日志 |
 
-**迁移创建** (MIGRATIONS v1-v15):
+**迁移创建** (MIGRATIONS v1-v18):
 
 | 表 | 迁移版本 | 主要字段 | 用途 |
 |----|---------|---------|------|
@@ -249,6 +280,9 @@ v12: context_window 默认值从 128000 升级到 256000
 v13: features.summary 列 — PM 一句话摘要用于索引层
 v14: agents 表改复合主键 (id, project_id)
 v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
+v16: sessions 置顶/重命名/隐藏 — pinned, custom_title, hidden 列
+v17: Session-Agent 调度系统 — sessions.member_id/feature_id/started_at/suspended_at/error_message + team_members.max_concurrent_sessions + features.locked_at + 索引
+v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 **模块自管理表** (ensureXxxTable):
 
@@ -260,24 +294,27 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | feature_sessions | conversation-backup.ts | Feature↔Session 关联 (v8.1) |
 | meta_agent_heartbeat_log | meta-agent-daemon.ts | 守护进程心跳日志 |
 
-### 93+ 工具体系
+### 130 工具体系
 
 | 类别 | 工具名 | 状态 |
 |------|--------|------|
-| **文件** (7) | read_file, write_file, edit_file, batch_edit, list_files, glob_files, search_files | ✅ |
-| **Shell** (3) | run_command, run_test, run_lint | ✅ 沙箱执行 |
-| **Git** (3) | git_commit, git_diff, git_log | ✅ |
-| **GitHub** (2) | github_create_issue, github_list_issues | ✅ v13 |
-| **思考/计划** (5) | think, todo_write, todo_read, report_blocked, task_complete | ✅ |
+| **文件** (12) | read_file, write_file, edit_file, batch_edit, list_files, glob_files, search_files, code_search, code_search_files, read_many_files, repo_map, code_graph_query | ✅ |
+| **Shell** (5) | run_command, run_test, run_lint, check_process, wait_for_process | ✅ 沙箱执行 |
+| **Git** (10) | git_commit, git_diff, git_log, git_create_branch, git_delete_branch, git_switch_branch, git_fetch, git_pull, git_push, git_list_branches | ✅ |
+| **GitHub** (9) | github_create_issue, github_list_issues, github_get_issue, github_close_issue, github_add_comment, github_create_pr, github_list_prs, github_get_pr, github_merge_pr | ✅ v13 |
+| **思考/计划** (8) | think, todo_write, todo_read, report_blocked, task_complete, rfc_propose, scratchpad_write, scratchpad_read | ✅ |
 | **记忆** (3) | memory_read, memory_append, spawn_researcher | ✅ |
-| **Web** (3) | web_search, fetch_url, http_request | ✅ |
+| **Web** (8) | web_search, web_search_boost, deep_research, configure_search, fetch_url, download_file, search_images, http_request | ✅ Zero-key |
 | **Computer Use** (5) | screenshot, mouse_click, mouse_move, keyboard_type, keyboard_hotkey | ✅ Windows |
-| **Playwright** (10) | browser_launch, navigate, click, type, screenshot, evaluate, wait, scroll, select, close | ✅ |
-| **视觉** (3) | analyze_image, compare_screenshots, visual_assert | ✅ Vision LLM |
+| **Playwright** (16) | browser_launch/navigate/click/type/screenshot/snapshot/evaluate/wait/network/close/hover/select_option/press_key/fill_form/drag/tabs/file_upload/console | ✅ |
+| **视觉** (3+) | analyze_image, compare_screenshots, visual_assert, generate_image, edit_image, configure_image_gen | ✅ Vision LLM |
 | **技能** (4) | skill_acquire, skill_search, skill_improve, skill_record_usage | ✅ |
-| **部署** (2+) | deploy_tools | ✅ v10 |
+| **子Agent** (5) | spawn_agent, spawn_parallel, list_sub_agents, cancel_sub_agent, run_blackbox_tests | ✅ |
+| **沙箱** (5) | sandbox_init, sandbox_exec, sandbox_write, sandbox_read, sandbox_destroy | ✅ |
+| **部署** (13) | deploy_*(nginx/pm2/compose/dockerfile/port) + cloudflare_*(deploy_pages/worker/dns/secret/status) + supabase_*(status/deploy/migration/types/secret/db_pull) | ✅ |
 | **元Agent** (1) | create_wish | ✅ 委派任务给团队 |
 | **Admin** (9) | admin_list_members, admin_add_member, admin_update_member, admin_remove_member, admin_list_workflows, admin_activate_workflow, admin_update_workflow, admin_update_project, admin_get_available_stages | ✅ v21 (仅admin模式) |
+| **Session** (2) | list_conversation_sessions, read_conversation_history | ✅ v28 |
 | **MCP** | 动态加载外部工具 | ✅ mcp-client.ts |
 
 ### IPC 命名空间 (preload.ts — 23 个)
@@ -319,11 +356,11 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | ADR-005 | 3 层模型选择 (strong/worker/fast) | 控制 Token 成本: 规划用 strong, 编码用 worker |
 | ADR-006 | ReAct + 内嵌 Planning (无独立 Planner 调用) | 减少 Token 开销, 2026 最佳实践 |
 | ADR-007 | 文档驱动开发 (.AutoMater/docs/) | ARCHITECTURE.md + 子需求 + 测试规格驱动代码生成 |
-| ADR-008 | schema_version 迁移体系 (v12.1) | 替代 try-catch 吞错误, 可审计版本演进 |
+| ADR-008 | schema_version 迁移体系 (v12.1→v18) | 替代 try-catch 吞错误, 可审计版本演进 |
 
 ## 4. CURRENT STATE
 
-**版本**: v28.1 (DAG工作流引擎 + 搜索引擎大修 + 思维链可视化 + 管家上下文管理 + 附件支持)
+**版本**: v29.0 (Session-Agent调度系统 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化 + 130工具)
 
 ### 版本演进总览
 
@@ -352,12 +389,14 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | v25 | DAG WorkflowEngine(状态机驱动阶段执行+transitions+12测试) + WorkflowPreview DAG可视化 + 内置工作流升级 + 错误经验主动检索 |
 | v26 | Echo风格思维链展示 + 完整工具调用可视化(diff/终端样式/Markdown代码块可复制) |
 | v28 | MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示 + 管家上下文管理 |
+| v28.2 | 会话置顶/重命名/隐藏 + toast反馈 + 错误日志 + 工作过程默认展开 |
+| v29 | Session-Agent调度系统(并发调度+僵尸锁+生命周期) + 管家记忆项目隔离 + 模式切换增强 |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
-- [x] ReAct Developer 循环 (50 轮, 93+ 工具 + MCP 动态加载)
+- [x] ReAct Developer 循环 (50 轮, 130 工具 + MCP 动态加载)
 - [x] QA 程序化检查 + LLM 审查 + 硬规则评分 + TDD 模式
-- [x] 93+ 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy/Docker/SubAgent/Admin)
+- [x] 130 内置工具 (文件/Shell/Git/GitHub/Web/Computer/Browser/Visual/Skill/Deploy/Docker/SubAgent/Admin/Session)
 - [x] 3 层上下文记忆 (Hot/Warm/Cold) + 压缩 + Scratchpad 持久化
 - [x] 3 层持久记忆 (Global/Project/Role) + 元Agent 持久记忆
 - [x] **v20.0 验证门控** — task_complete 前强制验证 (写过文件必须 run_command/test)
@@ -385,17 +424,21 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 - [x] **v26.0 思维链可视化** — Echo风格思考过程展示 + 工具调用diff/终端样式/Markdown代码块可复制
 - [x] **v28.0 多模态补全** — MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示
 - [x] **v28.1 上下文管理升级** — ContextPage支持管家Agent + 管家配置概览面板 + snapshot缓存
+- [x] **v28.2 会话管理增强** — 置顶/重命名/隐藏 + toast反馈 + 工作过程默认展开
+- [x] **v29.0 Session-Agent调度系统** — session-scheduler(并发上限+僵尸锁清理) + session-lifecycle(状态机) + scheduler-bus(事件总线) + DB v17迁移
+- [x] **v29.0 管家记忆项目隔离** — meta_agent_memories.project_id + 按项目过滤/管理记忆 + DB v18迁移
+- [x] **v29.0 模式切换增强** — button嵌套修复 + chat模式不注入记忆/项目上下文 + 侧边栏查看/修改已有对话模式
 - [x] 技能进化系统 + 跨项目经验迁移
 - [x] MCP 协议动态工具加载 + 成员级 MCP 配置
 - [x] 会话备份/恢复 + Feature-Session 关联追踪
 - [x] 工作流预设管理 (可配置/内置/自定义阶段)
 - [x] GitHub 深度集成 (Issue 创建, Feature↔Issue/PR/Branch 关联)
 - [x] 密钥加密存储 (project_secrets + secret-manager)
-- [x] 14 个 UI 页面 + 16 个组件 + 科技感 Canvas 背景
+- [x] 14 个 UI 页面 + 20 个组件 + 科技感 Canvas 背景
 - [x] 系统监控 (CPU/GPU/内存/硬盘) + 活动时序图
 - [x] 全局 Toast/确认系统 + 错误码中文映射 + 删除二次确认
 - [x] IPC 输入校验 (50+ 断言覆盖关键 handlers)
-- [x] schema_version 迁移体系 (12 版迁移, 可审计)
+- [x] schema_version 迁移体系 (18 版迁移, 可审计)
 
 ### 已知差距 (低优先级)
 - [ ] Docker 容器级沙箱隔离 (当前用进程级+黑名单)
@@ -436,9 +479,10 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | 自适应工具选择 | `electron/engine/adaptive-tool-selector.ts` |
 | 子Agent压缩 | `electron/engine/sub-agent-compressor.ts` |
 | LLM 调用 | `electron/engine/llm-client.ts` |
-| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 15 版) |
+| 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 18 版) |
 | 密钥管理 | `electron/engine/secret-manager.ts` |
 | 会话管理 | `electron/engine/conversation-backup.ts` + `electron/ipc/sessions.ts` |
+| Session-Agent调度 | `electron/engine/session-scheduler.ts` + `session-lifecycle.ts` + `scheduler-bus.ts` |
 | 工作流预设 | `electron/ipc/workflow.ts` |
 | 前端状态 | `src/stores/app-store.ts` + `src/stores/slices/*.ts` |
 | 元Agent 后端 | `electron/ipc/meta-agent.ts` (含 4模式提示词 + admin工具执行 + ModeConfig) |
@@ -447,7 +491,7 @@ v15: sessions.chat_mode 列 — 管家会话模式 (work/chat/deep/admin)
 | 项目导入分析 | `electron/engine/project-importer.ts` + `electron/engine/probes/*.ts` |
 | 系统监控 | `electron/engine/system-monitor.ts` + `src/components/SystemMonitor.tsx` |
 
-## 6. CODE HEALTH (2026-03-02 快照)
+## 6. CODE HEALTH (2026-03-04 快照)
 
 > 详见 `docs/CODE-QUALITY-REVIEW-2026-03-02.md`
 
