@@ -51,6 +51,7 @@ export function OverviewPage() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [stats, setStats] = useState<{ features: Record<string, number>; agents: Record<string, number> } | null>(null);
   const [project, setProject] = useState<ProjectRow | null>(null);
+  const [graphTab, setGraphTab] = useState<'arch' | 'feature'>('arch');
 
   // v5.1: 导入分析实时进度
   const [importProgress, setImportProgress] = useState<{
@@ -249,32 +250,63 @@ export function OverviewPage() {
       </div>
 
       <div className="flex-1 px-6 pb-6 space-y-4 relative z-10">
-        {/* ═══════ ① 系统架构图 — 始终展示 ═══════ */}
-        <ArchTreeGraph projectId={currentProjectId} />
+        {/* ═══════ ① 架构图 + Feature 进度图 — Tab 切换 ═══════ */}
+        <section>
+          <div className="flex items-center gap-1 mb-3">
+            <button
+              onClick={() => setGraphTab('arch')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                graphTab === 'arch'
+                  ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+              }`}
+            >
+              🏛️ 系统架构图谱
+            </button>
+            <button
+              onClick={() => setGraphTab('feature')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                graphTab === 'feature'
+                  ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+              }`}
+            >
+              📊 Feature 进度图
+              {enriched.length > 0 && <span className="ml-1.5 text-[10px] opacity-60">{enriched.length}</span>}
+            </button>
+          </div>
 
-        {/* Feature 进度图 (有 features 时展示) */}
-        {enriched.length > 0 && (
-          <section>
-            <h3 className="text-sm font-medium text-slate-400 mb-3">📊 Feature 进度图</h3>
-            <InteractiveGraph features={enriched} onDrillDown={() => {}} />
-            <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
-              {Object.entries(STATUS_COLOR).map(([key, sc]) => (
-                <span key={key} className="flex items-center gap-1">
-                  <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
-                  {key === 'todo'
-                    ? '待做'
-                    : key === 'in_progress'
-                      ? '开发中'
-                      : key === 'reviewing'
-                        ? '审查中'
-                        : key === 'passed'
-                          ? '已完成'
-                          : '失败'}
-                </span>
-              ))}
-            </div>
-          </section>
-        )}
+          {graphTab === 'arch' && <ArchTreeGraph projectId={currentProjectId} />}
+
+          {graphTab === 'feature' &&
+            (enriched.length > 0 ? (
+              <>
+                <InteractiveGraph features={enriched} onDrillDown={() => {}} />
+                <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
+                  {Object.entries(STATUS_COLOR).map(([key, sc]) => (
+                    <span key={key} className="flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full ${sc.bg}`} />
+                      {key === 'todo'
+                        ? '待做'
+                        : key === 'in_progress'
+                          ? '开发中'
+                          : key === 'reviewing'
+                            ? '审查中'
+                            : key === 'passed'
+                              ? '已完成'
+                              : '失败'}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="bg-slate-900/30 border border-slate-800/50 border-dashed rounded-xl px-5 py-10 text-center">
+                <div className="text-3xl mb-3 opacity-40">📊</div>
+                <div className="text-sm text-slate-500 mb-1">暂无 Feature 数据</div>
+                <div className="text-xs text-slate-600">导入项目并完成分析后，Feature 进度图将在此展示。</div>
+              </div>
+            ))}
+        </section>
 
         {/* 导入分析报告 (非 analyzing 且无 features 时展示分析产物) */}
         {enriched.length === 0 && !isAnalyzing && <ImportAnalysisPanel projectId={currentProjectId} />}
