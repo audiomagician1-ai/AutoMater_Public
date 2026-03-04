@@ -426,6 +426,7 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'admin_evolution_evaluate',
     'admin_evolution_run',
     'admin_evolution_verify',
+    'admin_evolution_auto_run',
     'list_conversation_sessions',
     'read_conversation_history', // v27.0: 对话历史浏览
   ],

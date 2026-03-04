@@ -59,6 +59,12 @@ import {
   DEFAULT_IMMUTABLE_FILES,
   DEFAULT_EVOLUTION_CONFIG,
 } from '../engine/self-evolution-engine';
+import {
+  EvolutionMutator,
+  EVOLUTION_SCOPES,
+  type EvolutionScopeLevel,
+  type MutationStrategy,
+} from '../engine/evolution-mutator';
 
 // ═══════════════════════════════════════
 // Types
@@ -559,6 +565,7 @@ ${PRODUCT_KNOWLEDGE}`;
 - \`admin_evolution_evaluate\` — 只读适应度评估（不修改代码，运行 tsc + vitest）
 - \`admin_evolution_run\` — 执行一次进化迭代（⚠️ 实际修改源代码，在独立 git 分支上进行）
 - \`admin_evolution_verify\` — 验证不可变文件 SHA256 完整性
+- \`admin_evolution_auto_run\` — 🚀 自主进化循环：LLM 自动生成代码修改 → 评估 → 接受/回滚，连续 N 代
 
 ### 辅助
 - read_file, list_files, search_files 等只读工具用于查看项目文件
@@ -1282,6 +1289,180 @@ async function executeEvolutionAdminTool(
         }
       }
 
+      case 'admin_evolution_auto_run': {
+        const eng = getEvolutionEngine();
+        const config = eng.getConfig();
+        const sourceRoot = config.sourceRoot;
+
+        const generations = Math.min(Math.max(Number(args.generations) || 3, 1), 10);
+        const scopeLevel = (args.scope as EvolutionScopeLevel) || 'conservative';
+        const preferredStrategy = args.strategy as MutationStrategy | undefined;
+        const maxFiles = Math.min(Math.max(Number(args.max_files) || 2, 1), 5);
+        const allowedScope = EVOLUTION_SCOPES[scopeLevel]
+          ? [...EVOLUTION_SCOPES[scopeLevel]]
+          : [...EVOLUTION_SCOPES.conservative];
+
+        const mutator = new EvolutionMutator(sourceRoot);
+        const results: string[] = [
+          `## 🧬 自主进化启动`,
+          '',
+          `- **代数**: ${generations}`,
+          `- **范围**: ${scopeLevel} (${allowedScope.length} 个目标模式)`,
+          `- **策略**: ${preferredStrategy || '自动选择'}`,
+          `- **每代最大文件数**: ${maxFiles}`,
+          '',
+        ];
+
+        // Pre-flight check
+        const preflight = await eng.preflight();
+        if (!preflight.ok) {
+          return {
+            success: false,
+            output:
+              results.join('\n') +
+              `\n❌ 预检失败: ${preflight.errors.join(', ')}\n\n请先确保 git 工作区干净且 tsc 通过。`,
+          };
+        }
+        results.push(`✅ 预检通过 — 基线适应度 ${preflight.baselineFitness?.score.toFixed(4) ?? 'N/A'}`);
+
+        let accepted = 0;
+        let rejected = 0;
+        let errors = 0;
+
+        for (let gen = 1; gen <= generations; gen++) {
+          results.push(`\n### 第 ${gen}/${generations} 代`);
+
+          // Generate mutation proposal via LLM
+          try {
+            const progress = eng.getProgress();
+            const proposal = await mutator.generateMutation({
+              sourceRoot,
+              fitness: preflight.baselineFitness || {
+                score: progress.baselineFitness,
+                tscPassed: true,
+                tscErrors: 0,
+                testPassRate: 1,
+                totalTests: 0,
+                passedTests: 0,
+                failedTests: 0,
+                statementCoverage: 0,
+                baselineCoverage: 0,
+                durations: { tsc: 0, vitest: 0, total: 0 },
+                details: '',
+              },
+              memories: progress.memories,
+              archive: progress.archive,
+              allowedScope,
+              preferredStrategy,
+              maxFiles,
+            });
+
+            results.push(`**策略**: ${proposal.strategy} | **描述**: ${proposal.description}`);
+            results.push(`**变更**: ${proposal.fileChanges.map(f => f.path).join(', ')}`);
+            results.push(`**Token**: ${proposal.tokenUsage.input} in / ${proposal.tokenUsage.output} out`);
+
+            // Execute the iteration via the engine
+            const iterResult = await eng.runSingleIteration(proposal.description, async (workingDir: string) => {
+              const modified: string[] = [];
+              for (const change of proposal.fileChanges) {
+                const absPath = path.resolve(workingDir, change.path);
+                if (change.action === 'delete') {
+                  if (fs.existsSync(absPath)) {
+                    fs.unlinkSync(absPath);
+                    modified.push(change.path);
+                  }
+                } else {
+                  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+                  fs.writeFileSync(absPath, change.content, 'utf-8');
+                  modified.push(change.path);
+                }
+              }
+              return modified;
+            });
+
+            if (iterResult.success) {
+              accepted++;
+              results.push(`✅ **已接受** — 适应度 ${iterResult.entry?.fitnessScore.toFixed(4) ?? 'N/A'}`);
+
+              // Save to DB
+              if (iterResult.entry) {
+                try {
+                  const db = getDb();
+                  db.prepare(
+                    `INSERT OR REPLACE INTO evolution_archive (id, parent_id, generation, branch, fitness_score, fitness_json, description, modified_files, status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  ).run(
+                    iterResult.entry.id,
+                    iterResult.entry.parentId,
+                    iterResult.entry.generation,
+                    iterResult.entry.branch,
+                    iterResult.entry.fitnessScore,
+                    JSON.stringify(iterResult.entry.fitness),
+                    iterResult.entry.description,
+                    JSON.stringify(iterResult.entry.modifiedFiles),
+                    iterResult.entry.status,
+                  );
+                } catch {
+                  /* DB save failure is non-critical */
+                }
+              }
+            } else if (iterResult.rolledBack) {
+              errors++;
+              results.push(`↩️ **已回滚** — ${iterResult.error || '安全检查失败'}`);
+            } else {
+              rejected++;
+              results.push(`❌ **已拒绝** — 适应度 ${iterResult.entry?.fitnessScore.toFixed(4) ?? 'N/A'} (未达标)`);
+            }
+
+            // Record memory
+            if (proposal.rationale) {
+              try {
+                const db = getDb();
+                db.prepare(
+                  'INSERT INTO evolution_memories (pattern, outcome, module, description, fitness_impact) VALUES (?, ?, ?, ?, ?)',
+                ).run(
+                  proposal.strategy,
+                  iterResult.success ? 'success' : 'failure',
+                  proposal.fileChanges.map(f => f.path).join(', '),
+                  proposal.description,
+                  iterResult.entry ? iterResult.entry.fitnessScore - (preflight.baselineFitness?.score || 0) : 0,
+                );
+              } catch {
+                /* DB save failure is non-critical */
+              }
+            }
+          } catch (genErr: unknown) {
+            errors++;
+            const errMsg = genErr instanceof Error ? genErr.message : String(genErr);
+            results.push(`❌ **异常**: ${errMsg}`);
+            log.error(`Auto-evolution gen ${gen} error`, genErr);
+
+            // If LLM failed, stop trying (likely API issue)
+            if (errMsg.includes('LLM') || errMsg.includes('API') || errMsg.includes('settings')) {
+              results.push(`\n⛔ LLM 调用失败，终止剩余迭代。`);
+              break;
+            }
+          }
+        }
+
+        // Summary
+        results.push(
+          '',
+          '---',
+          `## 📊 自主进化结果`,
+          `- ✅ 接受: ${accepted}`,
+          `- ❌ 拒绝: ${rejected}`,
+          `- ↩️ 错误/回滚: ${errors}`,
+          `- 总计: ${generations} 代`,
+        );
+
+        const finalProgress = eng.getProgress();
+        results.push(`- 当前适应度: ${finalProgress.baselineFitness.toFixed(4)}`);
+        results.push(`- 累计进化代数: ${finalProgress.generation}`);
+
+        return { success: accepted > 0, output: results.join('\n') };
+      }
+
       default:
         return null; // 不是进化工具，返回 null 交给通用处理
     }
@@ -1516,6 +1697,7 @@ export function setupMetaAgentHandlers() {
           'admin_evolution_evaluate',
           'admin_evolution_run',
           'admin_evolution_verify',
+          'admin_evolution_auto_run',
         ]);
         tools = tools.filter(t => adminAllowed.has((t.function as Record<string, unknown>).name as string));
       }

@@ -188,4 +188,43 @@ export const ADMIN_TOOLS: ToolDef[] = [
       '验证不可变文件的 SHA256 完整性。检查 vitest.config.ts、tsconfig.json、quality-gate.js 等关键文件是否被意外修改。',
     parameters: { type: 'object', properties: {} },
   },
+  {
+    name: 'admin_evolution_auto_run',
+    description:
+      '启动自主进化循环：LLM 自动分析代码 → 生成变异提案 → 应用修改 → 评估适应度 → 接受/回滚，连续执行 N 代。' +
+      '⚠️ 这是完全自主的进化模式，系统会自动使用 LLM 生成代码修改。启动前必须先通过 preflight 预检。' +
+      '进化范围可选 conservative(仅prompts)、moderate(+工具定义)、aggressive(+engine逻辑)。',
+    parameters: {
+      type: 'object',
+      properties: {
+        generations: {
+          type: 'number',
+          description: '自动进化的代数（1-10，默认 3）。每代约需 2-5 分钟。',
+        },
+        scope: {
+          type: 'string',
+          enum: ['conservative', 'moderate', 'aggressive'],
+          description:
+            '进化范围级别: conservative(仅prompts+constants)、moderate(+工具定义)、aggressive(+engine逻辑)。默认 conservative。',
+        },
+        strategy: {
+          type: 'string',
+          enum: [
+            'prompt_improvement',
+            'error_handling',
+            'performance',
+            'code_quality',
+            'test_coverage',
+            'bug_fix',
+            'feature_enhancement',
+          ],
+          description: '强制使用特定变异策略（可选，留空则自动选择）',
+        },
+        max_files: {
+          type: 'number',
+          description: '每代最多修改的文件数（1-5，默认 2）',
+        },
+      },
+    },
+  },
 ];
