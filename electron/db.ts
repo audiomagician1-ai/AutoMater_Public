@@ -448,6 +448,32 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 20,
+    description: 'v29.1: project_secrets 移除 FK 约束 — 全局密钥 (__global__) 被 FK 拦截导致 API Key 无法保存',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_secrets_new (
+          project_id TEXT NOT NULL,
+          key TEXT NOT NULL,
+          value TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (project_id, key)
+        );
+
+        INSERT OR IGNORE INTO project_secrets_new
+          SELECT project_id, key, value, provider, created_at, updated_at
+          FROM project_secrets;
+
+        DROP TABLE project_secrets;
+        ALTER TABLE project_secrets_new RENAME TO project_secrets;
+
+        CREATE INDEX IF NOT EXISTS idx_project_secrets_provider ON project_secrets(project_id, provider);
+      `);
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */
