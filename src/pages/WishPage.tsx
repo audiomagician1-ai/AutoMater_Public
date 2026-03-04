@@ -721,17 +721,27 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
       // 已有 session → 更新 DB
       try {
         await window.automater.session.updateChatMode(currentSessionId, mode);
-        // 刷新 session 列表以反映新模式
-        const list = await window.automater.metaAgent.listChatSessions(currentProjectId, undefined, true);
-        if (list) {
-          useAppStore
-            .getState()
-            .setMetaSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
-        }
+        // 立即更新本地 sessionList 中的 chatMode（不等远程刷新）
+        const store = useAppStore.getState();
+        const updatedList = store.metaSessionList.map(s => (s.id === currentSessionId ? { ...s, chatMode: mode } : s));
+        store.setMetaSessionList(updatedList as MetaSessionItem[]);
+        // 同时后台刷新完整列表以同步其他字段
+        window.automater.metaAgent
+          .listChatSessions(currentProjectId, undefined, true)
+          .then(list => {
+            if (list) {
+              useAppStore
+                .getState()
+                .setMetaSessionList(
+                  (list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[],
+                );
+            }
+          })
+          .catch(() => {});
         const mi = CHAT_MODE_INFO[mode];
         showModeToast(`${mi.icon} 已切换为${mi.label}模式`);
       } catch (err) {
-        console.error('[WishPage] handleModeSwitch refresh failed:', err);
+        console.error('[WishPage] handleModeSwitch failed:', err);
         showModeToast('❌ 模式切换失败');
       }
     } else {

@@ -501,10 +501,14 @@ ${PRODUCT_KNOWLEDGE}`;
 不需要 JSON — 直接用 Markdown 输出：列出变更摘要、操作结果和影响说明。`;
   }
 
-  // Inject memory context
-  const memoryBlock = formatMemoriesForContext(memories);
-  if (memoryBlock) {
-    prompt += `\n\n${memoryBlock}`;
+  // Inject memory context — 按模式控制
+  // chat 模式: 不注入记忆 (轻松聊天, 不需要项目记忆)
+  // work/deep/admin 模式: 注入记忆 (需要项目上下文)
+  if (mode !== 'chat') {
+    const memoryBlock = formatMemoriesForContext(memories);
+    if (memoryBlock) {
+      prompt += `\n\n${memoryBlock}`;
+    }
   }
 
   return prompt;
@@ -1050,7 +1054,8 @@ export function setupMetaAgentHandlers() {
       const agentId = 'meta-agent';
       const mode = (chatMode as 'work' | 'chat' | 'deep' | 'admin') || 'work';
 
-      const memories = getMemories(undefined, config.memoryInjectLimit);
+      // chat 模式不加载记忆 — 保持轻松对话，不带项目记忆上下文
+      const memories = mode === 'chat' ? [] : getMemories(undefined, config.memoryInjectLimit);
 
       const systemPrompt = buildSystemPrompt(config, memories, mode);
       const messages: Array<{
@@ -1060,7 +1065,8 @@ export function setupMetaAgentHandlers() {
         tool_call_id?: string;
       }> = [{ role: 'system', content: systemPrompt }];
 
-      if (projectId) {
+      if (projectId && mode !== 'chat') {
+        // chat 模式不注入项目上下文 — 保持轻松对话
         const ctx = collectProjectContext(projectId);
         messages.push({ role: 'system', content: `当前项目上下文:\n${ctx}` });
       }

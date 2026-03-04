@@ -227,6 +227,9 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
   const handleSwitchMode = async (sessId: string, mode: ChatMode) => {
     try {
       await window.automater.session.updateChatMode(sessId, mode);
+      // 立即更新本地 sessionList（不等远程刷新）
+      setSessionList(sessionList.map(s => (s.id === sessId ? { ...s, chatMode: mode } : s)) as MetaSessionItem[]);
+      // 后台完整刷新
       loadSessions();
     } catch (err) {
       console.error('[SessionDropdown] switchMode failed:', err);
@@ -379,14 +382,18 @@ export function MetaAgentPanel() {
   const currentModeInfo = CHAT_MODE_INFO[currentChatMode];
   const [modePopoverOpen, setModePopoverOpen] = useState(false);
   const modePopoverRef = useRef<HTMLDivElement>(null);
+  const modePopoverContentRef = useRef<HTMLDivElement>(null);
   const [modePopoverPos, setModePopoverPos] = useState<{ top: number; left: number } | null>(null);
   const [modeToast, setModeToast] = useState<string | null>(null);
 
-  // 关闭模式 popover 当点击外部
+  // 关闭模式 popover 当点击外部（排除触发按钮和 popover 内容区）
   useEffect(() => {
     if (!modePopoverOpen) return;
     const handler = (e: MouseEvent) => {
-      if (modePopoverRef.current && !modePopoverRef.current.contains(e.target as Node)) setModePopoverOpen(false);
+      const target = e.target as Node;
+      if (modePopoverRef.current?.contains(target)) return;
+      if (modePopoverContentRef.current?.contains(target)) return;
+      setModePopoverOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -400,10 +407,23 @@ export function MetaAgentPanel() {
     if (currentSessionId) {
       try {
         await window.automater.session.updateChatMode(currentSessionId, mode);
-        const list = await window.automater.metaAgent.listChatSessions(currentProjectId, undefined, true);
-        if (list) {
-          setSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
-        }
+        // 立即更新本地 sessionList 中的 chatMode（不等远程刷新）
+        const store = useAppStore.getState();
+        const updatedList = store.metaSessionList.map(s => (s.id === currentSessionId ? { ...s, chatMode: mode } : s));
+        store.setMetaSessionList(updatedList as MetaSessionItem[]);
+        // 同时后台刷新完整列表
+        window.automater.metaAgent
+          .listChatSessions(currentProjectId, undefined, true)
+          .then(list => {
+            if (list) {
+              useAppStore
+                .getState()
+                .setMetaSessionList(
+                  (list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[],
+                );
+            }
+          })
+          .catch(() => {});
         const mi = CHAT_MODE_INFO[mode];
         setModeToast(`${mi.icon} 已切换为${mi.label}模式`);
         setTimeout(() => setModeToast(null), 1800);
@@ -662,6 +682,7 @@ export function MetaAgentPanel() {
         {/* 模式切换 Popover — fixed 定位避免 overflow 裁剪 */}
         {modePopoverOpen && modePopoverPos && (
           <div
+            ref={modePopoverContentRef}
             className="fixed z-[60] flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
             style={{ top: modePopoverPos.top, left: modePopoverPos.left }}
             onClick={e => e.stopPropagation()}
@@ -697,41 +718,41 @@ export function MetaAgentPanel() {
 
         {/* Toggle button bar */}
         <div className="h-10 flex items-center border-b border-slate-800 shrink-0 relative">
-          <button
+          <div
             onClick={toggle}
-            className="flex-1 h-full flex items-center justify-center gap-1.5 hover:bg-slate-900 transition-colors"
+            className="flex-1 h-full flex items-center justify-center gap-1.5 hover:bg-slate-900 transition-colors cursor-pointer"
             title={open ? '收起管家面板' : '展开管家面板'}
           >
             {open ? (
               <>
                 <span className="text-xs">🤖</span>
-                <span className="text-[11px] text-slate-400 font-medium flex-1 text-left truncate">
-                  {agentName}
-                  {/* 模式指示器 · 点击切换 */}
-                  <span className="inline-block ml-1" ref={modePopoverRef}>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        if (!modePopoverOpen && modePopoverRef.current) {
-                          const rect = modePopoverRef.current.getBoundingClientRect();
-                          setModePopoverPos({ top: rect.bottom + 4, left: rect.left });
-                        }
-                        setModePopoverOpen(!modePopoverOpen);
-                      }}
-                      className={`text-[9px] px-1.5 py-0.5 rounded-md ${currentModeInfo.color} hover:bg-slate-800 transition-colors align-middle`}
-                      title={`${currentModeInfo.label}模式 · 点击切换`}
-                    >
-                      {currentModeInfo.icon} {currentModeInfo.label}
-                    </button>
-                  </span>
-                </span>
+                <span className="text-[11px] text-slate-400 font-medium flex-1 text-left truncate">{agentName}</span>
               </>
             ) : (
               <span className="text-sm" title={agentName}>
                 🤖
               </span>
             )}
-          </button>
+          </div>
+          {/* 模式指示器 · 点击切换 — 独立于 toggle 区域，避免 button 嵌套 */}
+          {open && (
+            <span className="inline-flex items-center mr-1" ref={modePopoverRef}>
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  if (!modePopoverOpen && modePopoverRef.current) {
+                    const rect = modePopoverRef.current.getBoundingClientRect();
+                    setModePopoverPos({ top: rect.bottom + 4, left: rect.left });
+                  }
+                  setModePopoverOpen(!modePopoverOpen);
+                }}
+                className={`text-[9px] px-1.5 py-0.5 rounded-md ${currentModeInfo.color} hover:bg-slate-800 transition-colors`}
+                title={`${currentModeInfo.label}模式 · 点击切换`}
+              >
+                {currentModeInfo.icon} {currentModeInfo.label}
+              </button>
+            </span>
+          )}
           {open && (
             <>
               {/* 会话切换下拉按钮 */}
