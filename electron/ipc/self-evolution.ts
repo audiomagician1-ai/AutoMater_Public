@@ -15,7 +15,7 @@
  *  - evolution:verify-immutable — 校验不可变文件完整性
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { createLogger } from '../engine/logger';
@@ -30,6 +30,29 @@ import {
 } from '../engine/self-evolution-engine';
 
 const log = createLogger('ipc:self-evolution');
+
+// ═══════════════════════════════════════
+// Event Push — 向渲染进程推送进化事件
+// ═══════════════════════════════════════
+
+function pushEvolutionEvent(channel: string, data: unknown): void {
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, data);
+    }
+  } catch {
+    // Window might be closed
+  }
+}
+
+function pushLog(message: string): void {
+  pushEvolutionEvent('evolution:log', { message, timestamp: Date.now() });
+}
+
+function pushProgress(status: string, extra?: Record<string, unknown>): void {
+  pushEvolutionEvent('evolution:progress', { status, timestamp: Date.now(), ...extra });
+}
 
 // ═══════════════════════════════════════
 // Engine Singleton
@@ -176,15 +199,21 @@ export function setupSelfEvolutionHandlers(): void {
   // ── Preflight check ──
   ipcMain.handle('evolution:preflight', async () => {
     try {
+      pushLog('🔍 开始进化前预检...');
+      pushProgress('preflight');
       const eng = getOrCreateEngine();
       const result = await eng.preflight();
       if (result.baselineFitness) {
         lastBaselineFitness = result.baselineFitness;
       }
+      pushLog(result.ok ? '✅ 预检通过' : `❌ 预检失败: ${result.errors.join(', ')}`);
+      pushProgress(result.ok ? 'idle' : 'failed', { baselineFitness: result.baselineFitness?.score });
       return { success: true, ...result };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error('Preflight failed', err);
+      pushLog(`❌ 预检异常: ${msg}`);
+      pushProgress('failed');
       return { success: false, ok: false, errors: [msg] };
     }
   });
@@ -219,6 +248,8 @@ export function setupSelfEvolutionHandlers(): void {
   // ── Evaluate fitness (read-only, no code changes) ──
   ipcMain.handle('evolution:evaluate', async () => {
     try {
+      pushLog('📊 评估适应度...');
+      pushProgress('evaluating');
       const sourceRoot = resolveSourceRoot();
       const evaluator = new FitnessEvaluator(
         sourceRoot,
@@ -226,10 +257,16 @@ export function setupSelfEvolutionHandlers(): void {
         DEFAULT_EVOLUTION_CONFIG.timeouts,
       );
       const result = evaluator.evaluate(lastBaselineFitness?.statementCoverage || 0);
+      pushLog(
+        `✅ 适应度: ${result.score.toFixed(4)} (tsc: ${result.tscPassed ? '✓' : '✗'}, tests: ${result.passedTests}/${result.totalTests})`,
+      );
+      pushProgress('idle', { fitness: result.score });
       return { success: true, fitness: result };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error('Fitness evaluation failed', err);
+      pushLog(`❌ 评估失败: ${msg}`);
+      pushProgress('failed');
       return { success: false, error: msg };
     }
   });
@@ -243,6 +280,8 @@ export function setupSelfEvolutionHandlers(): void {
       fileChanges: { path: string; content: string; action: 'write' | 'delete' }[],
     ) => {
       try {
+        pushLog(`🧬 开始进化迭代: ${description}`);
+        pushProgress('evolving', { description });
         const eng = getOrCreateEngine();
 
         const result = await eng.runSingleIteration(description, async (workingDir: string) => {
@@ -261,6 +300,7 @@ export function setupSelfEvolutionHandlers(): void {
               modifiedFiles.push(change.path);
             }
           }
+          pushLog(`📝 修改了 ${modifiedFiles.length} 个文件`);
           return modifiedFiles;
         });
 
@@ -269,10 +309,20 @@ export function setupSelfEvolutionHandlers(): void {
           saveArchiveEntry(result.entry);
         }
 
+        const icon = result.success ? '✅' : result.rolledBack ? '↩️' : '❌';
+        pushLog(`${icon} 迭代完成: ${result.success ? '已接受' : result.rolledBack ? '已回滚' : '已拒绝'}`);
+        pushProgress(result.success ? 'idle' : 'failed', {
+          entry: result.entry
+            ? { id: result.entry.id, status: result.entry.status, fitness: result.entry.fitnessScore }
+            : undefined,
+        });
+
         return { success: result.success, entry: result.entry, error: result.error, rolledBack: result.rolledBack };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error('Evolution iteration failed', err as Record<string, unknown>);
+        pushLog(`❌ 迭代异常: ${msg}`);
+        pushProgress('failed');
         return { success: false, error: msg, rolledBack: true };
       }
     },

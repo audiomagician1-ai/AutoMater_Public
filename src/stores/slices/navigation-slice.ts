@@ -4,7 +4,7 @@
 import type { StateCreator } from 'zustand';
 
 /** 外层页面 (无需选中项目) */
-export type GlobalPageId = 'projects' | 'settings' | 'guide';
+export type GlobalPageId = 'projects' | 'settings' | 'guide' | 'evolution';
 /** 项目内子页面 (需要 currentProjectId) */
 export type ProjectPageId =
   | 'overview'

@@ -3,6 +3,7 @@
 const globalNavItems: { id: GlobalPageId; icon: string; label: string }[] = [
   { id: 'projects', icon: '📁', label: '项目' },
   { id: 'guide', icon: '📖', label: '教程' },
+  { id: 'evolution', icon: '🧬', label: '进化' },
   { id: 'settings', icon: '⚙️', label: '设置' },
 ];
 

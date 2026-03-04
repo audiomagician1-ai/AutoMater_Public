@@ -24,6 +24,7 @@ const WorkflowPage = lazy(() => import('./pages/WorkflowPage').then(m => ({ defa
 const TimelinePage = lazy(() => import('./pages/TimelinePage'));
 const GuidePage = lazy(() => import('./pages/GuidePage').then(m => ({ default: m.GuidePage })));
 const GitPage = lazy(() => import('./pages/GitPage').then(m => ({ default: m.GitPage })));
+const EvolutionPage = lazy(() => import('./pages/EvolutionPage').then(m => ({ default: m.EvolutionPage })));
 const AcceptancePanel = lazy(() => import('./components/AcceptancePanel').then(m => ({ default: m.AcceptancePanel })));
 const MetaAgentPanel = lazy(() => import('./components/MetaAgentPanel').then(m => ({ default: m.MetaAgentPanel })));
 const SessionManager = lazy(() => import('./components/SessionManager').then(m => ({ default: m.SessionManager })));
@@ -325,6 +326,12 @@ export function App() {
           return (
             <ErrorBoundary key="guide">
               <GuidePage />
+            </ErrorBoundary>
+          );
+        case 'evolution':
+          return (
+            <ErrorBoundary key="evolution">
+              <EvolutionPage />
             </ErrorBoundary>
           );
         case 'projects':
