@@ -312,7 +312,7 @@ export class EvolutionMutator {
   - Tests: ${ctx.fitness.passedTests}/${ctx.fitness.totalTests} (${(ctx.fitness.testPassRate * 100).toFixed(1)}%)
   - Coverage: ${ctx.fitness.statementCoverage.toFixed(1)}%
 - **Max files to change**: ${ctx.maxFiles}
-- **Source root**: AgentForge (Electron + React + TypeScript desktop app)`);
+- **Source root**: AutoMater (Electron + React + TypeScript desktop app)`);
 
     // 2. Evolution memory
     if (ctx.memories.length > 0) {
@@ -538,9 +538,9 @@ Output the COMPLETE modified file content.`,
 Output the COMPLETE modified file content.`,
 };
 
-const MUTATION_SYSTEM_PROMPT = `You are an AI evolution agent tasked with improving the AgentForge codebase.
+const MUTATION_SYSTEM_PROMPT = `You are an AI evolution agent tasked with improving the AutoMater codebase.
 
-AgentForge is an Electron + React + TypeScript desktop application that coordinates AI agent teams for software development.
+AutoMater is an Electron + React + TypeScript desktop application that coordinates AI agent teams for software development.
 
 ## Your Role
 You analyze the current codebase, fitness metrics, and evolution memory to propose specific, targeted code modifications that will improve the system.

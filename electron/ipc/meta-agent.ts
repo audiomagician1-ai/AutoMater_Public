@@ -1042,17 +1042,17 @@ function getEvolutionEngine(): SelfEvolutionEngine {
   if (!_evolutionEngine) {
     // 从 __dirname (dist-electron/ipc/) 推断源码根目录
     // 开发模式: electron/ipc/ → 项目根
-    const candidates = [path.resolve(__dirname, '..', '..'), process.env.AGENTFORGE_SOURCE_ROOT || ''].filter(Boolean);
+    const candidates = [path.resolve(__dirname, '..', '..'), process.env.AUTOMATER_SOURCE_ROOT || ''].filter(Boolean);
 
     let sourceRoot = '';
     for (const c of candidates) {
-      if (SelfEvolutionEngine.isAgentForgeRoot(c)) {
+      if (SelfEvolutionEngine.isAutoMaterRoot(c)) {
         sourceRoot = c;
         break;
       }
     }
     if (!sourceRoot) {
-      throw new Error('无法定位 AgentForge 源码根目录。请设置 AGENTFORGE_SOURCE_ROOT 环境变量。');
+      throw new Error('无法定位 AutoMater 源码根目录。请设置 AUTOMATER_SOURCE_ROOT 环境变量。');
     }
     _evolutionEngine = new SelfEvolutionEngine({ sourceRoot });
     log.info(`Evolution engine initialized: ${sourceRoot}`);

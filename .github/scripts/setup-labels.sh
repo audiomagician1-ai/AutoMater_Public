@@ -4,7 +4,7 @@
 # 或在 PowerShell 中: 见下方 PowerShell 版本
 
 OWNER="${GITHUB_OWNER:-your-org}"
-REPO="${GITHUB_REPO:-AgentForge}"
+REPO="${GITHUB_REPO:-AutoMater}"
 
 # ============ 类型标签 ============
 declare -A TYPE_LABELS=(

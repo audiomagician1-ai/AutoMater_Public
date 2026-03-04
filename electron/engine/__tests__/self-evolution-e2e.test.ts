@@ -40,7 +40,7 @@ let tmpDir: string;
 function createTmpProject(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'evo-e2e-'));
 
-  // Create AgentForge marker structure so isAgentForgeRoot passes
+  // Create AutoMater marker structure so isAutoMaterRoot passes
   fs.mkdirSync(path.join(dir, 'electron', 'engine'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });

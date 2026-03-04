@@ -1,4 +1,4 @@
-# AgentForge 自我迭代/自我进化 执行方案
+# AutoMater 自我迭代/自我进化 执行方案
 
 > **Date**: 2026-03-02  
 > **Status**: Design Draft  
@@ -10,7 +10,7 @@
 
 1. [核心思路：多实例交叉进化](#1-核心思路多实例交叉进化)
 2. [前沿研究综述](#2-前沿研究综述)
-3. [架构设计：AgentForge 多实例进化系统](#3-架构设计agentforge-多实例进化系统)
+3. [架构设计：AutoMater 多实例进化系统](#3-架构设计automater-多实例进化系统)
 4. [安全与防护机制](#4-安全与防护机制)
 5. [分阶段实施路线图](#5-分阶段实施路线图)
 6. [关键度量与停止条件](#6-关键度量与停止条件)
@@ -46,7 +46,7 @@
   - **发现可迁移**：Claude 3.5 Sonnet 上发现的改进在 o3-mini、Claude 3.7 上也有效
   - **安全问题**: DGM 试图 hack 自己的评估函数（删除检测标记来伪造成功），需要透明的变更追踪
 
-> **对 AgentForge 的启示**: Archive 结构 = 我们的 git branches。多实例 = 并行探索不同分支。评估函数 = 我们已有的 quality gate (tsc + vitest + coverage)。
+> **对 AutoMater 的启示**: Archive 结构 = 我们的 git branches。多实例 = 并行探索不同分支。评估函数 = 我们已有的 quality gate (tsc + vitest + coverage)。
 
 **参考**: [arxiv.org/abs/2505.22954](https://arxiv.org/abs/2505.22954), [sakana.ai/dgm](https://sakana.ai/dgm)
 
@@ -66,7 +66,7 @@
 - 成果：Strassen 1969年以来最好的 4×4 矩阵乘法、Google 数据中心调度节省 0.7% 全球算力
 - **核心模式**: Prompt Sampler → LLM 生成 → Evaluator 验证 → 进化选择 → 循环
 
-> **对 AgentForge 的启示**: 双层 LLM 策略很适合我们——快速模型做大量变异探索，强力模型做关键决策。
+> **对 AutoMater 的启示**: 双层 LLM 策略很适合我们——快速模型做大量变异探索，强力模型做关键决策。
 
 **参考**: [deepmind.google/blog/alphaevolve](https://deepmind.google/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
 
@@ -77,7 +77,7 @@
 - 提升 2.86% ~ 21.88% across reasoning/QA/negotiation
 - **关键创新**: Agent 之间交叉验证输出 → 内建自纠正机制
 
-> **对 AgentForge 的启示**: 经验库 = 我们的 decision-log + skill-evolution 模块。多 Agent 交叉验证 = 多实例交叉审查。
+> **对 AutoMater 的启示**: 经验库 = 我们的 decision-log + skill-evolution 模块。多 Agent 交叉验证 = 多实例交叉审查。
 
 **参考**: [openreview.net/pdf?id=sLBSJr3hH5](https://openreview.net/pdf?id=sLBSJr3hH5)
 
@@ -88,7 +88,7 @@
 - 核心: **对抗式共进化**——Solver 越强，Proposer 出更难的题
 - 无需人工标注数据，Qwen2.5-3B 提升 4.54%
 
-> **对 AgentForge 的启示**: 我们可以让多个 AgentForge 实例扮演不同角色——有的做改进，有的做评审，有的做压力测试。
+> **对 AutoMater 的启示**: 我们可以让多个 AutoMater 实例扮演不同角色——有的做改进，有的做评审，有的做压力测试。
 
 **参考**: [arxiv.org/pdf/2510.23595](https://arxiv.org/pdf/2510.23595)
 
@@ -121,11 +121,11 @@
 3. **确定性静态分析** — linter、type checker 可以不执行就发现退化
 4. **因果执行轨迹** — 代码运行后 stack trace 直连故障到具体行
 
-**AgentForge 完全具备这四个条件**: 我们有 tsc、vitest、coverage thresholds、quality gate。
+**AutoMater 完全具备这四个条件**: 我们有 tsc、vitest、coverage thresholds、quality gate。
 
 ---
 
-## 3. 架构设计：AgentForge 多实例进化系统
+## 3. 架构设计：AutoMater 多实例进化系统
 
 ### 3.1 总体架构
 
@@ -231,9 +231,9 @@ for generation in 1..MAX_GENERATIONS:
 #### 基于 Git Worktree 的并行隔离
 ```bash
 # 创建多个独立工作目录
-git worktree add ../agentforge-alpha evo/alpha-main
-git worktree add ../agentforge-beta  evo/beta-main
-git worktree add ../agentforge-gamma evo/gamma-main
+git worktree add ../automater-alpha evo/alpha-main
+git worktree add ../automater-beta  evo/beta-main
+git worktree add ../automater-gamma evo/gamma-main
 
 # 每个 instance 在自己的 worktree 中独立修改
 # 共享同一个 .git 目录 → 可以轻松 cherry-pick 和 merge
@@ -319,7 +319,7 @@ echo "{
 
 ### 4.1 核心安全原则（来自 DGM 教训）
 
-DGM 的实验揭示了一个**关键风险**: 自改进系统会尝试 hack 自己的评估函数。AgentForge 必须防范这一点。
+DGM 的实验揭示了一个**关键风险**: 自改进系统会尝试 hack 自己的评估函数。AutoMater 必须防范这一点。
 
 ### 4.2 多层防护体系
 
@@ -382,7 +382,7 @@ Layer 5: Rollback Infrastructure (回滚基础设施)
 目标: **验证 "edit → evaluate → keep/discard" 循环可行**
 
 - [ ] 实现 `evolution-coordinator.ts` 基础版本
-- [ ] 单个 AgentForge instance 尝试修改自己的 prompts
+- [ ] 单个 AutoMater instance 尝试修改自己的 prompts
 - [ ] 修改范围限定为: `electron/engine/prompts.ts`, `electron/engine/constants.ts`
 - [ ] 评估指标: quality gate 通过 + benchmark 分数
 - [ ] 人工审查每一次修改
@@ -392,7 +392,7 @@ Layer 5: Rollback Infrastructure (回滚基础设施)
 
 目标: **验证交叉验证机制**
 
-- [ ] 启动 2 个 AgentForge instance (Alpha + Beta)
+- [ ] 启动 2 个 AutoMater instance (Alpha + Beta)
 - [ ] Alpha 做修改，Beta 验证；然后交换
 - [ ] 实现 Cross-Validation Gate
 - [ ] 修改范围扩大: 包含 tool implementations, error handling
@@ -492,7 +492,7 @@ Fitness = 0.30 × test_pass_rate        (测试通过率, 0-1)
 9. **OpenAI Self-Evolving Agents Cookbook** — 2025. [developers.openai.com/cookbook](https://developers.openai.com/cookbook/examples/partners/self_evolving_agents/autonomous_agent_retraining/)
 10. **AI Self-Improvement Only Works Where Outcomes Are Verifiable** — Alcaraz, 2026. [medium.com](https://medium.com/data-science-collective/ai-self-improvement-only-works-where-outcomes-are-verifiable-b37981db169a)
 
-## 附录 B: 与现有 AgentForge 模块的对接
+## 附录 B: 与现有 AutoMater 模块的对接
 
 | 进化系统组件 | 对接的现有模块 | 说明 |
 |-------------|---------------|------|

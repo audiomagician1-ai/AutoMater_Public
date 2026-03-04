@@ -584,7 +584,7 @@ const jinaProvider: ISearchProvider = {
     const url = `https://s.jina.ai/${encodeURIComponent(query)}`;
     const headers: Record<string, string> = {
       Accept: 'text/plain',
-      'User-Agent': 'agentforge/8.0',
+      'User-Agent': 'automater/8.0',
       'X-Retain-Images': 'none',
     };
     if (cfg.jinaApiKey) {
@@ -1017,7 +1017,7 @@ export async function readUrl(url: string, maxLength: number = 20000): Promise<R
         method: 'GET',
         headers: {
           Accept: 'text/plain',
-          'User-Agent': 'agentforge/8.0',
+          'User-Agent': 'automater/8.0',
           'X-Retain-Images': 'none',
           'X-Timeout': '15',
           Authorization: `Bearer ${_config.jinaApiKey}`,

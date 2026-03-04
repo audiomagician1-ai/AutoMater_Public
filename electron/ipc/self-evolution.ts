@@ -62,16 +62,16 @@ let engine: SelfEvolutionEngine | null = null;
 let lastBaselineFitness: FitnessResult | null = null;
 
 /**
- * 获取 AgentForge 源码根目录
+ * 获取 AutoMater 源码根目录
  * 策略:
- *  1. 环境变量 AGENTFORGE_SOURCE_ROOT
+ *  1. 环境变量 AUTOMATER_SOURCE_ROOT
  *  2. 检测常见已知路径
  *  3. 从 app.getAppPath() 推断
  */
 function resolveSourceRoot(): string {
   // 1. 环境变量
-  if (process.env.AGENTFORGE_SOURCE_ROOT) {
-    return process.env.AGENTFORGE_SOURCE_ROOT;
+  if (process.env.AUTOMATER_SOURCE_ROOT) {
+    return process.env.AUTOMATER_SOURCE_ROOT;
   }
 
   // 2. 已知开发路径 (开发模式)
@@ -81,13 +81,13 @@ function resolveSourceRoot(): string {
   ];
 
   for (const p of knownPaths) {
-    if (SelfEvolutionEngine.isAgentForgeRoot(p)) {
+    if (SelfEvolutionEngine.isAutoMaterRoot(p)) {
       return p;
     }
   }
 
   // 3. 打包后无法自我修改
-  throw new Error('Cannot resolve AgentForge source root. Set AGENTFORGE_SOURCE_ROOT env var.');
+  throw new Error('Cannot resolve AutoMater source root. Set AUTOMATER_SOURCE_ROOT env var.');
 }
 
 function getOrCreateEngine(): SelfEvolutionEngine {

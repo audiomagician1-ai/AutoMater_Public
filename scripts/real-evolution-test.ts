@@ -1,7 +1,7 @@
 /**
  * 真实环境集成测试 — 自我进化引擎
  *
- * ⚠️ 此测试在 AgentForge 真实仓库上运行，会:
+ * ⚠️ 此测试在 AutoMater 真实仓库上运行，会:
  *   - 创建/删除 git 分支
  *   - 修改/恢复文件
  *   - 运行真实的 tsc 和 vitest
@@ -118,7 +118,7 @@ describe('Real Evolution Engine Integration', { timeout: 600_000 }, () => {
 
   beforeAll(() => {
     // 前置条件检查
-    expect(SelfEvolutionEngine.isAgentForgeRoot(SOURCE_ROOT)).toBe(true);
+    expect(SelfEvolutionEngine.isAutoMaterRoot(SOURCE_ROOT)).toBe(true);
     expect(getCurrentBranch()).toBe(ORIGINAL_BRANCH);
     expect(isClean()).toBe(true);
     headBefore = getHead();

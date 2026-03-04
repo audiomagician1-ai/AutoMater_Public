@@ -254,12 +254,12 @@ describe('SafeGitOps', () => {
 // ═══════════════════════════════════════
 
 describe('SelfEvolutionEngine', () => {
-  it('should detect AgentForge root correctly', () => {
+  it('should detect AutoMater root correctly', () => {
     const tmpRoot = createTmpDir();
     tmpDir = tmpRoot;
 
-    // Not an AgentForge root
-    expect(SelfEvolutionEngine.isAgentForgeRoot(tmpRoot)).toBe(false);
+    // Not an AutoMater root
+    expect(SelfEvolutionEngine.isAutoMaterRoot(tmpRoot)).toBe(false);
 
     // Create marker files
     fs.mkdirSync(path.join(tmpRoot, 'electron', 'engine'), { recursive: true });
@@ -270,7 +270,7 @@ describe('SelfEvolutionEngine', () => {
     fs.writeFileSync(path.join(tmpRoot, 'electron', 'engine', 'orchestrator.ts'), '');
     fs.writeFileSync(path.join(tmpRoot, 'src', 'App.tsx'), '');
 
-    expect(SelfEvolutionEngine.isAgentForgeRoot(tmpRoot)).toBe(true);
+    expect(SelfEvolutionEngine.isAutoMaterRoot(tmpRoot)).toBe(true);
   });
 
   it('should read version from package.json', () => {

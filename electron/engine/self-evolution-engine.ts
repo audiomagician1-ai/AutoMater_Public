@@ -1,7 +1,7 @@
 /**
  * Self-Evolution Engine — 自我迭代基础设施 (Phase 0)
  *
- * 实现 AgentForge 自我修改源代码的安全基础设施:
+ * 实现 AutoMater 自我修改源代码的安全基础设施:
  *
  *  1. SafeGitOps        — 安全 git 操作 (分支、提交、回滚、diff)
  *  2. ImmutableGuard     — 不可变文件保护 (SHA256 hash 校验)
@@ -32,7 +32,7 @@ const log = createLogger('self-evolution');
 // ═══════════════════════════════════════
 
 export interface EvolutionConfig {
-  /** AgentForge 源码根目录 */
+  /** AutoMater 源码根目录 */
   sourceRoot: string;
   /** 基线分支 (默认 'self-evolution') */
   baseBranch: string;
@@ -979,10 +979,10 @@ export class SelfEvolutionEngine {
   // ── Static Utilities ──
 
   /**
-   * 检查一个目录是否是 AgentForge 源码根目录
+   * 检查一个目录是否是 AutoMater 源码根目录
    * (通过检查标志文件)
    */
-  static isAgentForgeRoot(dir: string): boolean {
+  static isAutoMaterRoot(dir: string): boolean {
     const markers = [
       'package.json',
       'electron/main.ts',
