@@ -326,6 +326,12 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (workspacePath) cleanupDecisionLog(workspacePath); // v5.5: 清理过期决策日志
   cleanExpiredLocks(); // v6.1 (构想A): 清理僵尸文件锁
 
+  // v29.1: 清理上一轮残留的 idle agents — 避免团队页面堆积大量不必要的虚拟员工
+  // 保留有统计数据的 agent（累计 token/cost > 0），只清理从未工作过的残留行
+  db.prepare(
+    "DELETE FROM agents WHERE project_id = ? AND status = 'idle' AND total_input_tokens = 0 AND total_output_tokens = 0 AND total_cost_usd = 0",
+  ).run(projectId);
+
   // v22.0: 从全局经验库注入相关经验到项目
   if (workspacePath && project.wish) {
     try {
@@ -697,7 +703,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status != 'arch_node'")
       .get(projectId) as CountResult
   ).c;
-  const maxWorkers = settings.workerCount > 0 ? settings.workerCount : featureCount;
+  // v29.1: workerCount=0 时默认上限 3 (非 featureCount)
+  // 原逻辑：为每个 Feature 创建一个 Developer Worker → 20个feature=20个worker=20个LLM并发
+  // 修复：合理默认值，避免创建大量不必要的虚拟员工
+  const DEFAULT_MAX_WORKERS = 3;
+  const maxWorkers = settings.workerCount > 0 ? settings.workerCount : DEFAULT_MAX_WORKERS;
   const workerCount = Math.min(maxWorkers, featureCount);
 
   const qaId = 'qa-0'; // 固定 ID: 复用同一 QA Agent

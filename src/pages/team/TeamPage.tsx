@@ -438,10 +438,17 @@ export function TeamPage() {
           {/* ── 左侧: 成员列表 (合并活跃 agent + 全部 members 兜底) ── */}
           <div className="w-56 shrink-0 border-r border-slate-800 bg-slate-950 overflow-y-auto p-2 space-y-1.5">
             {(() => {
-              // 以 agents (含运行状态) 为主，补充 members 中未出现的成员
-              const agentIds = new Set(agents.map(a => a.id));
+              // v29.1: 合并 agents + members，过滤掉无意义的 idle agents
+              // 只展示: (1) 正在工作的 agent, (2) 有统计数据的 agent, (3) team_members 中的配置成员
+              const meaningfulAgents = agents.filter(
+                a =>
+                  a.status === 'working' ||
+                  (a as unknown as Record<string, number>).total_input_tokens > 0 ||
+                  (a as unknown as Record<string, number>).total_cost_usd > 0,
+              );
+              const agentIds = new Set(meaningfulAgents.map(a => a.id));
               const merged: (TeamMember & { status?: string; current_task?: string })[] = [
-                ...agents,
+                ...meaningfulAgents,
                 ...members
                   .filter(m => !agentIds.has(m.id))
                   .map(m => ({ ...m, status: 'idle' as const, current_task: undefined })),
