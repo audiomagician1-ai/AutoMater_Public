@@ -20,8 +20,11 @@ const log = createLogger('orchestrator');
 import { getSettings, sleep, validateModel } from './llm-client';
 import { sendToUI, notify } from './ui-bridge';
 import {
-  registerOrchestrator, unregisterOrchestrator, isOrchestratorRunning,
-  spawnAgent, getTeamMemberLLMConfig,
+  registerOrchestrator,
+  unregisterOrchestrator,
+  isOrchestratorRunning,
+  spawnAgent,
+  getTeamMemberLLMConfig,
 } from './agent-manager';
 import { gateArchitectToDeveloper } from './guards';
 import { commitWorkspace } from './workspace-git';
@@ -36,16 +39,20 @@ import type { GitProviderConfig } from './git-provider';
 
 // ── Phase modules (all logic extracted) ──
 import {
-  phasePMAnalysis, phaseIncrementalPM, phasePMAcceptance,
+  phasePMAnalysis,
+  phaseIncrementalPM,
+  phasePMAcceptance,
   phaseArchitect,
-  phaseReqsAndTestSpecs, phaseIncrementalDocSync,
+  phaseReqsAndTestSpecs,
+  phaseIncrementalDocSync,
   workerLoop,
-    phaseDeployPipeline,
+  type WorkerLoopOptions,
+  phaseDeployPipeline,
   phaseFinalize,
   phaseEnvironmentBootstrap,
 } from './phases';
 import { WorkflowEngine, PRESET_FULL_DEVELOPMENT } from './workflow-engine';
-import type { PMPhaseResult } from './types';
+import type { PMPhaseResult, TeamMemberRow } from './types';
 
 // ═══════════════════════════════════════
 // Workflow Preset Resolver
@@ -54,7 +61,8 @@ import type { PMPhaseResult } from './types';
 /** 获取项目当前激活的工作流阶段配置。没有选择时回退到完整开发流程。 */
 function getActiveWorkflow(projectId: string): WorkflowStage[] {
   const db = getDb();
-  const row = db.prepare('SELECT stages FROM workflow_presets WHERE project_id = ? AND is_active = 1')
+  const row = db
+    .prepare('SELECT stages FROM workflow_presets WHERE project_id = ? AND is_active = 1')
     .get(projectId) as { stages: string } | undefined;
 
   if (!row) return PRESET_FULL_DEVELOPMENT;
@@ -62,7 +70,8 @@ function getActiveWorkflow(projectId: string): WorkflowStage[] {
   try {
     const stages: WorkflowStage[] = JSON.parse(row.stages);
     return stages;
-  } catch { /* silent: stages JSON parse — use default pipeline */
+  } catch {
+    /* silent: stages JSON parse — use default pipeline */
     return PRESET_FULL_DEVELOPMENT;
   }
 }
@@ -88,14 +97,20 @@ function _resolveMemberModel(projectId: string, role: string, settings: AppSetti
 
 export { stopOrchestrator } from './agent-manager';
 export { getAgentReactStates, getContextSnapshots } from './react-loop';
-export type { AgentReactState, ReactIterationState, MessageTokenBreakdown, GenericReactConfig, GenericReactResult } from './react-loop';
+export type {
+  AgentReactState,
+  ReactIterationState,
+  MessageTokenBreakdown,
+  GenericReactConfig,
+  GenericReactResult,
+} from './react-loop';
 
 // ═══════════════════════════════════════
 // Hot-Join: 运行中的 Worker Pool 上下文
 // ═══════════════════════════════════════
 
 /** 每个 developing 项目的热加入上下文 */
-interface HotJoinContext {
+export interface HotJoinContext {
   projectId: string;
   qaId: string;
   settings: AppSettings;
@@ -112,6 +127,14 @@ interface HotJoinContext {
 
 /** 活跃的热加入上下文表 (projectId → HotJoinContext) */
 const hotJoinContexts = new Map<string, HotJoinContext>();
+
+/**
+ * v28.0: 导出 hot-join 上下文访问器 — 供 session-scheduler 使用
+ * 允许 scheduler 通过 orchestrator 的运行上下文启动真正的 workerLoop
+ */
+export function getHotJoinContext(projectId: string): HotJoinContext | undefined {
+  return hotJoinContexts.get(projectId);
+}
 
 /**
  * 注册热加入上下文 — 在进入 developing 阶段时调用。
@@ -143,59 +166,78 @@ export function ensureHotJoinListener() {
   if (hotJoinListenerRegistered) return;
   hotJoinListenerRegistered = true;
 
-  orchestratorBus.on('team:member-added', (payload: { projectId: string; memberId: string; role: string; name: string }) => {
-    const { projectId, memberId, role, name } = payload;
+  orchestratorBus.on(
+    'team:member-added',
+    (payload: { projectId: string; memberId: string; role: string; name: string }) => {
+      const { projectId, memberId, role, name } = payload;
 
-    // 只对 developer 角色做热加入 spawn
-    if (role !== 'developer') {
-      log.debug(`Hot-join: ignoring non-developer role "${role}" for project ${projectId}`);
-      return;
-    }
+      // 只对 developer 角色做热加入 spawn
+      if (role !== 'developer') {
+        log.debug(`Hot-join: ignoring non-developer role "${role}" for project ${projectId}`);
+        return;
+      }
 
-    const ctx = hotJoinContexts.get(projectId);
-    if (!ctx) {
-      log.debug(`Hot-join: no active developing context for project ${projectId}`);
-      return;
-    }
+      const ctx = hotJoinContexts.get(projectId);
+      if (!ctx) {
+        log.debug(`Hot-join: no active developing context for project ${projectId}`);
+        return;
+      }
 
-    if (ctx.signal.aborted) {
-      log.debug(`Hot-join: orchestrator already aborted for project ${projectId}`);
-      return;
-    }
+      if (ctx.signal.aborted) {
+        log.debug(`Hot-join: orchestrator already aborted for project ${projectId}`);
+        return;
+      }
 
-    // 验证项目确实在 developing 阶段
-    const db = getDb();
-    const project = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string } | undefined;
-    if (project?.status !== 'developing') {
-      log.debug(`Hot-join: project ${projectId} not in developing phase (status=${project?.status})`);
-      return;
-    }
+      // 验证项目确实在 developing 阶段
+      const db = getDb();
+      const project = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as
+        | { status: string }
+        | undefined;
+      if (project?.status !== 'developing') {
+        log.debug(`Hot-join: project ${projectId} not in developing phase (status=${project?.status})`);
+        return;
+      }
 
-    // 分配 worker ID
-    ctx.nextWorkerSeq += 1;
-    const workerId = `dev-hot-${ctx.nextWorkerSeq}`;
+      // 分配 worker ID
+      ctx.nextWorkerSeq += 1;
+      const workerId = `dev-hot-${ctx.nextWorkerSeq}`;
 
-    log.info(`Hot-join: spawning new worker "${workerId}" for project ${projectId} (member: ${name} [${memberId}])`);
-    sendToUI(ctx.win, 'agent:log', {
-      projectId,
-      agentId: 'system',
-      content: `🔥 热加入: "${name}" 已上线为 ${workerId}，立即投入开发`,
-    });
+      log.info(`Hot-join: spawning new worker "${workerId}" for project ${projectId} (member: ${name} [${memberId}])`);
+      sendToUI(ctx.win, 'agent:log', {
+        projectId,
+        agentId: 'system',
+        content: `🔥 热加入: "${name}" 已上线为 ${workerId}，立即投入开发`,
+      });
 
-    spawnAgent(projectId, workerId, 'developer', ctx.win);
-    db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
+      spawnAgent(projectId, workerId, 'developer', ctx.win);
+      db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
 
-    // 启动 workerLoop — 它会自动从 lockNextFeature 领取任务
-    const promise = workerLoop(
-      projectId, workerId, ctx.qaId, ctx.settings, ctx.win, ctx.signal,
-      ctx.workspacePath, ctx.gitConfig, ctx.permissions,
-    );
-    ctx.workerPromises.add(promise);
-    // 当 workerLoop 结束（正常完成或异常），从集合中移除
-    promise.finally(() => {
-      ctx.workerPromises.delete(promise);
-    });
-  });
+      // v28.0: 查询 member 信息用于 session 生命周期管理
+      const memberRow = db
+        .prepare('SELECT * FROM team_members WHERE id = ? AND project_id = ?')
+        .get(memberId, projectId) as TeamMemberRow | undefined;
+      const hotJoinOpts: WorkerLoopOptions | undefined = memberRow ? { member: memberRow } : undefined;
+
+      // 启动 workerLoop — 它会自动从 lockNextFeature 领取任务
+      const promise = workerLoop(
+        projectId,
+        workerId,
+        ctx.qaId,
+        ctx.settings,
+        ctx.win,
+        ctx.signal,
+        ctx.workspacePath,
+        ctx.gitConfig,
+        ctx.permissions,
+        hotJoinOpts,
+      );
+      ctx.workerPromises.add(promise);
+      // 当 workerLoop 结束（正常完成或异常），从集合中移除
+      promise.finally(() => {
+        ctx.workerPromises.delete(promise);
+      });
+    },
+  );
 }
 
 // ═══════════════════════════════════════
@@ -207,7 +249,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (isOrchestratorRunning(projectId)) {
     log.warn(`Orchestrator already running for ${projectId}, ignoring duplicate call`);
     sendToUI(win, 'agent:log', {
-      projectId, agentId: 'system',
+      projectId,
+      agentId: 'system',
       content: '⚠️ 编排器已在运行中，忽略重复启动请求',
     });
     return;
@@ -229,7 +272,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   // ── v5.6: Pre-flight 模型可用性预检 ──
   {
     sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '🔍 预检: 验证 LLM 模型可用性...' });
-    const modelsToCheck = [...new Set([settings.strongModel, settings.workerModel, settings.fastModel].filter((m): m is string => Boolean(m)))];
+    const modelsToCheck = [
+      ...new Set(
+        [settings.strongModel, settings.workerModel, settings.fastModel].filter((m): m is string => Boolean(m)),
+      ),
+    ];
     const errors: string[] = [];
     for (const m of modelsToCheck) {
       const err = await validateModel(settings, m);
@@ -270,7 +317,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         shellExec: cfg.permissions.shellExec === true,
       };
     }
-  } catch { /* config parse error — use defaults (all denied) */ }
+  } catch {
+    /* config parse error — use defaults (all denied) */
+  }
 
   ensureGlobalMemory();
   if (workspacePath) ensureProjectMemory(workspacePath);
@@ -284,9 +333,15 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       const tags = inferTags(project.wish);
       const injected = injectGlobalExperience(workspacePath, tags);
       if (injected > 0) {
-        sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `📚 已从全局经验库注入 ${injected} 条相关经验` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: 'system',
+          content: `📚 已从全局经验库注入 ${injected} 条相关经验`,
+        });
       }
-    } catch { /* silent: non-critical path */ }
+    } catch {
+      /* silent: non-critical path */
+    }
   }
 
   // ═══════════════════════════════════════
@@ -294,7 +349,10 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   // ═══════════════════════════════════════
   if (workspacePath && !signal.aborted) {
     await phaseEnvironmentBootstrap(projectId, settings, win, signal, workspacePath);
-    if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+    if (signal.aborted) {
+      unregisterOrchestrator(projectId);
+      return;
+    }
   }
 
   // v11.0: 成员级模型解析器 — 按角色返回该成员实际使用的 LLM 模型名
@@ -303,11 +361,15 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   };
 
   emitEvent({
-    projectId, agentId: 'system', type: 'project:start',
+    projectId,
+    agentId: 'system',
+    type: 'project:start',
     data: { wish: project.wish, name: project.name, workspace: workspacePath },
   });
 
-  const existingFeatures = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ?").get(projectId) as CountResult;
+  const existingFeatures = db
+    .prepare('SELECT COUNT(*) as c FROM features WHERE project_id = ?')
+    .get(projectId) as CountResult;
   const isResume = existingFeatures.c > 0;
 
   // v12.0: 解析项目激活的工作流预设 — 决定执行哪些阶段
@@ -320,14 +382,17 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // ═══════════════════════════════════════
 
     // v23.0: 检查是否有需求待分析 — 无需求时跳过 PM 分析, 避免浪费 token
-    const pendingWishCount = (db.prepare(
-      "SELECT COUNT(*) as c FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing')"
-    ).get(projectId) as CountResult).c;
-    const hasWishContent = !!(project.wish?.trim()) || pendingWishCount > 0;
+    const pendingWishCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing')")
+        .get(projectId) as CountResult
+    ).c;
+    const hasWishContent = !!project.wish?.trim() || pendingWishCount > 0;
 
     if (!hasWishContent) {
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: 'ℹ️ 无待分析的需求, 跳过所有阶段。请先添加需求后再启动。',
       });
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
@@ -335,43 +400,55 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       unregisterOrchestrator(projectId);
       return;
     } else {
-    // v13.1: 将 wishes 表中所有 pending/developing 的需求标记为 analyzing
-    db.prepare(
-      "UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE project_id = ? AND status IN ('pending', 'developing')"
-    ).run(projectId);
-
-    // PM 分析 (pm_analysis or pm_triage)
-    if (hasStage(workflowStages, 'pm_analysis')) {
-      const pmResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
-      if (!pmResult?.features || signal.aborted) { unregisterOrchestrator(projectId); return; }
-      const features = pmResult.features;
-
-      // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
+      // v13.1: 将 wishes 表中所有 pending/developing 的需求标记为 analyzing
       db.prepare(
-        "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'"
+        "UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE project_id = ? AND status IN ('pending', 'developing')",
       ).run(projectId);
 
-      // 架构设计 (architect)
-      if (hasStage(workflowStages, 'architect')) {
-        await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
-        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-      }
+      // PM 分析 (pm_analysis or pm_triage)
+      if (hasStage(workflowStages, 'pm_analysis')) {
+        const pmResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
+        if (!pmResult?.features || signal.aborted) {
+          unregisterOrchestrator(projectId);
+          return;
+        }
+        const features = pmResult.features;
 
-      // 文档生成 (docs_gen)
-      if (hasStage(workflowStages, 'docs_gen') && workspacePath) {
-        await phaseReqsAndTestSpecs(projectId, features, settings, win, signal, workspacePath);
-        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
-      }
-    } else if (hasStage(workflowStages, 'pm_triage')) {
-      // 快速迭代模式: 只做分诊, 跳过架构和文档
-      const pmTriageResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
-      if (!pmTriageResult?.features || signal.aborted) { unregisterOrchestrator(projectId); return; }
+        // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
+        db.prepare(
+          "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'",
+        ).run(projectId);
 
-      // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
-      db.prepare(
-        "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'"
-      ).run(projectId);
-    }
+        // 架构设计 (architect)
+        if (hasStage(workflowStages, 'architect')) {
+          await phaseArchitect(projectId, project, features, settings, win, signal, workspacePath);
+          if (signal.aborted) {
+            unregisterOrchestrator(projectId);
+            return;
+          }
+        }
+
+        // 文档生成 (docs_gen)
+        if (hasStage(workflowStages, 'docs_gen') && workspacePath) {
+          await phaseReqsAndTestSpecs(projectId, features, settings, win, signal, workspacePath);
+          if (signal.aborted) {
+            unregisterOrchestrator(projectId);
+            return;
+          }
+        }
+      } else if (hasStage(workflowStages, 'pm_triage')) {
+        // 快速迭代模式: 只做分诊, 跳过架构和文档
+        const pmTriageResult = await phasePMAnalysis(projectId, project, settings, win, signal, permissions);
+        if (!pmTriageResult?.features || signal.aborted) {
+          unregisterOrchestrator(projectId);
+          return;
+        }
+
+        // v13.1: PM 分析完成 → 标记 wishes 为 analyzed
+        db.prepare(
+          "UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE project_id = ? AND status = 'analyzing'",
+        ).run(projectId);
+      }
     } // end hasWishContent
   } else {
     // ═══════════════════════════════════════
@@ -380,9 +457,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     // ── v5.6: Circuit Breaker — 检查上次失败原因是否仍然存在 ──
     {
-      const failedFeatures = db.prepare(
-        "SELECT id, last_error, last_error_at FROM features WHERE project_id = ? AND status = 'failed' AND last_error IS NOT NULL"
-      ).all(projectId) as Array<{ id: string; last_error: string; last_error_at: string }>;
+      const failedFeatures = db
+        .prepare(
+          "SELECT id, last_error, last_error_at FROM features WHERE project_id = ? AND status = 'failed' AND last_error IS NOT NULL",
+        )
+        .all(projectId) as Array<{ id: string; last_error: string; last_error_at: string }>;
 
       if (failedFeatures.length > 0) {
         // 检查是否全部都是不可重试错误
@@ -391,7 +470,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
           // 所有失败的 Feature 都是不可重试错误 → 不要盲目重跑
           const sampleError = nonRetryable[0].last_error;
           sendToUI(win, 'agent:log', {
-            projectId, agentId: 'system',
+            projectId,
+            agentId: 'system',
             content: `🔴 Circuit Breaker: ${nonRetryable.length} 个 Feature 因不可重试错误失败 (如模型不可用、API Key 无效)。\n示例: ${sampleError}\n请在设置中修正后重新启动。`,
           });
           sendToUI(win, 'agent:error', {
@@ -408,7 +488,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         // 有部分是不可重试的 → 清除可重试的 failed Feature 让它们重跑，不可重试的保持 failed
         if (nonRetryable.length > 0) {
           sendToUI(win, 'agent:log', {
-            projectId, agentId: 'system',
+            projectId,
+            agentId: 'system',
             content: `⚠️ ${nonRetryable.length} 个 Feature 因不可重试错误保持 failed 状态，${failedFeatures.length - nonRetryable.length} 个可重试 Feature 将重新执行`,
           });
         }
@@ -416,7 +497,7 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
       // 将可重试的 failed Feature 重置为 todo (不可重试的保持 failed)
       db.prepare(
-        "UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status = 'failed' AND (last_error IS NULL OR last_error NOT LIKE '%[NonRetryable:%')"
+        "UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status = 'failed' AND (last_error IS NULL OR last_error NOT LIKE '%[NonRetryable:%')",
       ).run(projectId);
     }
 
@@ -426,9 +507,11 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
 
     // v13.1: 从 wishes 表收集所有待处理的需求 (pending / developing)
     // 修复: 此前只读 projects.wish (单字段)，导致 wishes 表中待分析的需求被忽略
-    const pendingWishes = db.prepare(
-      "SELECT id, content FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing') ORDER BY created_at ASC"
-    ).all(projectId) as Array<{ id: string; content: string }>;
+    const pendingWishes = db
+      .prepare(
+        "SELECT id, content FROM wishes WHERE project_id = ? AND status IN ('pending', 'developing') ORDER BY created_at ASC",
+      )
+      .all(projectId) as Array<{ id: string; content: string }>;
 
     // 获取 projects.wish (可能被用户更新过)
     const freshProject = db.prepare('SELECT wish FROM projects WHERE id = ?').get(projectId) as { wish: string };
@@ -444,7 +527,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
       mergedWishContent = pendingWishes.map(w => w.content).join('\n\n---\n\n');
       pendingWishIds.push(...pendingWishes.map(w => w.id));
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: `📋 发现 ${pendingWishes.length} 个待处理需求, 纳入本轮分析`,
       });
     } else if (projectWish) {
@@ -456,14 +540,19 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     if (mergedWishContent) {
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — PM 检查新需求和隐式变更...' });
     } else {
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '♻️ 项目续跑 — 无新需求, 继续处理未完成的 Feature...' });
+      sendToUI(win, 'agent:log', {
+        projectId,
+        agentId: 'system',
+        content: '♻️ 项目续跑 — 无新需求, 继续处理未完成的 Feature...',
+      });
     }
 
     // 标记 wishes 为 analyzing
     if (pendingWishIds.length > 0) {
       const placeholders = pendingWishIds.map(() => '?').join(',');
-      db.prepare(`UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE id IN (${placeholders})`)
-        .run(...pendingWishIds);
+      db.prepare(
+        `UPDATE wishes SET status = 'analyzing', updated_at = datetime('now') WHERE id IN (${placeholders})`,
+      ).run(...pendingWishIds);
     }
 
     // 判断是否有新 wish 需要处理 (对比最近一次 wish 是否与现有 features 有偏差)
@@ -471,16 +560,18 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     let triage: WishTriageResult | null = null;
 
     if (workspacePath && mergedWishContent) {
-      triage = await detectImplicitChanges(
-        projectId, mergedWishContent, settings, win, signal, workspacePath,
-      );
-      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      triage = await detectImplicitChanges(projectId, mergedWishContent, settings, win, signal, workspacePath);
+      if (signal.aborted) {
+        unregisterOrchestrator(projectId);
+        return;
+      }
     }
 
     if (triage && triage.category !== 'pure_new' && triage.implicitChanges.length > 0) {
       // ── 检测到隐式变更: 先执行变更流程 ──
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: `🔀 检测到 ${triage.implicitChanges.length} 个隐式变更, 启动变更管理流程...`,
       });
 
@@ -489,28 +580,37 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         `用户新需求: ${mergedWishContent}`,
         '',
         '检测到的隐式变更:',
-        ...triage.implicitChanges.map(c =>
-          `- ${c.featureId} (${c.featureTitle}): ${c.changeDescription} [${c.severity}]`
+        ...triage.implicitChanges.map(
+          c => `- ${c.featureId} (${c.featureTitle}): ${c.changeDescription} [${c.severity}]`,
         ),
-        ...(triage.conflicts.length > 0 ? [
-          '',
-          '潜在冲突:',
-          ...triage.conflicts.map(c => `- ${c.description} (涉及: ${c.involvedFeatures.join(', ')})`),
-        ] : []),
+        ...(triage.conflicts.length > 0
+          ? [
+              '',
+              '潜在冲突:',
+              ...triage.conflicts.map(c => `- ${c.description} (涉及: ${c.involvedFeatures.join(', ')})`),
+            ]
+          : []),
       ].join('\n');
 
       // 创建变更请求记录
       const crId = `cr-auto-${Date.now().toString(36)}`;
-      db.prepare("INSERT INTO change_requests (id, project_id, description, status) VALUES (?, ?, ?, 'analyzing')")
-        .run(crId, projectId, changeDescription);
+      db.prepare("INSERT INTO change_requests (id, project_id, description, status) VALUES (?, ?, ?, 'analyzing')").run(
+        crId,
+        projectId,
+        changeDescription,
+      );
 
       // 执行级联更新
       const changeResult = await runChangeRequest(projectId, crId, changeDescription, win, signal);
-      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      if (signal.aborted) {
+        unregisterOrchestrator(projectId);
+        return;
+      }
 
       if (!changeResult.success) {
         sendToUI(win, 'agent:log', {
-          projectId, agentId: 'system',
+          projectId,
+          agentId: 'system',
           content: `⚠️ 变更管理流程未完全成功: ${changeResult.error}. 继续开发已有任务。`,
         });
       }
@@ -519,26 +619,40 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     if (triage && triage.newCapabilities.length > 0) {
       // ── 有新功能: 走 PM 增量分析 → 新增 Feature ──
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: `🆕 检测到 ${triage.newCapabilities.length} 个新功能, 启动增量 PM 分析...`,
       });
 
       const incResult = await phaseIncrementalPM(
-        projectId, project, triage.newCapabilities, settings, win, signal, workspacePath,
+        projectId,
+        project,
+        triage.newCapabilities,
+        settings,
+        win,
+        signal,
+        workspacePath,
       );
-      if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+      if (signal.aborted) {
+        unregisterOrchestrator(projectId);
+        return;
+      }
       const incrementalFeatures = incResult?.features ?? [];
 
       // 为新 Feature 生成子需求 + 测试规格
       if (incrementalFeatures.length > 0 && workspacePath) {
         await phaseReqsAndTestSpecs(projectId, incrementalFeatures, settings, win, signal, workspacePath);
-        if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+        if (signal.aborted) {
+          unregisterOrchestrator(projectId);
+          return;
+        }
       }
     }
 
     if (!triage || (triage.implicitChanges.length === 0 && triage.newCapabilities.length === 0)) {
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: '♻️ 无新需求或变更, 继续处理未完成的 Feature...',
       });
     }
@@ -546,8 +660,9 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     // v13.1: 更新 wishes 表状态 — 标记已处理的需求为 analyzed
     if (pendingWishIds.length > 0) {
       const placeholders = pendingWishIds.map(() => '?').join(',');
-      db.prepare(`UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE id IN (${placeholders})`)
-        .run(...pendingWishIds);
+      db.prepare(
+        `UPDATE wishes SET status = 'analyzed', updated_at = datetime('now') WHERE id IN (${placeholders})`,
+      ).run(...pendingWishIds);
       log.info(`Updated ${pendingWishIds.length} wishes to 'analyzed'`);
     }
   }
@@ -559,22 +674,33 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   if (!isResume) {
     const archGate = gateArchitectToDeveloper(workspacePath);
     if (!archGate.passed) {
-      sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: `⚠️ Architect→Developer 门控: ${archGate.reason} (继续但可能影响质量)` });
+      sendToUI(win, 'agent:log', {
+        projectId,
+        agentId: 'system',
+        content: `⚠️ Architect→Developer 门控: ${archGate.reason} (继续但可能影响质量)`,
+      });
     }
   }
 
   // ═══════════════════════════════════════
   // Phase 4a: Developer 实现 + QA 代码审查 (v5.0: 原 Phase 5)
   // ═══════════════════════════════════════
-  if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+  if (signal.aborted) {
+    unregisterOrchestrator(projectId);
+    return;
+  }
   db.prepare("UPDATE projects SET status = 'developing', updated_at = datetime('now') WHERE id = ?").run(projectId);
   sendToUI(win, 'project:status', { projectId, status: 'developing' });
 
-  const featureCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status != 'arch_node'").get(projectId) as CountResult).c;
+  const featureCount = (
+    db
+      .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status != 'arch_node'")
+      .get(projectId) as CountResult
+  ).c;
   const maxWorkers = settings.workerCount > 0 ? settings.workerCount : featureCount;
   const workerCount = Math.min(maxWorkers, featureCount);
 
-  const qaId = 'qa-0';  // 固定 ID: 复用同一 QA Agent
+  const qaId = 'qa-0'; // 固定 ID: 复用同一 QA Agent
   spawnAgent(projectId, qaId, 'qa', win);
   sendToUI(win, 'agent:log', { projectId, agentId: qaId, content: '🧪 QA 工程师就绪' });
   db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(qaId, projectId);
@@ -591,18 +717,43 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
   ensureHotJoinListener();
   const workerPromiseSet = new Set<Promise<void | PhaseResult>>();
   const hotJoinCtx: HotJoinContext = {
-    projectId, qaId, settings, win, signal, workspacePath, gitConfig,
+    projectId,
+    qaId,
+    settings,
+    win,
+    signal,
+    workspacePath,
+    gitConfig,
     workerPromises: workerPromiseSet,
-    nextWorkerSeq: workerCount,  // 从已有 worker 数量开始编号
+    nextWorkerSeq: workerCount, // 从已有 worker 数量开始编号
     permissions,
   };
   registerHotJoinContext(hotJoinCtx);
+
+  // v28.0: 查询 team_members 表中的 developer 成员，按索引匹配 worker
+  const developerMembers = db
+    .prepare("SELECT * FROM team_members WHERE project_id = ? AND role = 'developer' ORDER BY created_at ASC")
+    .all(projectId) as TeamMemberRow[];
 
   for (let i = 0; i < workerCount; i++) {
     const workerId = `dev-${i + 1}`;
     spawnAgent(projectId, workerId, 'developer', win);
     db.prepare("UPDATE agents SET status = 'idle' WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    const p = workerLoop(projectId, workerId, qaId, settings, win, signal, workspacePath, gitConfig, permissions);
+    // 传递 member 信息（如果 team_members 表有对应行）
+    const member = developerMembers[i] ?? undefined;
+    const workerOpts: WorkerLoopOptions | undefined = member ? { member } : undefined;
+    const p = workerLoop(
+      projectId,
+      workerId,
+      qaId,
+      settings,
+      win,
+      signal,
+      workspacePath,
+      gitConfig,
+      permissions,
+      workerOpts,
+    );
     workerPromiseSet.add(p);
     p.finally(() => workerPromiseSet.delete(p));
   }
@@ -612,11 +763,14 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     await Promise.race([...workerPromiseSet]);
     // race 返回时至少一个 worker 完成/移除了, 继续等待剩余的
     // 如果热加入又加了新 worker, 下一轮 while 会 pick up
-    await sleep(100);  // 微等以允许 finally 清理
+    await sleep(100); // 微等以允许 finally 清理
   }
   unregisterHotJoinContext(projectId);
 
-  if (signal.aborted) { unregisterOrchestrator(projectId); return; }
+  if (signal.aborted) {
+    unregisterOrchestrator(projectId);
+    return;
+  }
 
   // ═══════════════════════════════════════
   // Post-dev 阶段: WorkflowEngine 驱动 (v25.0)
@@ -653,7 +807,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
     const postDevResult = await postDevEngine.run(postDevExecutor, (result, nextStageId) => {
       const icon = result.status === 'success' ? '✅' : result.status === 'skipped' ? '⏭️' : '❌';
       sendToUI(win, 'agent:log', {
-        projectId, agentId: 'system',
+        projectId,
+        agentId: 'system',
         content: `${icon} ${result.stageId}: ${result.summary} (${(result.durationMs / 1000).toFixed(1)}s)${nextStageId ? ` → ${nextStageId}` : ''}`,
       });
     });
@@ -693,14 +848,20 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const deps = Object.keys(pkg.dependencies || {}).slice(0, 20);
       const devDeps = Object.keys(pkg.devDependencies || {}).slice(0, 10);
       depsInfo = `### 依赖\n- 运行时: ${deps.join(', ') || '无'}\n- 开发: ${devDeps.join(', ') || '无'}`;
-    } catch { /* parse error */ }
+    } catch {
+      /* parse error */
+    }
   }
 
   // 读取 .gitignore 获取忽略规则
   let gitignoreInfo = '';
   const gitignorePath = path.join(workspacePath, '.gitignore');
   if (fs.existsSync(gitignorePath)) {
-    const ignoreRules = fs.readFileSync(gitignorePath, 'utf-8').split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0, 15);
+    const ignoreRules = fs
+      .readFileSync(gitignorePath, 'utf-8')
+      .split('\n')
+      .filter(l => l.trim() && !l.startsWith('#'))
+      .slice(0, 15);
     gitignoreInfo = `### .gitignore 规则\n${ignoreRules.map(r => `- ${r}`).join('\n')}`;
   }
 
@@ -712,17 +873,23 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const tsConfig = JSON.parse(fs.readFileSync(tsConfigPath, 'utf-8'));
       const co = tsConfig.compilerOptions || {};
       tsInfo = `### TypeScript 配置\n- target: ${co.target || 'N/A'}\n- module: ${co.module || 'N/A'}\n- strict: ${co.strict ?? 'N/A'}\n- outDir: ${co.outDir || 'N/A'}`;
-    } catch { /* parse error */ }
+    } catch {
+      /* parse error */
+    }
   }
 
   // 检测目录结构
   let dirStructure = '';
   try {
     const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
-    const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules').map(e => e.name);
+    const dirs = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+      .map(e => e.name);
     const files = entries.filter(e => e.isFile()).map(e => e.name);
     dirStructure = `### 项目结构\n- 目录: ${dirs.join(', ') || '无'}\n- 根文件: ${files.slice(0, 15).join(', ')}`;
-  } catch { /* read error */ }
+  } catch {
+    /* read error */
+  }
 
   const content = [
     `# AGENTS.md — 项目规范`,
@@ -766,7 +933,9 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
     `- 遇到信息不足时使用 report_blocked 阻塞`,
     `- 发现设计问题使用 rfc_propose 提案`,
     ``,
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   fs.writeFileSync(agentsPath, content, 'utf-8');
 }

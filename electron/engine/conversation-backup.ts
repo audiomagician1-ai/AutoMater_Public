@@ -81,6 +81,15 @@ export interface ConversationBackup {
 
 export type ChatMode = 'work' | 'chat' | 'deep';
 
+/**
+ * Session 状态 — 完整生命周期 (v28.0)
+ *  created → running → completed → archived
+ *               ├──→ suspended ──→ (回到 running)
+ *               └──→ failed ──→ archived
+ *  'active' 为向后兼容旧数据的别名 (等同 running)
+ */
+export type SessionStatus = 'created' | 'running' | 'suspended' | 'completed' | 'failed' | 'archived' | 'active';
+
 export interface SessionInfo {
   id: string;
   projectId: string | null;
@@ -88,7 +97,7 @@ export interface SessionInfo {
   agentRole: string;
   /** 该 agent 在该项目下的序号 (如 001, 002) */
   agentSeq: number;
-  status: 'active' | 'completed' | 'archived';
+  status: SessionStatus;
   backupPath: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -97,6 +106,16 @@ export interface SessionInfo {
   totalCost: number;
   /** v21.0: 管家会话模式 */
   chatMode: ChatMode;
+  /** v28.0: Agent 类定义 ID (→ team_members.id) */
+  memberId: string | null;
+  /** v28.0: 绑定的 Feature ID */
+  featureId: string | null;
+  /** v28.0: 实际开始执行时间 */
+  startedAt: string | null;
+  /** v28.0: 暂停时间 */
+  suspendedAt: string | null;
+  /** v28.0: 失败原因 */
+  errorMessage: string | null;
 }
 
 // ═══════════════════════════════════════
@@ -105,18 +124,18 @@ export interface SessionInfo {
 
 /** 工作类型 — 描述一次 Session 的具体工作性质 */
 export type WorkType =
-  | 'pm-analysis'       // PM 需求分析
-  | 'pm-design'         // PM 设计文档
-  | 'pm-incremental'    // PM 增量分析
-  | 'pm-acceptance'     // PM 验收审查
-  | 'architect-design'  // 架构 + 产品设计
-  | 'dev-implement'     // 开发实现
-  | 'dev-rework'        // QA 驳回后重做
-  | 'qa-review'         // QA 代码审查
-  | 'qa-tdd'            // QA TDD 测试骨架
-  | 'devops-build'      // DevOps 构建验证
-  | 'doc-generation'    // 子需求/测试规格文档生成
-  | 'meta-agent';       // 元 Agent 对话
+  | 'pm-analysis' // PM 需求分析
+  | 'pm-design' // PM 设计文档
+  | 'pm-incremental' // PM 增量分析
+  | 'pm-acceptance' // PM 验收审查
+  | 'architect-design' // 架构 + 产品设计
+  | 'dev-implement' // 开发实现
+  | 'dev-rework' // QA 驳回后重做
+  | 'qa-review' // QA 代码审查
+  | 'qa-tdd' // QA TDD 测试骨架
+  | 'devops-build' // DevOps 构建验证
+  | 'doc-generation' // 子需求/测试规格文档生成
+  | 'meta-agent'; // 元 Agent 对话
 
 /** Feature-Session 关联记录 */
 export interface FeatureSessionLink {
@@ -223,9 +242,13 @@ function ensureDir(dirPath: string): void {
 function getNextAgentSeq(projectId: string | null, agentId: string): number {
   const db = getDb();
   const key = projectId || '_global';
-  const row = db.prepare(
-    'SELECT MAX(agent_seq) as max_seq FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ?'
-  ).get(key === '_global' ? null : key, key === '_global' ? null : key, agentId) as { max_seq: number | null } | undefined;
+  const row = db
+    .prepare(
+      'SELECT MAX(agent_seq) as max_seq FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ?',
+    )
+    .get(key === '_global' ? null : key, key === '_global' ? null : key, agentId) as
+    | { max_seq: number | null }
+    | undefined;
   return (row?.max_seq ?? 0) + 1;
 }
 
@@ -243,19 +266,154 @@ export function createSession(
   const seq = getNextAgentSeq(projectId, agentId);
   const now = new Date().toISOString();
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO sessions (id, project_id, agent_id, agent_role, agent_seq, status, chat_mode, created_at)
     VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
-  `).run(id, projectId, agentId, agentRole, seq, chatMode, now);
+  `,
+  ).run(id, projectId, agentId, agentRole, seq, chatMode, now);
 
   log.info('Session created', { id, projectId, agentId, agentRole, seq, chatMode });
 
   return {
-    id, projectId, agentId, agentRole, agentSeq: seq,
-    status: 'active', backupPath: null, createdAt: now,
-    completedAt: null, messageCount: 0, totalTokens: 0, totalCost: 0,
+    id,
+    projectId,
+    agentId,
+    agentRole,
+    agentSeq: seq,
+    status: 'active',
+    backupPath: null,
+    createdAt: now,
+    completedAt: null,
+    messageCount: 0,
+    totalTokens: 0,
+    totalCost: 0,
     chatMode,
+    memberId: null,
+    featureId: null,
+    startedAt: null,
+    suspendedAt: null,
+    errorMessage: null,
   };
+}
+
+/**
+ * v28.0: 从 Agent 类定义实例化 Session——绑定到具体 Feature
+ * 这是“Agent(class) → Session(instance)”模型的核心 API
+ */
+export function createSessionForFeature(
+  memberId: string,
+  featureId: string | null,
+  projectId: string,
+  agentId?: string,
+  agentRole?: string,
+): SessionInfo {
+  const db = getDb();
+  const id = `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  // 从 team_members 读取 Agent 类定义
+  const member = db.prepare('SELECT * FROM team_members WHERE id = ?').get(memberId) as
+    | { id: string; role: string; name: string }
+    | undefined;
+  const resolvedAgentId = agentId || member?.name || memberId;
+  const resolvedRole = agentRole || member?.role || 'developer';
+  const seq = getNextAgentSeq(projectId, resolvedAgentId);
+  const now = new Date().toISOString();
+
+  db.prepare(
+    `
+    INSERT INTO sessions (id, project_id, agent_id, agent_role, agent_seq, status, member_id, feature_id, created_at)
+    VALUES (?, ?, ?, ?, ?, 'created', ?, ?, ?)
+  `,
+  ).run(id, projectId, resolvedAgentId, resolvedRole, seq, memberId, featureId, now);
+
+  log.info('Session created for feature', { id, memberId, featureId, projectId, agentId: resolvedAgentId });
+
+  return {
+    id,
+    projectId,
+    agentId: resolvedAgentId,
+    agentRole: resolvedRole,
+    agentSeq: seq,
+    status: 'created',
+    backupPath: null,
+    createdAt: now,
+    completedAt: null,
+    messageCount: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    chatMode: 'work',
+    memberId,
+    featureId,
+    startedAt: null,
+    suspendedAt: null,
+    errorMessage: null,
+  };
+}
+
+/**
+ * v28.0: Session 状态流转
+ * 支持的转换: created→running, running→suspended, running→completed,
+ * running→failed, suspended→running, completed→archived, failed→archived
+ */
+export function transitionSession(sessionId: string, newStatus: SessionStatus, errorMessage?: string): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  switch (newStatus) {
+    case 'running':
+      db.prepare(
+        "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?), suspended_at = NULL WHERE id = ?",
+      ).run(now, sessionId);
+      break;
+    case 'suspended':
+      db.prepare("UPDATE sessions SET status = 'suspended', suspended_at = ? WHERE id = ?").run(now, sessionId);
+      break;
+    case 'completed':
+      db.prepare("UPDATE sessions SET status = 'completed', completed_at = ? WHERE id = ?").run(now, sessionId);
+      break;
+    case 'failed':
+      db.prepare("UPDATE sessions SET status = 'failed', completed_at = ?, error_message = ? WHERE id = ?").run(
+        now,
+        errorMessage ?? null,
+        sessionId,
+      );
+      break;
+    case 'archived':
+      db.prepare("UPDATE sessions SET status = 'archived' WHERE id = ?").run(sessionId);
+      break;
+    default:
+      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run(newStatus, sessionId);
+  }
+
+  log.info('Session transitioned', { sessionId, newStatus });
+}
+
+/**
+ * v28.0: 实时更新 Session 统计（每轮 ReAct iteration 后调用）
+ */
+export function updateSessionStats(sessionId: string, inputTokens: number, outputTokens: number, cost: number): void {
+  const db = getDb();
+  db.prepare(
+    `
+    UPDATE sessions SET
+      message_count = message_count + 1,
+      total_tokens = total_tokens + ? + ?,
+      total_cost = total_cost + ?
+    WHERE id = ?
+  `,
+  ).run(inputTokens, outputTokens, cost, sessionId);
+}
+
+/**
+ * v28.0: 查询某 Agent 当前 running session 数（用于并发控制）
+ */
+export function getRunningSessionCount(memberId: string): number {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT COUNT(*) as c FROM sessions WHERE member_id = ? AND status IN ('running', 'created')")
+    .get(memberId) as { c: number };
+  return row.c;
 }
 
 /**
@@ -263,20 +421,18 @@ export function createSession(
  */
 export function getActiveSession(projectId: string | null, agentId: string): SessionInfo | null {
   const db = getDb();
-  const row = db.prepare(
-    "SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
-  ).get(projectId, projectId, agentId) as SessionRow | undefined;
+  const row = db
+    .prepare(
+      "SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(projectId, projectId, agentId) as SessionRow | undefined;
   return row ? mapSessionRow(row) : null;
 }
 
 /**
  * 获取或自动创建 Session
  */
-export function getOrCreateSession(
-  projectId: string | null,
-  agentId: string,
-  agentRole: string,
-): SessionInfo {
+export function getOrCreateSession(projectId: string | null, agentId: string, agentRole: string): SessionInfo {
   const existing = getActiveSession(projectId, agentId);
   if (existing) return existing;
   return createSession(projectId, agentId, agentRole);
@@ -292,7 +448,7 @@ export function switchSession(sessionId: string): SessionInfo | null {
 
   // 将该 agent 当前的 active session 标记为 completed
   db.prepare(
-    "UPDATE sessions SET status = 'completed', completed_at = datetime('now') WHERE agent_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND status = 'active'"
+    "UPDATE sessions SET status = 'completed', completed_at = datetime('now') WHERE agent_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND status = 'active'",
   ).run(target.agent_id, target.project_id, target.project_id);
 
   // 激活目标 session
@@ -309,13 +465,17 @@ export function listSessions(projectId: string | null, agentId?: string): Sessio
   const db = getDb();
   let rows: SessionRow[];
   if (agentId) {
-    rows = db.prepare(
-      'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? ORDER BY created_at DESC'
-    ).all(projectId, projectId, agentId) as SessionRow[];
+    rows = db
+      .prepare(
+        'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) AND agent_id = ? ORDER BY created_at DESC',
+      )
+      .all(projectId, projectId, agentId) as SessionRow[];
   } else {
-    rows = db.prepare(
-      'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) ORDER BY created_at DESC'
-    ).all(projectId, projectId) as SessionRow[];
+    rows = db
+      .prepare(
+        'SELECT * FROM sessions WHERE (project_id = ? OR (project_id IS NULL AND ? IS NULL)) ORDER BY created_at DESC',
+      )
+      .all(projectId, projectId) as SessionRow[];
   }
   return rows.map(mapSessionRow);
 }
@@ -336,7 +496,7 @@ function mapSessionRow(row: SessionRow): SessionInfo {
     agentId: row.agent_id,
     agentRole: row.agent_role,
     agentSeq: row.agent_seq,
-    status: row.status as SessionRow['status'],
+    status: row.status as SessionInfo['status'],
     backupPath: row.backup_path,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -344,6 +504,12 @@ function mapSessionRow(row: SessionRow): SessionInfo {
     totalTokens: row.total_tokens,
     totalCost: row.total_cost,
     chatMode: (row.chat_mode as ChatMode) || 'work',
+    // v28.0: Session-Agent 实例化字段
+    memberId: row.member_id ?? null,
+    featureId: row.feature_id ?? null,
+    startedAt: row.started_at ?? null,
+    suspendedAt: row.suspended_at ?? null,
+    errorMessage: row.error_message ?? null,
   };
 }
 
@@ -428,7 +594,8 @@ export function backupConversation(opts: {
     fs.writeFileSync(filePath, JSON.stringify(backup, null, 2), 'utf-8');
 
     // 更新 session 记录
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE sessions SET
         status = 'completed',
         completed_at = ?,
@@ -437,7 +604,15 @@ export function backupConversation(opts: {
         total_tokens = ?,
         total_cost = ?
       WHERE id = ?
-    `).run(now, filePath, opts.messages.length, opts.totalInputTokens + opts.totalOutputTokens, opts.totalCost, session.id);
+    `,
+    ).run(
+      now,
+      filePath,
+      opts.messages.length,
+      opts.totalInputTokens + opts.totalOutputTokens,
+      opts.totalCost,
+      session.id,
+    );
 
     log.info('Conversation backed up', {
       sessionId: session.id,
@@ -447,7 +622,6 @@ export function backupConversation(opts: {
     });
 
     return filePath;
-
   } catch (err: unknown) {
     log.error('Conversation backup failed', err, { agentId: opts.agentId });
     return null;
@@ -477,7 +651,9 @@ export function readBackup(filePath: string): ConversationBackup | null {
  */
 export function readSessionBackup(sessionId: string): ConversationBackup | null {
   const db = getDb();
-  const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as { backup_path: string | null } | undefined;
+  const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as
+    | { backup_path: string | null }
+    | undefined;
   if (!row?.backup_path) return null;
   return readBackup(row.backup_path);
 }
@@ -497,13 +673,17 @@ export function getBackupStats(): {
   newestBackup: string | null;
 } {
   const db = getDb();
-  const stats = db.prepare(`
+  const stats = db
+    .prepare(
+      `
     SELECT
       COUNT(*) as total,
       MIN(created_at) as oldest,
       MAX(created_at) as newest
     FROM sessions
-  `).get() as { total: number; oldest: string | null; newest: string | null };
+  `,
+    )
+    .get() as { total: number; oldest: string | null; newest: string | null };
 
   let totalSize = 0;
   let fileCount = 0;
@@ -523,7 +703,9 @@ export function getBackupStats(): {
         }
       };
       walkSize(backupRoot);
-    } catch { /* safe walk */ }
+    } catch {
+      /* safe walk */
+    }
   }
 
   return {
@@ -547,7 +729,8 @@ export function cleanupOldBackups(keepDays: number = 30): number {
   let deleted = 0;
 
   try {
-    const dateFolders = fs.readdirSync(backupRoot, { withFileTypes: true })
+    const dateFolders = fs
+      .readdirSync(backupRoot, { withFileTypes: true })
       .filter(d => d.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d.name));
 
     for (const df of dateFolders) {
@@ -589,42 +772,60 @@ export function linkFeatureSession(opts: {
   const id = `fsl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
   const now = new Date().toISOString();
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO feature_sessions (id, feature_id, session_id, project_id, agent_id, agent_role, work_type, expected_output, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-  `).run(id, opts.featureId, opts.sessionId, opts.projectId, opts.agentId, opts.agentRole, opts.workType, opts.expectedOutput, now);
+  `,
+  ).run(
+    id,
+    opts.featureId,
+    opts.sessionId,
+    opts.projectId,
+    opts.agentId,
+    opts.agentRole,
+    opts.workType,
+    opts.expectedOutput,
+    now,
+  );
 
-  log.info('Feature-Session linked', { id, featureId: opts.featureId, sessionId: opts.sessionId, workType: opts.workType });
+  log.info('Feature-Session linked', {
+    id,
+    featureId: opts.featureId,
+    sessionId: opts.sessionId,
+    workType: opts.workType,
+  });
   return id;
 }
 
 /**
  * 完成 Feature-Session 关联 — session 结束时更新实际产出和状态
  */
-export function completeFeatureSessionLink(
-  linkId: string,
-  actualOutput: string,
-  success: boolean,
-): void {
+export function completeFeatureSessionLink(linkId: string, actualOutput: string, success: boolean): void {
   const db = getDb();
   const status = success ? 'completed' : 'failed';
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE feature_sessions SET
       actual_output = ?,
       status = ?,
       completed_at = datetime('now')
     WHERE id = ?
-  `).run(actualOutput, status, linkId);
+  `,
+  ).run(actualOutput, status, linkId);
 }
 
 /**
  * 按 Feature 查询关联的所有 Sessions（含 session 详情）
  */
-export function getSessionsForFeature(projectId: string, featureId: string): Array<FeatureSessionLink & { session: SessionInfo | null }> {
+export function getSessionsForFeature(
+  projectId: string,
+  featureId: string,
+): Array<FeatureSessionLink & { session: SessionInfo | null }> {
   const db = getDb();
-  const links = db.prepare(
-    'SELECT * FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC'
-  ).all(projectId, featureId) as FeatureSessionRow[];
+  const links = db
+    .prepare('SELECT * FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC')
+    .all(projectId, featureId) as FeatureSessionRow[];
 
   return links.map(link => ({
     ...mapFeatureSessionRow(link),
@@ -640,9 +841,9 @@ export function getSessionsForFeature(projectId: string, featureId: string): Arr
  */
 export function getFeaturesForSession(sessionId: string): FeatureSessionLink[] {
   const db = getDb();
-  const links = db.prepare(
-    'SELECT * FROM feature_sessions WHERE session_id = ? ORDER BY created_at ASC'
-  ).all(sessionId) as FeatureSessionRow[];
+  const links = db
+    .prepare('SELECT * FROM feature_sessions WHERE session_id = ? ORDER BY created_at ASC')
+    .all(sessionId) as FeatureSessionRow[];
   return links.map(mapFeatureSessionRow);
 }
 
@@ -651,25 +852,30 @@ export function getFeaturesForSession(sessionId: string): FeatureSessionLink[] {
  */
 export function listFeatureSessionLinks(projectId: string, limit: number = 200): FeatureSessionLink[] {
   const db = getDb();
-  const links = db.prepare(
-    'SELECT * FROM feature_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
-  ).all(projectId, limit) as FeatureSessionRow[];
+  const links = db
+    .prepare('SELECT * FROM feature_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?')
+    .all(projectId, limit) as FeatureSessionRow[];
   return links.map(mapFeatureSessionRow);
 }
 
 /**
  * 获取 Feature 的 Session 统计摘要（用于看板卡片展示）
  */
-export function getFeatureSessionSummary(projectId: string, featureId: string): {
+export function getFeatureSessionSummary(
+  projectId: string,
+  featureId: string,
+): {
   totalSessions: number;
   workTypes: string[];
   lastWorkType: string | null;
   lastAgent: string | null;
 } {
   const db = getDb();
-  const rows = db.prepare(
-    'SELECT work_type, agent_id FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC'
-  ).all(projectId, featureId) as Array<{ work_type: string; agent_id: string }>;
+  const rows = db
+    .prepare(
+      'SELECT work_type, agent_id FROM feature_sessions WHERE project_id = ? AND feature_id = ? ORDER BY created_at ASC',
+    )
+    .all(projectId, featureId) as Array<{ work_type: string; agent_id: string }>;
 
   const workTypes = [...new Set(rows.map(r => r.work_type))];
   const last = rows[rows.length - 1];
@@ -685,16 +891,21 @@ export function getFeatureSessionSummary(projectId: string, featureId: string): 
 /**
  * 批量获取多个 Feature 的 Session 摘要（看板页面一次性加载）
  */
-export function batchGetFeatureSessionSummaries(projectId: string): Map<string, {
-  totalSessions: number;
-  workTypes: string[];
-  lastWorkType: string | null;
-  lastAgent: string | null;
-}> {
+export function batchGetFeatureSessionSummaries(projectId: string): Map<
+  string,
+  {
+    totalSessions: number;
+    workTypes: string[];
+    lastWorkType: string | null;
+    lastAgent: string | null;
+  }
+> {
   const db = getDb();
-  const rows = db.prepare(
-    'SELECT feature_id, work_type, agent_id FROM feature_sessions WHERE project_id = ? ORDER BY created_at ASC'
-  ).all(projectId) as Array<{ feature_id: string; work_type: string; agent_id: string }>;
+  const rows = db
+    .prepare(
+      'SELECT feature_id, work_type, agent_id FROM feature_sessions WHERE project_id = ? ORDER BY created_at ASC',
+    )
+    .all(projectId) as Array<{ feature_id: string; work_type: string; agent_id: string }>;
 
   const map = new Map<string, { entries: Array<{ work_type: string; agent_id: string }> }>();
   for (const row of rows) {
@@ -702,7 +913,10 @@ export function batchGetFeatureSessionSummaries(projectId: string): Map<string, 
     map.get(row.feature_id)?.entries.push({ work_type: row.work_type, agent_id: row.agent_id });
   }
 
-  const result = new Map<string, { totalSessions: number; workTypes: string[]; lastWorkType: string | null; lastAgent: string | null }>();
+  const result = new Map<
+    string,
+    { totalSessions: number; workTypes: string[]; lastWorkType: string | null; lastAgent: string | null }
+  >();
   for (const [fid, data] of map.entries()) {
     const last = data.entries[data.entries.length - 1];
     result.set(fid, {

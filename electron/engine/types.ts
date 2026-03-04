@@ -60,7 +60,7 @@ export interface ProjectRow {
   wish: string;
   status: ProjectStatus;
   workspace_path: string | null;
-  config: string;  // JSON
+  config: string; // JSON
   git_mode: 'local' | 'github';
   github_repo: string | null;
   github_token: string | null;
@@ -68,14 +68,7 @@ export interface ProjectRow {
   updated_at: string;
 }
 
-export type FeatureStatus =
-  | 'todo'
-  | 'in_progress'
-  | 'reviewing'
-  | 'qa_passed'
-  | 'pm_rejected'
-  | 'passed'
-  | 'failed';
+export type FeatureStatus = 'todo' | 'in_progress' | 'reviewing' | 'qa_passed' | 'pm_rejected' | 'passed' | 'failed';
 
 export interface FeatureRow {
   id: string;
@@ -87,11 +80,11 @@ export interface FeatureRow {
   description: string;
   /** D3: PM 一句话摘要 (<80字), 用于 Agent 上下文中的索引层 */
   summary: string | null;
-  depends_on: string;       // JSON array of feature IDs
+  depends_on: string; // JSON array of feature IDs
   status: FeatureStatus;
   locked_by: string | null;
   acceptance_criteria: string; // JSON array
-  affected_files: string;      // JSON array
+  affected_files: string; // JSON array
   notes: string;
   created_at: string;
   completed_at: string | null;
@@ -158,8 +151,19 @@ export interface CostStatsResult {
 
 /** Directories to ignore when scanning workspace files */
 export const WORKSPACE_IGNORE_DIRS = new Set([
-  'node_modules', '.git', '__pycache__', 'dist', 'build', '.next',
-  'coverage', '.cache', 'target', 'vendor', '.automater', '.venv', 'venv',
+  'node_modules',
+  '.git',
+  '__pycache__',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  '.cache',
+  'target',
+  'vendor',
+  '.automater',
+  '.venv',
+  'venv',
 ]);
 
 // ═══════════════════════════════════════
@@ -197,10 +201,26 @@ export interface MemberSkillRef {
 
 /** Code file extensions for analysis */
 export const CODE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.go', '.rs', '.java', '.cs', '.rb',
-  '.c', '.cpp', '.h', '.hpp', '.swift', '.kt',
-  '.vue', '.svelte',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+  '.go',
+  '.rs',
+  '.java',
+  '.cs',
+  '.rb',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.swift',
+  '.kt',
+  '.vue',
+  '.svelte',
 ]);
 
 // ═══════════════════════════════════════
@@ -354,9 +374,9 @@ export interface ParsedFeature {
   sub_group: string;
   title: string;
   description: string;
-  summary?: string;              // D3: PM 一句话摘要
-  dependsOn: string[];          // LLM 倾向 camelCase
-  depends_on?: string[];        // DB 使用 snake_case, 向后兼容
+  summary?: string; // D3: PM 一句话摘要
+  dependsOn: string[]; // LLM 倾向 camelCase
+  depends_on?: string[]; // DB 使用 snake_case, 向后兼容
   acceptance_criteria: string[];
   acceptanceCriteria?: string[]; // LLM 可能输出 camelCase
   notes: string;
@@ -527,6 +547,40 @@ export interface OpenAIFunctionTool {
 // DB Row Types for mapper functions (v12.3)
 // ═══════════════════════════════════════
 
+/** team_members 表原始行 (v28.0: 作为 Agent 类定义) */
+export interface TeamMemberRow {
+  id: string;
+  project_id: string;
+  role: string;
+  name: string;
+  model: string | null;
+  capabilities: string; // JSON array
+  system_prompt: string | null;
+  context_files: string; // JSON array
+  max_context_tokens: number;
+  llm_config: string | null; // JSON
+  mcp_servers: string | null; // JSON
+  skills: string | null; // JSON
+  max_iterations: number | null;
+  max_concurrent_sessions: number;
+  created_at: string;
+}
+
+/** Session 状态 — 完整生命周期 (v28.0)
+ *  created → running → completed → archived
+ *                ├──→ suspended ──→ (回到 running)
+ *                └──→ failed ──→ archived
+ */
+export type SessionStatus =
+  | 'created'
+  | 'running'
+  | 'suspended'
+  | 'completed'
+  | 'failed'
+  | 'archived'
+  // 向后兼容旧状态值
+  | 'active';
+
 /** sessions 表原始行 */
 export interface SessionRow {
   id: string;
@@ -534,7 +588,7 @@ export interface SessionRow {
   agent_id: string;
   agent_role: string;
   agent_seq: number;
-  status: 'active' | 'completed' | 'archived';
+  status: SessionStatus;
   backup_path: string | null;
   created_at: string;
   completed_at: string | null;
@@ -543,6 +597,16 @@ export interface SessionRow {
   total_cost: number;
   /** v21.0: 管家会话模式 */
   chat_mode: string;
+  /** v28.0: Agent 类定义 ID (→ team_members.id) */
+  member_id: string | null;
+  /** v28.0: 绑定的 Feature ID */
+  feature_id: string | null;
+  /** v28.0: 实际开始执行时间 */
+  started_at: string | null;
+  /** v28.0: 暂停时间 */
+  suspended_at: string | null;
+  /** v28.0: 失败原因 */
+  error_message: string | null;
 }
 
 /** feature_sessions 表原始行 */
@@ -553,7 +617,7 @@ export interface FeatureSessionRow {
   project_id: string;
   agent_id: string;
   agent_role: string;
-  work_type: string;  // WorkType at runtime
+  work_type: string; // WorkType at runtime
   expected_output: string;
   actual_output: string | null;
   status: 'pending' | 'active' | 'completed' | 'failed';
@@ -740,4 +804,3 @@ export class ToolError extends EngineError {
     this.toolName = toolName;
   }
 }
-

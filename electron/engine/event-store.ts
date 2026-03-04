@@ -68,11 +68,23 @@ export type EventType =
   | 'lesson:extracted'
   // v20.0: Decision audit trail
   | 'decision:point'
+  // v28.0: Session-Agent 调度事件 (事件驱动调度总线的输入信号)
+  | 'schedule:wish_created' // 需求列表新增
+  | 'schedule:wish_updated' // 需求变更
+  | 'schedule:feature_todo' // Feature 变为 todo (新增 / 重置 / PM 分析产出)
+  | 'schedule:feature_completed' // Feature 完成 (释放 Agent capacity)
+  | 'schedule:feature_failed' // Feature 失败
+  | 'schedule:project_started' // 用户点击启动
+  | 'schedule:project_paused' // 用户暂停
+  | 'schedule:member_added' // 团队新增成员
+  | 'schedule:member_updated' // 成员配置变更 (并发数等)
+  | 'schedule:session_created' // Session 实例创建
+  | 'schedule:session_failed' // Session 异常终止 (可能需要重新调度)
   // Errors
   | 'error';
 
 export interface AgentEvent {
-  id?: number;            // auto-increment
+  id?: number; // auto-increment
   projectId: string;
   agentId: string;
   featureId?: string;
@@ -171,9 +183,15 @@ export function emitEvents(events: AgentEvent[]): void {
   const batch = db.transaction((items: AgentEvent[]) => {
     for (const e of items) {
       stmt.run(
-        e.projectId, e.agentId || '', e.featureId || null,
-        e.type, JSON.stringify(e.data || {}),
-        e.durationMs ?? null, e.inputTokens ?? null, e.outputTokens ?? null, e.costUsd ?? null,
+        e.projectId,
+        e.agentId || '',
+        e.featureId || null,
+        e.type,
+        JSON.stringify(e.data || {}),
+        e.durationMs ?? null,
+        e.inputTokens ?? null,
+        e.outputTokens ?? null,
+        e.costUsd ?? null,
       );
     }
   });
@@ -264,9 +282,9 @@ export function getFeatureTimeline(projectId: string, featureId: string): AgentE
  */
 export function getRecentEvents(projectId: string, limit: number = 50): AgentEvent[] {
   const db = getDb();
-  const rows = db.prepare(
-    'SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?'
-  ).all(projectId, limit) as EventRow[];
+  const rows = db
+    .prepare('SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?')
+    .all(projectId, limit) as EventRow[];
   return rows.reverse().map(rowToEvent);
 }
 
@@ -304,24 +322,30 @@ export function getProjectEventStats(projectId: string): EventStats {
   const db = getDb();
 
   // 总体统计
-  const total = db.prepare(`
+  const total = db
+    .prepare(
+      `
     SELECT COUNT(*) as cnt,
            COALESCE(SUM(duration_ms), 0) as dur,
            COALESCE(SUM(input_tokens), 0) as inp,
            COALESCE(SUM(output_tokens), 0) as outp,
            COALESCE(SUM(cost_usd), 0) as cost
     FROM events WHERE project_id = ?
-  `).get(projectId) as { cnt: number; dur: number; inp: number; outp: number; cost: number };
+  `,
+    )
+    .get(projectId) as { cnt: number; dur: number; inp: number; outp: number; cost: number };
 
   // 按类型统计
-  const typeRows = db.prepare(
-    'SELECT type, COUNT(*) as cnt FROM events WHERE project_id = ? GROUP BY type'
-  ).all(projectId) as Array<{ type: string; cnt: number }>;
+  const typeRows = db
+    .prepare('SELECT type, COUNT(*) as cnt FROM events WHERE project_id = ? GROUP BY type')
+    .all(projectId) as Array<{ type: string; cnt: number }>;
   const eventsByType: Record<string, number> = {};
   for (const r of typeRows) eventsByType[r.type] = r.cnt;
 
   // 按 feature 统计
-  const featureRows = db.prepare(`
+  const featureRows = db
+    .prepare(
+      `
     SELECT feature_id,
            COUNT(*) as cnt,
            COALESCE(SUM(duration_ms), 0) as dur,
@@ -330,7 +354,16 @@ export function getProjectEventStats(projectId: string): EventStats {
            SUM(CASE WHEN type = 'llm:call' THEN 1 ELSE 0 END) as llms
     FROM events WHERE project_id = ? AND feature_id IS NOT NULL
     GROUP BY feature_id ORDER BY feature_id
-  `).all(projectId) as Array<{ feature_id: string; cnt: number; dur: number; cost: number; tools: number; llms: number }>;
+  `,
+    )
+    .all(projectId) as Array<{
+    feature_id: string;
+    cnt: number;
+    dur: number;
+    cost: number;
+    tools: number;
+    llms: number;
+  }>;
   const featureStats = featureRows.map(r => ({
     featureId: r.feature_id,
     events: r.cnt,
@@ -341,14 +374,18 @@ export function getProjectEventStats(projectId: string): EventStats {
   }));
 
   // 工具调用统计
-  const toolRows = db.prepare(`
+  const toolRows = db
+    .prepare(
+      `
     SELECT json_extract(data, '$.tool') as tool_name,
            COUNT(*) as cnt,
            AVG(duration_ms) as avg_dur,
            SUM(CASE WHEN json_extract(data, '$.success') = 1 THEN 1 ELSE 0 END) as successes
     FROM events WHERE project_id = ? AND type = 'tool:call' AND json_extract(data, '$.tool') IS NOT NULL
     GROUP BY tool_name ORDER BY cnt DESC
-  `).all(projectId) as Array<{ tool_name: string; cnt: number; avg_dur: number; successes: number }>;
+  `,
+    )
+    .all(projectId) as Array<{ tool_name: string; cnt: number; avg_dur: number; successes: number }>;
   const toolStats = toolRows.map(r => ({
     toolName: r.tool_name || 'unknown',
     calls: r.cnt,

@@ -5,27 +5,56 @@
  */
 
 import {
-  BrowserWindow, getDb, createLogger,
-  callLLM, calcCost, sendToUI, addLog, notify, sleep,
-  spawnAgent, updateAgentStats, checkBudget,
+  BrowserWindow,
+  getDb,
+  createLogger,
+  callLLM,
+  calcCost,
+  sendToUI,
+  addLog,
+  notify,
+  sleep,
+  spawnAgent,
+  updateAgentStats,
+  checkBudget,
   stopOrchestrator as _stopOrchestrator,
-  reactDeveloperLoop, runQAReview, generateTestSkeleton,
+  reactDeveloperLoop,
+  runQAReview,
+  generateTestSkeleton,
   NonRetryableError,
-  buildFeatureDocContext, appendProjectMemory, buildLessonExtractionPrompt,
-  selectModelTier, resolveModel,
-  emitEvent, createCheckpoint,
-  claimFiles, releaseFiles, getClaimsSummary, predictAffectedFiles,
-  broadcastFilesCreated, getRecentBroadcasts, formatBroadcastContext,
+  buildFeatureDocContext,
+  appendProjectMemory,
+  buildLessonExtractionPrompt,
+  selectModelTier,
+  resolveModel,
+  emitEvent,
+  emitScheduleEvent,
+  createCheckpoint,
+  claimFiles,
+  releaseFiles,
+  getClaimsSummary,
+  predictAffectedFiles,
+  broadcastFilesCreated,
+  getRecentBroadcasts,
+  formatBroadcastContext,
   releaseFeatureLocks,
   commitWorkspace,
-  linkFeatureSession, completeFeatureSessionLink, getOrCreateSession, type WorkType,
+  linkFeatureSession,
+  completeFeatureSessionLink,
+  getOrCreateSession,
+  type WorkType,
   resolveMemberModel,
-  type AppSettings, type CountResult, type EnrichedFeature, type FeatureRow, type GitProviderConfig,
-  type PhaseResult, makePhaseResult,
+  type AppSettings,
+  type CountResult,
+  type EnrichedFeature,
+  type FeatureRow,
+  type GitProviderConfig,
+  type PhaseResult,
+  makePhaseResult,
 } from './shared';
-import {
-  createBranch, switchBranch, gitPush, createPR, addIssueComment, getCurrentBranch,
-} from '../git-provider';
+import { createSessionForFeature, transitionSession, updateSessionStats } from '../conversation-backup';
+import type { TeamMemberRow } from '../types';
+import { createBranch, switchBranch, gitPush, createPR, addIssueComment, getCurrentBranch } from '../git-provider';
 import { harvestPostFeature } from '../experience-harvester';
 import { addInstance, compactProjectMemory } from '../experience-library';
 
@@ -35,11 +64,28 @@ const _log = createLogger('phase:worker');
 // Worker Loop (Dev + QA per Feature)
 // ═══════════════════════════════════════
 
+/**
+ * Worker 循环配置 (v28.0)
+ * 当由 Scheduler 驱动时传入 member 信息，用于 Session 生命周期管理。
+ */
+export interface WorkerLoopOptions {
+  /** Agent 类定义（来自 team_members 表）。传入后启用 Session 生命周期追踪。 */
+  member?: TeamMemberRow;
+  /** 预创建的 Session ID — 如果 scheduler 已提前创建了 session */
+  preCreatedSessionId?: string;
+}
+
 export async function workerLoop(
-  projectId: string, workerId: string, qaId: string, settings: AppSettings,
-  win: BrowserWindow | null, signal: AbortSignal,
-  workspacePath: string | null, gitConfig: GitProviderConfig,
+  projectId: string,
+  workerId: string,
+  qaId: string,
+  settings: AppSettings,
+  win: BrowserWindow | null,
+  signal: AbortSignal,
+  workspacePath: string | null,
+  gitConfig: GitProviderConfig,
   permissions?: import('../tool-registry').AgentPermissions,
+  options?: WorkerLoopOptions,
 ): Promise<PhaseResult> {
   const startTime = Date.now();
   let featuresProcessed = 0;
@@ -47,38 +93,88 @@ export async function workerLoop(
   let featuresFailed = 0;
   const db = getDb();
   const maxQARetries = 3;
+  const member = options?.member;
 
   while (!signal.aborted) {
     const budget = checkBudget(projectId, settings);
     if (!budget.ok) {
-      sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停` });
+      sendToUI(win, 'agent:log', {
+        projectId,
+        agentId: workerId,
+        content: `💰 预算已用尽! ($${budget.spent.toFixed(2)} / $${budget.budget}) — 自动暂停`,
+      });
       notify('⚠️ AutoMater 预算告警', `已花费 $${budget.spent.toFixed(2)}，超过预算 $${budget.budget}`);
       _stopOrchestrator(projectId);
       break;
     }
 
-    const lockedFeature = (await import('../agent-manager')).lockNextFeature(projectId, workerId);
+    // v28.0: 使用 member.id 作为锁定身份（如果有），否则用 workerId
+    const lockIdentity = member?.id ?? workerId;
+    const lockedFeature = (await import('../agent-manager')).lockNextFeature(projectId, lockIdentity);
     if (!lockedFeature) {
-      const inProgress = db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')").get(projectId) as CountResult;
-      if (inProgress.c > 0) { await sleep(3000); continue; }
+      const inProgress = db
+        .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')")
+        .get(projectId) as CountResult;
+      if (inProgress.c > 0) {
+        await sleep(3000);
+        continue;
+      }
       sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: '✅ 没有更多任务，下班了' });
-      db.prepare("UPDATE agents SET status = 'idle', current_task = NULL, last_active_at = datetime('now') WHERE id = ? AND project_id = ?").run(workerId, projectId);
+      db.prepare(
+        "UPDATE agents SET status = 'idle', current_task = NULL, last_active_at = datetime('now') WHERE id = ? AND project_id = ?",
+      ).run(workerId, projectId);
       sendToUI(win, 'agent:status', { projectId, agentId: workerId, status: 'idle', currentTask: null });
       break;
     }
 
     const feature: EnrichedFeature = { ...lockedFeature };
 
-    db.prepare("UPDATE agents SET status = 'working', current_task = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?")
-      .run(feature.id, workerId, projectId);
-    sendToUI(win, 'agent:status', { projectId, agentId: workerId, status: 'working', currentTask: feature.id, featureTitle: feature.title || feature.description });
+    // v28.0: Session 生命周期 — 为每个 Feature 创建或复用 Session
+    let featureSessionId: string | null = null;
+    if (member) {
+      try {
+        // 如果 scheduler 预创建了 session 且是第一个 feature，使用它；否则新建
+        if (options?.preCreatedSessionId && featuresProcessed === 0) {
+          featureSessionId = options.preCreatedSessionId;
+          transitionSession(featureSessionId, 'running');
+        } else {
+          const sess = createSessionForFeature(member.id, feature.id, projectId, workerId, member.role);
+          featureSessionId = sess.id;
+          transitionSession(featureSessionId, 'running');
+        }
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `📋 Session ${featureSessionId} 启动 (Feature: ${feature.id})`,
+        });
+      } catch (err) {
+        _log.warn('Failed to create session for feature', { featureId: feature.id, error: String(err) });
+      }
+    }
+
+    db.prepare(
+      "UPDATE agents SET status = 'working', current_task = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?",
+    ).run(feature.id, workerId, projectId);
+    sendToUI(win, 'agent:status', {
+      projectId,
+      agentId: workerId,
+      status: 'working',
+      currentTask: feature.id,
+      featureTitle: feature.title || feature.description,
+    });
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'in_progress', agentId: workerId });
-    sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔨 开始: ${feature.id} — ${feature.title || feature.description}` });
+    sendToUI(win, 'agent:log', {
+      projectId,
+      agentId: workerId,
+      content: `🔨 开始: ${feature.id} — ${feature.title || feature.description}`,
+    });
 
     // Inject doc context
     if (workspacePath) {
       const docContext = buildFeatureDocContext(workspacePath, feature.id);
-      if (docContext) { feature._docContext = docContext; }
+      if (docContext) {
+        feature._docContext = docContext;
+      }
     }
 
     // File conflict detection
@@ -86,23 +182,35 @@ export async function workerLoop(
       const plannedFiles = predictAffectedFiles(feature);
       const conflicts = claimFiles(workspacePath, workerId, feature.id, plannedFiles);
       if (conflicts.length > 0) {
-        const conflictMsg = conflicts.map(c => `⚠️ ${c.otherWorkerId}(${c.otherFeatureId}) 正在修改: ${c.overlappingFiles.join(', ')}`).join('\n');
-        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔒 文件冲突检测:\n${conflictMsg}\n将注意避免冲突修改` });
+        const conflictMsg = conflicts
+          .map(c => `⚠️ ${c.otherWorkerId}(${c.otherFeatureId}) 正在修改: ${c.overlappingFiles.join(', ')}`)
+          .join('\n');
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `🔒 文件冲突检测:\n${conflictMsg}\n将注意避免冲突修改`,
+        });
         feature._conflictWarning = `注意: 以下文件正被其他 Worker 修改，请协调避免冲突:\n${conflictMsg}`;
       }
       const otherClaims = getClaimsSummary(workspacePath, workerId);
-      if (otherClaims) { feature._otherWorkerClaims = otherClaims; }
+      if (otherClaims) {
+        feature._otherWorkerClaims = otherClaims;
+      }
     }
 
     // Worker broadcast context injection
     const recentWork = getRecentBroadcasts(600_000, workerId);
-    if (recentWork.length > 0) { feature._teamContext = formatBroadcastContext(recentWork); }
+    if (recentWork.length > 0) {
+      feature._teamContext = formatBroadcastContext(recentWork);
+    }
 
     let passed = false;
     let qaFeedback = '';
 
     // v14.0: Issue-driven branch — create/switch before dev starts
-    const featureRow = db.prepare('SELECT github_branch, github_issue_number FROM features WHERE id = ? AND project_id = ?').get(feature.id, projectId) as { github_branch: string | null; github_issue_number: number | null } | undefined;
+    const featureRow = db
+      .prepare('SELECT github_branch, github_issue_number FROM features WHERE id = ? AND project_id = ?')
+      .get(feature.id, projectId) as { github_branch: string | null; github_issue_number: number | null } | undefined;
     const issueBranch = featureRow?.github_branch;
     const issueNumber = featureRow?.github_issue_number;
     if (issueBranch && workspacePath && gitConfig.mode === 'github') {
@@ -118,7 +226,11 @@ export async function workerLoop(
             if (swResult.success) {
               sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🌿 已切换到分支: ${issueBranch}` });
             } else {
-              sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ 分支操作失败: ${brResult.error || swResult.error}（将在当前分支继续）` });
+              sendToUI(win, 'agent:log', {
+                projectId,
+                agentId: workerId,
+                content: `⚠️ 分支操作失败: ${brResult.error || swResult.error}（将在当前分支继续）`,
+              });
             }
           }
         }
@@ -129,31 +241,57 @@ export async function workerLoop(
     }
 
     // TDD mode — QA generates test skeleton first
-    const localQaId = `qa-${workerId}`;  // 固定 ID: 每个 worker 对应一个 QA
+    const localQaId = `qa-${workerId}`; // 固定 ID: 每个 worker 对应一个 QA
     if (settings.tddMode && workspacePath) {
       try {
         spawnAgent(projectId, localQaId, 'qa', win);
-        sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `📝 TDD: 为 ${feature.id} 生成测试骨架...` });
-        sendToUI(win, 'agent:status', { projectId, agentId: localQaId, status: 'working', currentTask: feature.id, featureTitle: `TDD: ${feature.title || ''}` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: localQaId,
+          content: `📝 TDD: 为 ${feature.id} 生成测试骨架...`,
+        });
+        sendToUI(win, 'agent:status', {
+          projectId,
+          agentId: localQaId,
+          status: 'working',
+          currentTask: feature.id,
+          featureTitle: `TDD: ${feature.title || ''}`,
+        });
 
         const tddSession = getOrCreateSession(projectId, localQaId, 'qa');
-        const tddLinkId = linkFeatureSession({ featureId: feature.id, sessionId: tddSession.id, projectId, agentId: localQaId, agentRole: 'qa', workType: 'qa-tdd', expectedOutput: `为 ${feature.id} 生成 TDD 测试骨架` });
+        const tddLinkId = linkFeatureSession({
+          featureId: feature.id,
+          sessionId: tddSession.id,
+          projectId,
+          agentId: localQaId,
+          agentRole: 'qa',
+          workType: 'qa-tdd',
+          expectedOutput: `为 ${feature.id} 生成 TDD 测试骨架`,
+        });
 
         const tddResult = await generateTestSkeleton(settings, signal, feature, workspacePath, projectId);
         if (tddResult.files.length > 0) {
           const tddFiles = tddResult.files.map(f => f.path).join(', ');
-          sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `  ✅ TDD 测试骨架已写入: ${tddFiles}` });
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: localQaId,
+            content: `  ✅ TDD 测试骨架已写入: ${tddFiles}`,
+          });
           feature._tddTests = tddResult.files.map(f => f.path);
           feature._tddContext = `[TDD 模式] 以下测试文件已预先生成，你的目标是让这些测试全部通过:\n${tddFiles}\n请先阅读测试文件了解验收标准，然后编写实现代码。`;
           completeFeatureSessionLink(tddLinkId, `TDD 测试骨架: ${tddFiles}`, true);
         } else {
           completeFeatureSessionLink(tddLinkId, '未生成测试文件', false);
         }
-        db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(localQaId, projectId);
+        db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(localQaId, projectId);
         sendToUI(win, 'agent:status', { projectId, agentId: localQaId, status: 'idle' });
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `  ⚠️ TDD 测试骨架生成失败 (将继续正常开发): ${errMsg}` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: localQaId,
+          content: `  ⚠️ TDD 测试骨架生成失败 (将继续正常开发): ${errMsg}`,
+        });
       }
     }
     let lastErrorMsg = '';
@@ -162,15 +300,46 @@ export async function workerLoop(
       const devSession = getOrCreateSession(projectId, workerId, 'developer');
       const devWorkType: WorkType = qaAttempt === 1 ? 'dev-implement' : 'dev-rework';
       const devLinkId = linkFeatureSession({
-        featureId: feature.id, sessionId: devSession.id, projectId,
-        agentId: workerId, agentRole: 'developer', workType: devWorkType,
-        expectedOutput: qaAttempt === 1
-          ? `实现 ${feature.id}: ${(feature.title || feature.description || '').slice(0, 80)}`
-          : `重做 ${feature.id} (第${qaAttempt}次, QA反馈: ${(qaFeedback || '').slice(0, 60)})`,
+        featureId: feature.id,
+        sessionId: devSession.id,
+        projectId,
+        agentId: workerId,
+        agentRole: 'developer',
+        workType: devWorkType,
+        expectedOutput:
+          qaAttempt === 1
+            ? `实现 ${feature.id}: ${(feature.title || feature.description || '').slice(0, 80)}`
+            : `重做 ${feature.id} (第${qaAttempt}次, QA反馈: ${(qaFeedback || '').slice(0, 60)})`,
       });
 
       try {
-        const reactResult = await reactDeveloperLoop(projectId, workerId, settings, win, signal, workspacePath, gitConfig, feature, qaFeedback, permissions);
+        const reactResult = await reactDeveloperLoop(
+          projectId,
+          workerId,
+          settings,
+          win,
+          signal,
+          workspacePath,
+          gitConfig,
+          feature,
+          qaFeedback,
+          permissions,
+        );
+
+        // v28.0: 实时更新 Session 统计
+        if (featureSessionId) {
+          try {
+            updateSessionStats(
+              featureSessionId,
+              reactResult.totalInputTokens,
+              reactResult.totalOutputTokens,
+              reactResult.totalCost,
+            );
+          } catch {
+            /* safe */
+          }
+        }
+
         if (!reactResult.completed) {
           // v18.0: 区分「达到轮数上限」和「其他终止」
           const isMaxIter = reactResult.terminationReason === 'max_iterations';
@@ -186,97 +355,211 @@ export async function workerLoop(
               terminationReason: reactResult.terminationReason,
               timestamp: new Date().toISOString(),
             });
-            db.prepare("UPDATE features SET status = 'paused', resume_snapshot = ? WHERE id = ? AND project_id = ?")
-              .run(snapshot, feature.id, projectId);
+            db.prepare(
+              "UPDATE features SET status = 'paused', resume_snapshot = ? WHERE id = ? AND project_id = ?",
+            ).run(snapshot, feature.id, projectId);
             sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'paused' });
             sendToUI(win, 'agent:log', {
-              projectId, agentId: workerId,
+              projectId,
+              agentId: workerId,
               content: `⏸️ ${feature.id} 达到最大工作轮数 (${reactResult.iterations} 轮)，已暂停。可在看板页点击「继续」按钮恢复执行。`,
             });
             completeFeatureSessionLink(devLinkId, `暂停: 达到 ${reactResult.iterations} 轮上限`, false);
             break; // 不重试，等待用户手动恢复
           }
 
-          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ ${feature.id} ReAct 未完成 (${qaAttempt}/${maxQARetries})` });
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: workerId,
+            content: `⚠️ ${feature.id} ReAct 未完成 (${qaAttempt}/${maxQARetries})`,
+          });
           completeFeatureSessionLink(devLinkId, `ReAct 未完成 (iter=${reactResult.iterations})`, false);
           if (qaAttempt >= maxQARetries) break;
           continue;
         }
 
-        completeFeatureSessionLink(devLinkId, `完成: ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代, $${reactResult.totalCost.toFixed(4)}`, true);
+        completeFeatureSessionLink(
+          devLinkId,
+          `完成: ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代, $${reactResult.totalCost.toFixed(4)}`,
+          true,
+        );
 
         // v20.0: Feature 级成本异常预警 (P3-3) — 成本超过 $1 或 30 轮迭代
         if (reactResult.totalCost > 1.0 || reactResult.iterations > 30) {
           sendToUI(win, 'agent:log', {
-            projectId, agentId: workerId,
+            projectId,
+            agentId: workerId,
             content: `💰 ${feature.id} 成本预警: $${reactResult.totalCost.toFixed(4)}, ${reactResult.iterations} 迭代, ${reactResult.totalInputTokens + reactResult.totalOutputTokens} tokens`,
           });
-          addLog(projectId, workerId, 'warning',
-            `[${feature.id}] 成本异常: $${reactResult.totalCost.toFixed(4)}, ${reactResult.iterations} 迭代`);
+          addLog(
+            projectId,
+            workerId,
+            'warning',
+            `[${feature.id}] 成本异常: $${reactResult.totalCost.toFixed(4)}, ${reactResult.iterations} 迭代`,
+          );
         }
 
         if (reactResult.filesWritten.length > 0 && workspacePath) {
-          sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'reviewing', agentId: localQaId });
-          db.prepare("UPDATE features SET status = 'reviewing' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
-          db.prepare("UPDATE agents SET status = 'working', current_task = ? WHERE id = ? AND project_id = ?").run(feature.id, localQaId, projectId);
-          sendToUI(win, 'agent:status', { projectId, agentId: localQaId, status: 'working', currentTask: feature.id, featureTitle: feature.title || feature.description });
+          sendToUI(win, 'feature:status', {
+            projectId,
+            featureId: feature.id,
+            status: 'reviewing',
+            agentId: localQaId,
+          });
+          db.prepare("UPDATE features SET status = 'reviewing' WHERE id = ? AND project_id = ?").run(
+            feature.id,
+            projectId,
+          );
+          db.prepare("UPDATE agents SET status = 'working', current_task = ? WHERE id = ? AND project_id = ?").run(
+            feature.id,
+            localQaId,
+            projectId,
+          );
+          sendToUI(win, 'agent:status', {
+            projectId,
+            agentId: localQaId,
+            status: 'working',
+            currentTask: feature.id,
+            featureTitle: feature.title || feature.description,
+          });
           sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `🔍 审查 ${feature.id}...` });
 
           const qaSession = getOrCreateSession(projectId, localQaId, 'qa');
-          const qaLinkId = linkFeatureSession({ featureId: feature.id, sessionId: qaSession.id, projectId, agentId: localQaId, agentRole: 'qa', workType: 'qa-review', expectedOutput: `审查 ${feature.id} 的 ${reactResult.filesWritten.length} 个文件` });
+          const qaLinkId = linkFeatureSession({
+            featureId: feature.id,
+            sessionId: qaSession.id,
+            projectId,
+            agentId: localQaId,
+            agentRole: 'qa',
+            workType: 'qa-review',
+            expectedOutput: `审查 ${feature.id} 的 ${reactResult.filesWritten.length} 个文件`,
+          });
 
-          const qaResult = await runQAReview(settings, signal, feature, reactResult.filesWritten, workspacePath, projectId);
-          const qaCost = calcCost(resolveMemberModel(projectId, 'qa', settings), qaResult.inputTokens, qaResult.outputTokens);
+          const qaResult = await runQAReview(
+            settings,
+            signal,
+            feature,
+            reactResult.filesWritten,
+            workspacePath,
+            projectId,
+          );
+          const qaCost = calcCost(
+            resolveMemberModel(projectId, 'qa', settings),
+            qaResult.inputTokens,
+            qaResult.outputTokens,
+          );
           updateAgentStats(localQaId, projectId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
-          db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(localQaId, projectId);
+          // v28.0: QA 成本也计入 feature session
+          if (featureSessionId) {
+            try {
+              updateSessionStats(featureSessionId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
+            } catch {
+              /* safe */
+            }
+          }
+          db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(localQaId, projectId);
 
           if (qaResult.verdict === 'pass') {
             passed = true;
             completeFeatureSessionLink(qaLinkId, `QA 通过 (分数: ${qaResult.score})`, true);
-            sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `✅ ${feature.id} QA 通过! (分数: ${qaResult.score}, $${qaCost.toFixed(4)})` });
-            notify('✅ Feature 完成', `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`);
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: localQaId,
+              content: `✅ ${feature.id} QA 通过! (分数: ${qaResult.score}, $${qaCost.toFixed(4)})`,
+            });
+            notify(
+              '✅ Feature 完成',
+              `${feature.id}: ${(feature.title || '').slice(0, 40)} — QA 分数 ${qaResult.score}`,
+            );
 
             if (qaAttempt > 1 && qaFeedback && workspacePath) {
-              await extractLessons(projectId, localQaId, feature, qaFeedback, reactResult.filesWritten, qaResult.score, qaAttempt, settings, signal, workspacePath);
+              await extractLessons(
+                projectId,
+                localQaId,
+                feature,
+                qaFeedback,
+                reactResult.filesWritten,
+                qaResult.score,
+                qaAttempt,
+                settings,
+                signal,
+                workspacePath,
+              );
             }
             // v22.0: 录入经验实例到分层经验库
             if (workspacePath) {
               try {
                 if (qaAttempt > 1) {
-                  addInstance(workspacePath, 'qa_fail',
+                  addInstance(
+                    workspacePath,
+                    'qa_fail',
                     `${feature.id} 经过 ${qaAttempt} 轮 QA 后通过 (${qaResult.score}分): 初始问题 "${(qaFeedback || '').slice(0, 100)}"`,
-                    undefined);
+                    undefined,
+                  );
                 }
-                addInstance(workspacePath, 'feature_done',
+                addInstance(
+                  workspacePath,
+                  'feature_done',
                   `${feature.id} 完成: ${(feature.title || '').slice(0, 80)} — ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代`,
-                  undefined);
-              } catch { /* non-critical */ }
+                  undefined,
+                );
+              } catch {
+                /* non-critical */
+              }
             }
             broadcastFilesCreated(workerId, feature.id, reactResult.filesWritten);
             break;
           } else {
             qaFeedback = qaResult.feedbackText;
-            completeFeatureSessionLink(qaLinkId, `QA 未通过 (分数: ${qaResult.score}): ${(qaResult.summary || '').slice(0, 100)}`, false);
-            sendToUI(win, 'agent:log', { projectId, agentId: localQaId, content: `❌ ${feature.id} QA 未通过 (${qaResult.score}): ${qaResult.summary}` });
-            sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔄 ${feature.id} 重做 (${qaAttempt}/${maxQARetries})` });
-            db.prepare("UPDATE features SET status = 'in_progress' WHERE id = ? AND project_id = ?").run(feature.id, projectId);
+            completeFeatureSessionLink(
+              qaLinkId,
+              `QA 未通过 (分数: ${qaResult.score}): ${(qaResult.summary || '').slice(0, 100)}`,
+              false,
+            );
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: localQaId,
+              content: `❌ ${feature.id} QA 未通过 (${qaResult.score}): ${qaResult.summary}`,
+            });
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: workerId,
+              content: `🔄 ${feature.id} 重做 (${qaAttempt}/${maxQARetries})`,
+            });
+            db.prepare("UPDATE features SET status = 'in_progress' WHERE id = ? AND project_id = ?").run(
+              feature.id,
+              projectId,
+            );
 
             // v20.0: 自动经验提取 (P2-1) — QA reject 时记录失败原因到项目记忆
             if (workspacePath) {
               try {
                 const { extractExperience } = await import('../scratchpad');
-                extractExperience(workspacePath, workerId, 'qa_reject',
-                  `${feature.id} QA 未通过 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`);
+                extractExperience(
+                  workspacePath,
+                  workerId,
+                  'qa_reject',
+                  `${feature.id} QA 未通过 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`,
+                );
                 // v22.0: 同时录入分层经验库
-                addInstance(workspacePath, 'qa_fail',
+                addInstance(
+                  workspacePath,
+                  'qa_fail',
                   `${feature.id} QA 驳回 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`,
-                  undefined);
-              } catch { /* silent */ }
+                  undefined,
+                );
+              } catch {
+                /* silent */
+              }
             }
           }
         } else {
           passed = true;
-          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `✅ ${feature.id} 完成 (无文件, $${reactResult.totalCost.toFixed(4)})` });
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: workerId,
+            content: `✅ ${feature.id} 完成 (无文件, $${reactResult.totalCost.toFixed(4)})`,
+          });
           break;
         }
       } catch (err: unknown) {
@@ -286,7 +569,11 @@ export async function workerLoop(
         completeFeatureSessionLink(devLinkId, `错误: ${lastErrorMsg.slice(0, 150)}`, false);
         if (err instanceof NonRetryableError) {
           lastErrorMsg = `[NonRetryable:${err.statusCode}] ${err.message}`;
-          sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🛑 ${feature.id} 不可重试错误: ${err.message}` });
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: workerId,
+            content: `🛑 ${feature.id} 不可重试错误: ${err.message}`,
+          });
           addLog(projectId, workerId, 'error', `[${feature.id}] NonRetryable: ${err.message}`);
           break;
         }
@@ -297,40 +584,95 @@ export async function workerLoop(
       }
     }
 
-    if (signal.aborted) break;
+    if (signal.aborted) {
+      // v28.0: 中断时也需要结束 session
+      if (featureSessionId) {
+        try {
+          transitionSession(featureSessionId, 'suspended', 'Signal aborted');
+        } catch {
+          /* safe */
+        }
+      }
+      break;
+    }
 
-    // Release claims and locks
-    if (workspacePath) { releaseFiles(workspacePath, workerId, feature.id); }
-    releaseFeatureLocks(workerId, feature.id);
+    // Release claims and locks (use lockIdentity to match lockNextFeature)
+    if (workspacePath) {
+      releaseFiles(workspacePath, lockIdentity, feature.id);
+    }
+    releaseFeatureLocks(lockIdentity, feature.id);
+
+    // v28.0: Session 生命周期终态
+    if (featureSessionId) {
+      try {
+        transitionSession(
+          featureSessionId,
+          passed ? 'completed' : 'failed',
+          passed ? undefined : lastErrorMsg || 'Feature not passed',
+        );
+      } catch {
+        /* session lifecycle non-critical */
+      }
+    }
 
     const newStatus = passed ? 'qa_passed' : 'failed';
     featuresProcessed++;
-    if (passed) featuresPassed++; else featuresFailed++;
-    db.prepare("UPDATE features SET status = ?, locked_by = NULL, last_error = ?, last_error_at = CASE WHEN ? = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?")
-      .run(newStatus, passed ? null : lastErrorMsg, newStatus, feature.id, projectId);
+    if (passed) featuresPassed++;
+    else featuresFailed++;
+    db.prepare(
+      "UPDATE features SET status = ?, locked_by = NULL, last_error = ?, last_error_at = CASE WHEN ? = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ? AND project_id = ?",
+    ).run(newStatus, passed ? null : lastErrorMsg, newStatus, feature.id, projectId);
     sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: newStatus, agentId: workerId });
-    db.prepare("UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?").run(workerId, projectId);
-    emitEvent({ projectId, agentId: workerId, featureId: feature.id, type: passed ? 'feature:qa_passed' : 'feature:failed', data: { title: feature.title, status: newStatus } });
+    db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(workerId, projectId);
+    emitEvent({
+      projectId,
+      agentId: workerId,
+      featureId: feature.id,
+      type: passed ? 'feature:qa_passed' : 'feature:failed',
+      data: { title: feature.title, status: newStatus },
+    });
+    // v28.0: 触发调度总线 — 释放 capacity / 重新调度
+    emitScheduleEvent(passed ? 'schedule:feature_completed' : 'schedule:feature_failed', {
+      projectId,
+      featureId: feature.id,
+    });
 
-    const completedCount = (db.prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('qa_passed','passed','failed')").get(projectId) as CountResult).c;
+    const completedCount = (
+      db
+        .prepare(
+          "SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('qa_passed','passed','failed')",
+        )
+        .get(projectId) as CountResult
+    ).c;
     if (completedCount % 3 === 0) createCheckpoint(projectId, `${completedCount} Features 已处理`);
-    if (passed && workspacePath) await commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
+    if (passed && workspacePath)
+      await commitWorkspace(workspacePath, `feat: ${feature.id} — ${(feature.title || '').slice(0, 50)}`);
 
     // D5+D9: Post-feature 经验提取 (fire-and-forget, 覆盖 passed/failed 双路径)
     if (workspacePath) {
-      const projRow = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId) as { name: string } | undefined;
+      const projRow = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId) as
+        | { name: string }
+        | undefined;
       harvestPostFeature({
-        projectId, featureId: feature.id, featureTitle: feature.title || '',
+        projectId,
+        featureId: feature.id,
+        featureTitle: feature.title || '',
         result: passed ? 'passed' : 'failed',
         qaAttempts: maxQARetries,
         filesWritten: [], // files already committed; not tracked here
         reason: passed ? undefined : lastErrorMsg || undefined,
-        workspacePath, projectName: projRow?.name || projectId,
-        settings, signal,
+        workspacePath,
+        projectName: projRow?.name || projectId,
+        settings,
+        signal,
       }).catch(() => {}); // non-blocking
 
       // v22.0: project-memory.md 容量自治 — 每完成一个 feature 检查并压缩
-      try { compactProjectMemory(workspacePath, 8000); } catch { /* silent */ }
+      try {
+        compactProjectMemory(workspacePath, 8000);
+      } catch {
+        /* silent */
+      }
     }
 
     // v14.0: Post-completion GitHub automation (push → PR → Issue comment/close)
@@ -357,13 +699,23 @@ export async function workerLoop(
             feature.description || feature.title || '(无描述)',
             '',
             `> 🤖 此 PR 由 AutoMater 自动创建`,
-          ].filter(Boolean).join('\n');
+          ]
+            .filter(Boolean)
+            .join('\n');
 
           const pr = await createPR(gitConfig, prTitle, prBody, issueBranch, 'main', false);
           if (pr) {
-            sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `🔀 PR #${pr.number} 已创建: ${pr.html_url}` });
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: workerId,
+              content: `🔀 PR #${pr.number} 已创建: ${pr.html_url}`,
+            });
             // 记录 PR 号
-            db.prepare('UPDATE features SET github_pr_number = ? WHERE id = ? AND project_id = ?').run(pr.number, feature.id, projectId);
+            db.prepare('UPDATE features SET github_pr_number = ? WHERE id = ? AND project_id = ?').run(
+              pr.number,
+              feature.id,
+              projectId,
+            );
           } else {
             sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ PR 创建失败` });
           }
@@ -379,7 +731,11 @@ export async function workerLoop(
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        sendToUI(win, 'agent:log', { projectId, agentId: workerId, content: `⚠️ GitHub 自动化失败 (非致命): ${errMsg}` });
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `⚠️ GitHub 自动化失败 (非致命): ${errMsg}`,
+        });
         addLog(projectId, workerId, 'warn', `GitHub automation failed for ${feature.id}: ${errMsg}`);
       }
     }
@@ -388,7 +744,8 @@ export async function workerLoop(
     if (issueBranch && workspacePath && gitConfig.mode === 'github') {
       try {
         await switchBranch(gitConfig, 'main');
-      } catch { /* silent: 分支切回main失败不影响主流程 */
+      } catch {
+        /* silent: 分支切回main失败不影响主流程 */
         // Non-fatal: might not have a main branch
       }
     }
@@ -396,8 +753,8 @@ export async function workerLoop(
     await sleep(500);
   }
 
-  const workerSummary = `Worker ${workerId}: ${featuresProcessed} features 处理 (${featuresPassed} passed, ${featuresFailed} failed)`;
-  const workerStatus = signal.aborted ? 'failure' : (featuresFailed > 0 ? 'partial' : 'success');
+  const workerSummary = `Worker ${workerId}${member ? ` [${member.name}]` : ''}: ${featuresProcessed} features 处理 (${featuresPassed} passed, ${featuresFailed} failed)`;
+  const workerStatus = signal.aborted ? 'failure' : featuresFailed > 0 ? 'partial' : 'success';
   return makePhaseResult('dev_implement', workerStatus, workerSummary, startTime, {
     artifacts: { testResults: { passed: featuresPassed, failed: featuresFailed } },
   });
@@ -408,17 +765,35 @@ export async function workerLoop(
 // ═══════════════════════════════════════
 
 async function extractLessons(
-  projectId: string, qaId: string, feature: EnrichedFeature | FeatureRow, qaFeedback: string,
-  filesWritten: string[], qaScore: number, qaAttempt: number,
-  settings: AppSettings, signal: AbortSignal, workspacePath: string,
+  projectId: string,
+  qaId: string,
+  feature: EnrichedFeature | FeatureRow,
+  qaFeedback: string,
+  filesWritten: string[],
+  qaScore: number,
+  qaAttempt: number,
+  settings: AppSettings,
+  signal: AbortSignal,
+  workspacePath: string,
 ): Promise<void> {
   try {
-    const lessonPrompt = buildLessonExtractionPrompt(feature.id, qaFeedback, filesWritten, `QA pass on attempt ${qaAttempt}, score ${qaScore}`);
+    const lessonPrompt = buildLessonExtractionPrompt(
+      feature.id,
+      qaFeedback,
+      filesWritten,
+      `QA pass on attempt ${qaAttempt}, score ${qaScore}`,
+    );
     const lessonModel = resolveModel(selectModelTier({ type: 'lesson_extract' }).tier, settings);
-    const lessonResult = await callLLM(settings, lessonModel, [
-      { role: 'system', content: '你是经验提取助手，只输出经验条目。' },
-      { role: 'user', content: lessonPrompt },
-    ], signal, 1024);
+    const lessonResult = await callLLM(
+      settings,
+      lessonModel,
+      [
+        { role: 'system', content: '你是经验提取助手，只输出经验条目。' },
+        { role: 'user', content: lessonPrompt },
+      ],
+      signal,
+      1024,
+    );
 
     const lessonCost = calcCost(lessonModel, lessonResult.inputTokens, lessonResult.outputTokens);
     updateAgentStats(qaId, projectId, lessonResult.inputTokens, lessonResult.outputTokens, lessonCost);
@@ -426,7 +801,11 @@ async function extractLessons(
     const lessons = lessonResult.content.trim();
     if (lessons) {
       appendProjectMemory(workspacePath, `### Lessons from ${feature.id} (QA attempt ${qaAttempt})\n${lessons}`);
-      sendToUI(null, 'agent:log', { projectId, agentId: 'system', content: `📝 经验已记录:\n${lessons.slice(0, 200)}` });
+      sendToUI(null, 'agent:log', {
+        projectId,
+        agentId: 'system',
+        content: `📝 经验已记录:\n${lessons.slice(0, 200)}`,
+      });
       addLog(projectId, 'system', 'lesson', `[${feature.id}] ${lessons}`);
     }
   } catch (e: unknown) {

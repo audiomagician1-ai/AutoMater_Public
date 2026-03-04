@@ -55,6 +55,7 @@ import {
   type SecretProvider,
 } from '../engine/secret-manager';
 import { safeJsonParse } from '../engine/safe-json';
+import { emitScheduleEvent } from '../engine/scheduler-bus';
 
 // 导入进程的 AbortController 映射（用于取消正在运行的导入）
 const importAbortControllers = new Map<string, AbortController>();
@@ -489,6 +490,7 @@ export function setupProjectHandlers() {
     const db = getDb();
     const id = 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     db.prepare(`INSERT INTO wishes (id, project_id, content) VALUES (?, ?, ?)`).run(id, projectId, content);
+    emitScheduleEvent('schedule:wish_created', { projectId, wishId: id });
     return { success: true, wishId: id };
   });
 
@@ -544,6 +546,13 @@ export function setupProjectHandlers() {
       sets.push("updated_at = datetime('now')");
       vals.push(wishId);
       db.prepare(`UPDATE wishes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+      // v28.0: 需求变更时发射调度事件
+      if (fields.content !== undefined) {
+        const wish = db.prepare('SELECT project_id FROM wishes WHERE id = ?').get(wishId) as
+          | { project_id: string }
+          | undefined;
+        if (wish) emitScheduleEvent('schedule:wish_updated', { projectId: wish.project_id, wishId });
+      }
       return { success: true };
     },
   );
@@ -607,6 +616,8 @@ export function setupProjectHandlers() {
       }
       // 触发主进程内部事件 — orchestrator 监听此事件决定是否 spawn worker
       emitMemberAdded(payload);
+      // v28.0: 触发调度总线事件
+      emitScheduleEvent('schedule:member_added', { projectId, memberId: id, role: member.role, name: member.name });
 
       return { success: true, memberId: id };
     },
@@ -1164,6 +1175,7 @@ export function setupProjectHandlers() {
     }
 
     // 正常项目：走 orchestrator 流水线
+    emitScheduleEvent('schedule:project_started', { projectId });
     runOrchestrator(projectId, win).catch(err => {
       log.error('Orchestrator fatal error', err);
       win?.webContents.send('agent:error', { projectId, error: err.message });
@@ -1201,6 +1213,7 @@ export function setupProjectHandlers() {
     }
 
     stopOrchestrator(projectId);
+    emitScheduleEvent('schedule:project_paused', { projectId });
 
     // v23.0: TODO — 项目停止时异步触发经验整理 (consolidateOnProjectEnd 尚未实现)
     // try {

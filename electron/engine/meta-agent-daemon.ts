@@ -19,6 +19,13 @@ import { callLLM, getSettings } from './llm-client';
 import { sendToUI } from './ui-bridge';
 import { createLogger } from './logger';
 import { safeJsonParse } from './safe-json';
+import {
+  registerSchedulerListeners,
+  fallbackCheck as schedulerFallbackCheck,
+  enableScheduler,
+  disableScheduler,
+} from './session-scheduler';
+import { cleanupZombieLocks, gcSessions } from './session-lifecycle';
 
 const log = createLogger('meta-daemon');
 
@@ -27,51 +34,82 @@ const log = createLogger('meta-daemon');
 // ═══════════════════════════════════════
 
 export interface DaemonConfig {
-  enabled: boolean;             // 总开关
+  enabled: boolean; // 总开关
   heartbeatIntervalMin: number; // 心跳间隔(分钟), 0=禁用
-  activeHoursStart: string;     // 活跃时间窗口开始 "08:00"
-  activeHoursEnd: string;       // 活跃时间窗口结束 "24:00"
-  dailyTokenBudget: number;     // 每日 token 预算上限
-  hooks: HookConfig;            // 事件钩子配置
-  cronJobs: CronJobConfig[];    // 定时任务列表
-  heartbeatPrompt: string;      // 自定义心跳 prompt (空=内置)
+  activeHoursStart: string; // 活跃时间窗口开始 "08:00"
+  activeHoursEnd: string; // 活跃时间窗口结束 "24:00"
+  dailyTokenBudget: number; // 每日 token 预算上限
+  hooks: HookConfig; // 事件钩子配置
+  cronJobs: CronJobConfig[]; // 定时任务列表
+  heartbeatPrompt: string; // 自定义心跳 prompt (空=内置)
 }
 
 export interface HookConfig {
-  onFeatureFailed: boolean;     // feature QA 失败时通知
-  onProjectComplete: boolean;   // 项目完成时通知
-  onProjectStalled: boolean;    // 项目长时间无进展时通知
-  onError: boolean;             // 严重错误时通知
-  stallThresholdMin: number;    // 停滞阈值(分钟), 默认 30
+  onFeatureFailed: boolean; // feature QA 失败时通知
+  onProjectComplete: boolean; // 项目完成时通知
+  onProjectStalled: boolean; // 项目长时间无进展时通知
+  onError: boolean; // 严重错误时通知
+  stallThresholdMin: number; // 停滞阈值(分钟), 默认 30
 }
 
 export interface CronJobConfig {
   id: string;
   name: string;
-  schedule: string;             // 简化cron: "daily:09:00" | "hourly" | "every:120m"
-  prompt: string;               // 执行时发给 LLM 的指令
+  schedule: string; // 简化cron: "daily:09:00" | "hourly" | "every:120m"
+  prompt: string; // 执行时发给 LLM 的指令
   enabled: boolean;
 }
 
 export interface HeartbeatLog {
   id?: number;
   type: 'heartbeat' | 'hook' | 'cron';
-  trigger: string;              // 触发原因描述
+  trigger: string; // 触发原因描述
   result: 'ok' | 'notified' | 'error';
-  message: string;              // LLM 回复或静默标记
+  message: string; // LLM 回复或静默标记
   tokensUsed: number;
   created_at?: string;
 }
 
 /** DB query result types (internal) */
-interface ProjectRow { id: string; name: string; wish: string; status: string; updated_at: string | null }
-interface FeatureStatusCount { status: string; count: number }
-interface StalledFeature { id: string; title: string; status: string; locked_by: string | null }
-interface FailedFeature { id: string; title: string; last_error: string | null }
-interface CountRow { count: number }
-interface MaxIdRow { maxId: number | null }
-interface EventRow { id: number; project_id: string; type: string; data: string | null; created_at: string }
-interface MemoryRow { content: string; category: string }
+interface ProjectRow {
+  id: string;
+  name: string;
+  wish: string;
+  status: string;
+  updated_at: string | null;
+}
+interface FeatureStatusCount {
+  status: string;
+  count: number;
+}
+interface StalledFeature {
+  id: string;
+  title: string;
+  status: string;
+  locked_by: string | null;
+}
+interface FailedFeature {
+  id: string;
+  title: string;
+  last_error: string | null;
+}
+interface CountRow {
+  count: number;
+}
+interface MaxIdRow {
+  maxId: number | null;
+}
+interface EventRow {
+  id: number;
+  project_id: string;
+  type: string;
+  data: string | null;
+  created_at: string;
+}
+interface MemoryRow {
+  content: string;
+  category: string;
+}
 
 // ═══════════════════════════════════════
 // Defaults
@@ -120,10 +158,12 @@ export function ensureHeartbeatTable(): void {
 function logHeartbeat(entry: HeartbeatLog): void {
   try {
     const db = getDb();
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO meta_agent_heartbeat_log (type, trigger_desc, result, message, tokens_used)
       VALUES (?, ?, ?, ?, ?)
-    `).run(entry.type, entry.trigger, entry.result, entry.message, entry.tokensUsed);
+    `,
+    ).run(entry.type, entry.trigger, entry.result, entry.message, entry.tokensUsed);
   } catch (err) {
     log.error('Failed to log heartbeat', err);
   }
@@ -132,13 +172,19 @@ function logHeartbeat(entry: HeartbeatLog): void {
 function getTodayTokenUsage(): number {
   try {
     const db = getDb();
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT COALESCE(SUM(tokens_used), 0) as total
       FROM meta_agent_heartbeat_log
       WHERE created_at >= date('now')
-    `).get() as { total: number };
+    `,
+      )
+      .get() as { total: number };
     return row.total;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 }
 
 // ═══════════════════════════════════════
@@ -147,11 +193,15 @@ function getTodayTokenUsage(): number {
 
 export function getDaemonConfig(): DaemonConfig {
   const db = getDb();
-  const row = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('daemon') as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('daemon') as
+    | { value: string }
+    | undefined;
   if (row) {
     try {
       return { ...DEFAULT_DAEMON_CONFIG, ...JSON.parse(row.value) };
-    } catch { /* fallback */ }
+    } catch {
+      /* fallback */
+    }
   }
   return { ...DEFAULT_DAEMON_CONFIG };
 }
@@ -160,7 +210,10 @@ export function saveDaemonConfig(config: Partial<DaemonConfig>): DaemonConfig {
   const db = getDb();
   const current = getDaemonConfig();
   const merged = { ...current, ...config };
-  db.prepare('INSERT OR REPLACE INTO meta_agent_config (key, value) VALUES (?, ?)').run('daemon', JSON.stringify(merged));
+  db.prepare('INSERT OR REPLACE INTO meta_agent_config (key, value) VALUES (?, ?)').run(
+    'daemon',
+    JSON.stringify(merged),
+  );
   return merged;
 }
 
@@ -180,35 +233,53 @@ function isWithinActiveHours(config: DaemonConfig): boolean {
 
 function buildProjectStatusSnapshot(): string {
   const db = getDb();
-  const projects = db.prepare("SELECT id, name, wish, status, updated_at FROM projects ORDER BY updated_at DESC LIMIT 10").all() as ProjectRow[];
+  const projects = db
+    .prepare('SELECT id, name, wish, status, updated_at FROM projects ORDER BY updated_at DESC LIMIT 10')
+    .all() as ProjectRow[];
 
   if (projects.length === 0) return '当前没有任何项目。';
 
   const parts: string[] = ['## 项目状态总览'];
   for (const p of projects) {
-    const features = db.prepare(`
+    const features = db
+      .prepare(
+        `
       SELECT status, COUNT(*) as count FROM features WHERE project_id = ? GROUP BY status
-    `).all(p.id) as FeatureStatusCount[];
+    `,
+      )
+      .all(p.id) as FeatureStatusCount[];
 
     const statusSummary = features.map(f => `${f.status}:${f.count}`).join(', ');
 
     // Check for stalled features
-    const stalledFeatures = db.prepare(`
+    const stalledFeatures = db
+      .prepare(
+        `
       SELECT id, title, status, locked_by FROM features
       WHERE project_id = ? AND status IN ('in_progress', 'todo') AND locked_by IS NOT NULL
-    `).all(p.id) as StalledFeature[];
+    `,
+      )
+      .all(p.id) as StalledFeature[];
 
     // Check for failed features
-    const failedFeatures = db.prepare(`
+    const failedFeatures = db
+      .prepare(
+        `
       SELECT id, title, last_error FROM features
       WHERE project_id = ? AND status = 'failed'
-    `).all(p.id) as FailedFeature[];
+    `,
+      )
+      .all(p.id) as FailedFeature[];
 
     // Recent events
-    const recentEventCount = db.prepare(`
+    const recentEventCount = db
+      .prepare(
+        `
       SELECT COUNT(*) as count FROM events
       WHERE project_id = ? AND created_at >= datetime('now', '-30 minutes')
-    `).get(p.id) as CountRow | undefined;
+    `,
+      )
+      .get(p.id) as CountRow | undefined;
 
     parts.push(`### ${p.name} [${p.status}]`);
     parts.push(`  需求: ${(p.wish || '').slice(0, 100)}`);
@@ -217,7 +288,9 @@ function buildProjectStatusSnapshot(): string {
       parts.push(`  ⚠ 失败 (${failedFeatures.length}): ${failedFeatures.map(f => f.title).join(', ')}`);
     }
     if (stalledFeatures.length > 0) {
-      parts.push(`  🔒 进行中 (${stalledFeatures.length}): ${stalledFeatures.map(f => `${f.title}(${f.locked_by})`).join(', ')}`);
+      parts.push(
+        `  🔒 进行中 (${stalledFeatures.length}): ${stalledFeatures.map(f => `${f.title}(${f.locked_by})`).join(', ')}`,
+      );
     }
     parts.push(`  最近30分钟事件: ${recentEventCount?.count ?? 0}`);
     parts.push(`  最后更新: ${p.updated_at || 'N/A'}`);
@@ -250,34 +323,45 @@ async function runAgentCheck(type: HeartbeatLog['type'], trigger: string, custom
   // 只有定时心跳才检查 (hook/cron 有明确触发事件, 不受此限)
   if (type === 'heartbeat') {
     const db0 = getDb();
-    const activeCount = (db0.prepare(
-      "SELECT COUNT(*) as c FROM projects WHERE status IN ('initializing', 'analyzing', 'developing', 'reviewing', 'deploying')"
-    ).get() as { c: number }).c;
-    const totalCount = (db0.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c;
+    const activeCount = (
+      db0
+        .prepare(
+          "SELECT COUNT(*) as c FROM projects WHERE status IN ('initializing', 'analyzing', 'developing', 'reviewing', 'deploying')",
+        )
+        .get() as { c: number }
+    ).c;
+    const totalCount = (db0.prepare('SELECT COUNT(*) as c FROM projects').get() as { c: number }).c;
     if (totalCount === 0 || activeCount === 0) {
       log.debug(`Heartbeat skipped: no active projects (total=${totalCount}, active=${activeCount})`);
-      logHeartbeat({ type, trigger, result: 'ok', message: `HEARTBEAT_OK (no active projects: ${totalCount} total, ${activeCount} active)`, tokensUsed: 0 });
+      logHeartbeat({
+        type,
+        trigger,
+        result: 'ok',
+        message: `HEARTBEAT_OK (no active projects: ${totalCount} total, ${activeCount} active)`,
+        tokensUsed: 0,
+      });
       return;
     }
   }
 
   // Load meta-agent config for name/personality
   const db = getDb();
-  const metaRow = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('config') as { value: string } | undefined;
+  const metaRow = db.prepare('SELECT value FROM meta_agent_config WHERE key = ?').get('config') as
+    | { value: string }
+    | undefined;
   const metaConfig = metaRow
     ? safeJsonParse<Record<string, string>>(metaRow.value, {}, 'meta-agent-config')
-    : {} as Record<string, string>;
+    : ({} as Record<string, string>);
   const agentName = metaConfig.name || '元Agent管家';
   const personality = metaConfig.personality || '专业、友好、高效';
   const userNickname = metaConfig.userNickname ? `称呼用户为"${metaConfig.userNickname}"` : '';
 
   // Load relevant memories
-  const memories = db.prepare(
-    'SELECT content, category FROM meta_agent_memories ORDER BY importance DESC, updated_at DESC LIMIT 20'
-  ).all() as MemoryRow[];
-  const memoryContext = memories.length > 0
-    ? '\n## 你的记忆\n' + memories.map(m => `- [${m.category}] ${m.content}`).join('\n')
-    : '';
+  const memories = db
+    .prepare('SELECT content, category FROM meta_agent_memories ORDER BY importance DESC, updated_at DESC LIMIT 20')
+    .all() as MemoryRow[];
+  const memoryContext =
+    memories.length > 0 ? '\n## 你的记忆\n' + memories.map(m => `- [${m.category}] ${m.content}`).join('\n') : '';
 
   const statusSnapshot = buildProjectStatusSnapshot();
 
@@ -299,7 +383,10 @@ async function runAgentCheck(type: HeartbeatLog['type'], trigger: string, custom
 - 失败/卡住/完成 才需要通知
 ${memoryContext}`;
 
-  const userPrompt = customPrompt || config.heartbeatPrompt || `请审视以下项目状态，判断是否有需要我关注的事情。如果一切正常，回复 ${HEARTBEAT_OK_TOKEN}。\n\n${statusSnapshot}`;
+  const userPrompt =
+    customPrompt ||
+    config.heartbeatPrompt ||
+    `请审视以下项目状态，判断是否有需要我关注的事情。如果一切正常，回复 ${HEARTBEAT_OK_TOKEN}。\n\n${statusSnapshot}`;
 
   const messages = [
     { role: 'system', content: heartbeatSystemPrompt },
@@ -366,10 +453,14 @@ function checkEventHooks(): void {
     const db = getDb();
 
     // Get new events since last check
-    const events = db.prepare(`
+    const events = db
+      .prepare(
+        `
       SELECT id, project_id, type, data, created_at FROM events
       WHERE id > ? ORDER BY id ASC LIMIT 50
-    `).all(_lastEventCheckId) as EventRow[];
+    `,
+      )
+      .all(_lastEventCheckId) as EventRow[];
 
     if (events.length === 0) return;
     _lastEventCheckId = events[events.length - 1].id;
@@ -392,7 +483,11 @@ function checkEventHooks(): void {
 
     if (triggers.length > 0) {
       const triggerSummary = triggers.join('\n');
-      runAgentCheck('hook', triggerSummary, `以下事件刚刚发生，请判断是否需要通知用户:\n${triggerSummary}\n\n如果不需要特别通知，回复 ${HEARTBEAT_OK_TOKEN}。`);
+      runAgentCheck(
+        'hook',
+        triggerSummary,
+        `以下事件刚刚发生，请判断是否需要通知用户:\n${triggerSummary}\n\n如果不需要特别通知，回复 ${HEARTBEAT_OK_TOKEN}。`,
+      );
     }
   } catch (err) {
     log.error('Event hook check failed', err);
@@ -458,14 +553,22 @@ export function startDaemon(): void {
   }
 
   _running = true;
-  log.info(`Daemon starting — heartbeat every ${config.heartbeatIntervalMin}m, active ${config.activeHoursStart}-${config.activeHoursEnd}`);
+  log.info(
+    `Daemon starting — heartbeat every ${config.heartbeatIntervalMin}m, active ${config.activeHoursStart}-${config.activeHoursEnd}`,
+  );
+
+  // v28.0: 注册 Scheduler 事件监听器并启用自动调度
+  registerSchedulerListeners();
+  enableScheduler();
 
   // Initialize last event ID to current max
   try {
     const db = getDb();
     const row = db.prepare('SELECT MAX(id) as maxId FROM events').get() as MaxIdRow | undefined;
     _lastEventCheckId = row?.maxId ?? 0;
-  } catch { _lastEventCheckId = 0; }
+  } catch {
+    _lastEventCheckId = 0;
+  }
 
   // Heartbeat timer
   if (config.heartbeatIntervalMin > 0) {
@@ -476,6 +579,9 @@ export function startDaemon(): void {
         return;
       }
       runAgentCheck('heartbeat', `定时心跳 (每${config.heartbeatIntervalMin}分钟)`);
+      // v28.0: 心跳时执行维护任务（低频，不会每 30s 跑）
+      cleanupZombieLocks();
+      gcSessions();
     }, intervalMs);
   }
 
@@ -487,12 +593,21 @@ export function startDaemon(): void {
 
     checkEventHooks();
     checkCronJobs();
+    // v28.0: Scheduler 兜底检查 — 补漏事件驱动遗漏的调度
+    schedulerFallbackCheck().catch(err => log.error('Scheduler fallback check failed', err));
   }, 30_000);
 }
 
 export function stopDaemon(): void {
-  if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
-  if (_hookTimer) { clearInterval(_hookTimer); _hookTimer = null; }
+  if (_heartbeatTimer) {
+    clearInterval(_heartbeatTimer);
+    _heartbeatTimer = null;
+  }
+  if (_hookTimer) {
+    clearInterval(_hookTimer);
+    _hookTimer = null;
+  }
+  disableScheduler(); // v28.0
   _running = false;
   log.info('Daemon stopped');
 }
@@ -510,10 +625,10 @@ export function isDaemonRunning(): boolean {
 export function getHeartbeatLogs(limit: number = 50): HeartbeatLog[] {
   try {
     const db = getDb();
-    return db.prepare(
-      'SELECT * FROM meta_agent_heartbeat_log ORDER BY id DESC LIMIT ?'
-    ).all(limit) as HeartbeatLog[];
-  } catch { return []; }
+    return db.prepare('SELECT * FROM meta_agent_heartbeat_log ORDER BY id DESC LIMIT ?').all(limit) as HeartbeatLog[];
+  } catch {
+    return [];
+  }
 }
 
 /** Get daemon status summary */

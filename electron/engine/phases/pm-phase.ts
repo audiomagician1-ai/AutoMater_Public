@@ -13,7 +13,7 @@ import {
   sendToUI,
   addLog,
   notify,
-    spawnAgent,
+  spawnAgent,
   updateAgentStats,
   getTeamPrompt,
   getTeamMemberLLMConfig,
@@ -31,6 +31,7 @@ import {
   completeFeatureSessionLink,
   getOrCreateSession,
   emitEvent,
+  emitScheduleEvent,
   createCheckpoint,
   resolveMemberModel,
   safeJsonParse,
@@ -65,7 +66,10 @@ export async function phasePMAnalysis(
   permissions?: import('../tool-registry').AgentPermissions,
 ): Promise<PMPhaseResult> {
   const startTime = Date.now();
-  const _fail = (msg: string): PMPhaseResult => ({ ...makePhaseResult('pm_analysis', 'failure', msg, startTime), features: null });
+  const _fail = (msg: string): PMPhaseResult => ({
+    ...makePhaseResult('pm_analysis', 'failure', msg, startTime),
+    features: null,
+  });
   const db = getDb();
   const pmId = 'pm-0'; // 固定 ID: 复用同一 Agent 行
   spawnAgent(projectId, pmId, 'pm', win);
@@ -226,7 +230,15 @@ export async function phasePMAnalysis(
       db.prepare("UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?").run(projectId);
       sendToUI(win, 'project:status', { projectId, status: 'paused' });
       notify('⚠️ AutoMater 需要你的帮助', `PM 分析遇到阻塞: ${pmReactResult.blockReason}`);
-      return { ...makePhaseResult('pm_analysis', 'failure', `PM 被阻塞: ${(pmReactResult.blockReason || '').slice(0, 80)}`, startTime), features: null };
+      return {
+        ...makePhaseResult(
+          'pm_analysis',
+          'failure',
+          `PM 被阻塞: ${(pmReactResult.blockReason || '').slice(0, 80)}`,
+          startTime,
+        ),
+        features: null,
+      };
     }
 
     const textToParse = pmReactResult.finalText || '';
@@ -312,6 +324,10 @@ export async function phasePMAnalysis(
   sendToUI(win, 'project:features-ready', { projectId, count: features.length });
   sendToUI(win, 'agent:log', { projectId, agentId: pmId, content: `📋 生成了 ${features.length} 个 Feature` });
   emitEvent({ projectId, agentId: pmId, type: 'phase:pm:end', data: { featureCount: features.length } });
+  // v28.0: PM 产出新 Feature → 触发调度
+  for (const f of features) {
+    emitScheduleEvent('schedule:feature_todo', { projectId, featureId: f.id });
+  }
   createCheckpoint(projectId, `PM 分析完成 (${features.length} Features)`);
 
   const pmResult: PMPhaseResult = {
@@ -337,7 +353,10 @@ export async function phaseIncrementalPM(
   _workspacePath: string | null,
 ): Promise<PMPhaseResult> {
   const startTime = Date.now();
-  const _failInc = (msg: string): PMPhaseResult => ({ ...makePhaseResult('pm_analysis', 'failure', msg, startTime), features: null });
+  const _failInc = (msg: string): PMPhaseResult => ({
+    ...makePhaseResult('pm_analysis', 'failure', msg, startTime),
+    features: null,
+  });
   const db = getDb();
   const pmId = 'pm-0'; // 固定 ID: 增量分析复用 PM Agent
   spawnAgent(projectId, pmId, 'pm', win);
@@ -440,6 +459,10 @@ export async function phaseIncrementalPM(
       content: `✅ 新增 ${newFeatures.length} 个 Feature ($${cost.toFixed(4)})`,
     });
     emitEvent({ projectId, agentId: pmId, type: 'phase:incremental-pm:end', data: { newCount: newFeatures.length } });
+    // v28.0: 增量 PM 产出新 Feature → 触发调度
+    for (const f of newFeatures) {
+      emitScheduleEvent('schedule:feature_todo', { projectId, featureId: f.id });
+    }
     const incResult: PMPhaseResult = {
       ...makePhaseResult('pm_analysis', 'success', `增量分析完成 (${newFeatures.length} 新 Features)`, startTime),
       features: newFeatures,

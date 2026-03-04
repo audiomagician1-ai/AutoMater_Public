@@ -374,6 +374,30 @@ const MIGRATIONS: Migration[] = [
       safeAddColumn('ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    version: 17,
+    description: 'v28.0: Session-Agent 调度系统 — Session 语义升级 + 并发调度基础',
+    up: () => {
+      // sessions 表: 建立 Session → Agent(team_members) 实例化关系
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN member_id TEXT'); // → team_members.id
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN feature_id TEXT'); // 直接关联目标 Feature
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN started_at TEXT'); // 实际开始执行时间
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN suspended_at TEXT'); // 暂停时间
+      safeAddColumn('ALTER TABLE sessions ADD COLUMN error_message TEXT'); // 失败原因
+      // status 枚举扩展: 'created' | 'running' | 'suspended' | 'completed' | 'failed' | 'archived'
+      // (SQLite 不强制枚举，由应用层保证)
+
+      // sessions 索引: 按 member_id 查询 running session 数（并发调度核心查询）
+      db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_member ON sessions(member_id, status)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_feature ON sessions(feature_id)');
+
+      // team_members 表: Agent 最大并发 Session 数
+      safeAddColumn('ALTER TABLE team_members ADD COLUMN max_concurrent_sessions INTEGER DEFAULT 1');
+
+      // features 表: 锁定时间戳（僵尸锁清理用）
+      safeAddColumn('ALTER TABLE features ADD COLUMN locked_at TEXT');
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */
