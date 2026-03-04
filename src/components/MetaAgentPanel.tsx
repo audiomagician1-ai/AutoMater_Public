@@ -8,9 +8,9 @@
  *        完整会话历史列表在 WishPage (许愿页) 常驻
  */
 
-import { useState, useEffect, useRef, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAppStore, type MetaAgentMessage, type AgentWorkMessage } from '../stores/app-store';
-import type { MetaSessionItem } from '../stores/slices/meta-agent-slice';
+import type { MetaSessionItem, ChatMode } from '../stores/slices/meta-agent-slice';
 import { MetaAgentSettings } from './MetaAgentSettings';
 import { MSG_STYLES } from './AgentWorkFeed';
 import { friendlyErrorMessage } from '../utils/errors';
@@ -20,6 +20,14 @@ import { MessageAttachments } from './MessageAttachments';
 
 const EMPTY_WORK_MSGS: readonly AgentWorkMessage[] = [];
 const META_AGENT_ID = 'meta-agent';
+
+/** 对话模式元数据 — 与 WishPage 保持一致 */
+const CHAT_MODE_INFO: Record<ChatMode, { icon: string; label: string; desc: string; color: string }> = {
+  work: { icon: '🔧', label: '工作', desc: '指挥调度 · 派发任务给团队', color: 'text-amber-400' },
+  chat: { icon: '💬', label: '闲聊', desc: '自由对话 · 不触发工作流', color: 'text-blue-400' },
+  deep: { icon: '🔬', label: '深度', desc: '深入分析 · 可输出文件/派发任务', color: 'text-purple-400' },
+  admin: { icon: '🛠️', label: '管理', desc: '修改团队/工作流/项目配置', color: 'text-rose-400' },
+};
 
 // ═══════════════════════════════════════
 // InlineWorkMessage — 内联工具活动消息卡片
@@ -129,16 +137,21 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
   const setCurrentSessionId = useAppStore(s => s.setCurrentMetaSessionId);
   const setMessages = useAppStore(s => s.setMetaAgentMessages);
   const messagesMap = useAppStore(s => s.metaAgentMessages);
+  const [modeSubmenu, setModeSubmenu] = useState<string | null>(null); // 右键菜单中展开模式子菜单的 sessId
 
   // 加载 session 列表
-  useEffect(() => {
+  const loadSessions = useCallback(() => {
     window.automater.metaAgent
-      .listChatSessions(currentProjectId)
+      .listChatSessions(currentProjectId, undefined, true)
       .then(list => {
         setSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
       })
       .catch(() => {});
   }, [currentProjectId, setSessionList]);
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
 
   const handleSelect = async (sessId: string) => {
     setCurrentSessionId(sessId);
@@ -210,6 +223,18 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
     closeCtx();
   };
 
+  /** 切换指定 session 的对话模式 */
+  const handleSwitchMode = async (sessId: string, mode: ChatMode) => {
+    try {
+      await window.automater.session.updateChatMode(sessId, mode);
+      loadSessions();
+    } catch (err) {
+      console.error('[SessionDropdown] switchMode failed:', err);
+    }
+    setModeSubmenu(null);
+    closeCtx();
+  };
+
   return (
     <>
       {/* Backdrop */}
@@ -239,6 +264,42 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
             <span>💡</span>复制关键结论
           </button>
           <div className="border-t border-slate-800 my-0.5" />
+          {/* 切换模式 — 展开子菜单 */}
+          <div className="relative">
+            <button
+              onClick={() => setModeSubmenu(modeSubmenu === ctxMenu.sessId ? null : ctxMenu.sessId)}
+              className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+            >
+              <span>🔄</span>切换模式
+              <span className="ml-auto text-slate-600 text-[9px]">▸</span>
+            </button>
+            {modeSubmenu === ctxMenu.sessId && (
+              <div
+                className="fixed z-[70] w-40 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1"
+                style={{ left: ctxMenu.x + 160, top: ctxMenu.y }}
+              >
+                {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
+                  const mi = CHAT_MODE_INFO[m];
+                  const sess = sessionList.find(s => s.id === ctxMenu.sessId);
+                  const isActive = (sess?.chatMode || 'work') === m;
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => handleSwitchMode(ctxMenu.sessId, m)}
+                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center gap-2 ${
+                        isActive ? 'text-forge-400 bg-forge-600/10' : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>{mi.icon}</span>
+                      <span className={isActive ? 'font-medium' : ''}>{mi.label}</span>
+                      {isActive && <span className="ml-auto text-[9px]">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="border-t border-slate-800 my-0.5" />
           <button
             onClick={handleOpenFolder}
             className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
@@ -254,7 +315,8 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
           {sessionList.length === 0 && <div className="text-center py-6 text-[10px] text-slate-600">暂无历史会话</div>}
           {sessionList.map(sess => {
             const isSelected = currentSessionId === sess.id;
-            const title = sess.title || `会话 #${sess.agentSeq}`;
+            const title = sess.customTitle || sess.title || `会话 #${sess.agentSeq}`;
+            const modeInfo = CHAT_MODE_INFO[(sess.chatMode as ChatMode) || 'work'];
             return (
               <button
                 key={sess.id}
@@ -267,7 +329,10 @@ function SessionDropdown({ onClose }: { onClose: () => void }) {
                   {sess.status === 'active' && (
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                   )}
-                  <span className="truncate font-medium">{title}</span>
+                  <span className="truncate font-medium flex-1">{title}</span>
+                  <span className={`shrink-0 text-[10px] ${modeInfo.color}`} title={`${modeInfo.label}模式`}>
+                    {modeInfo.icon}
+                  </span>
                 </div>
                 <div className="text-[9px] text-slate-600 mt-0.5">{formatTime(sess.createdAt)}</div>
               </button>
@@ -296,10 +361,65 @@ export function MetaAgentPanel() {
   const currentSessionId = useAppStore(s => s.currentMetaSessionId);
   const setCurrentSessionId = useAppStore(s => s.setCurrentMetaSessionId);
   const sessionList = useAppStore(s => s.metaSessionList);
+  const setSessionList = useAppStore(s => s.setMetaSessionList);
 
   // chatKey: session 优先, 否则用 projectId/_global
   const chatKey = currentSessionId || currentProjectId || '_global';
   const messages = messagesMap.get(chatKey) || [];
+
+  // ── 模式管理 ──
+  const [pendingMode, setPendingMode] = useState<ChatMode>('work');
+  const currentChatMode: ChatMode = useMemo(() => {
+    if (currentSessionId) {
+      const sess = sessionList.find(s => s.id === currentSessionId);
+      if (sess?.chatMode) return sess.chatMode;
+    }
+    return pendingMode;
+  }, [currentSessionId, sessionList, pendingMode]);
+  const currentModeInfo = CHAT_MODE_INFO[currentChatMode];
+  const [modePopoverOpen, setModePopoverOpen] = useState(false);
+  const modePopoverRef = useRef<HTMLDivElement>(null);
+  const [modePopoverPos, setModePopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const [modeToast, setModeToast] = useState<string | null>(null);
+
+  // 关闭模式 popover 当点击外部
+  useEffect(() => {
+    if (!modePopoverOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (modePopoverRef.current && !modePopoverRef.current.contains(e.target as Node)) setModePopoverOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [modePopoverOpen]);
+
+  const handleModeSwitch = async (mode: ChatMode) => {
+    if (mode === currentChatMode) {
+      setModePopoverOpen(false);
+      return;
+    }
+    if (currentSessionId) {
+      try {
+        await window.automater.session.updateChatMode(currentSessionId, mode);
+        const list = await window.automater.metaAgent.listChatSessions(currentProjectId, undefined, true);
+        if (list) {
+          setSessionList((list || []).map(s => ({ ...s, title: s.title ?? undefined })) as MetaSessionItem[]);
+        }
+        const mi = CHAT_MODE_INFO[mode];
+        setModeToast(`${mi.icon} 已切换为${mi.label}模式`);
+        setTimeout(() => setModeToast(null), 1800);
+      } catch (err) {
+        console.error('[MetaAgentPanel] handleModeSwitch failed:', err);
+        setModeToast('❌ 模式切换失败');
+        setTimeout(() => setModeToast(null), 1800);
+      }
+    } else {
+      setPendingMode(mode);
+      const mi = CHAT_MODE_INFO[mode];
+      setModeToast(`${mi.icon} 新对话将使用${mi.label}模式`);
+      setTimeout(() => setModeToast(null), 1800);
+    }
+    setModePopoverOpen(false);
+  };
 
   const [sending, setSending] = useState(false);
   const [agentName, setAgentName] = useState('元Agent · 管家');
@@ -407,7 +527,12 @@ export function MetaAgentPanel() {
     let sessionId = currentSessionId;
     if (!sessionId) {
       try {
-        const newSession = await window.automater.session.create(currentProjectId, META_AGENT_ID, 'meta-agent');
+        const newSession = await window.automater.session.create(
+          currentProjectId,
+          META_AGENT_ID,
+          'meta-agent',
+          currentChatMode,
+        );
         sessionId = newSession.id;
         setCurrentSessionId(sessionId);
       } catch {
@@ -454,16 +579,12 @@ export function MetaAgentPanel() {
     try {
       const currentMsgs = messagesMap.get(activeChatKey) || [];
       const history = [...currentMsgs].slice(-20).map(m => ({ role: m.role as string, content: m.content }));
-      // v28.1: 从 session 中获取 chatMode，确保侧边栏也尊重模式设置
-      const currentSess = sessionList.find(s => s.id === sessionId);
-      const chatMode = currentSess?.chatMode || 'work';
-
       const result = await window.automater.metaAgent.chat(
         currentProjectId,
         userMsg.content,
         history,
         msgAttachments,
-        chatMode,
+        currentChatMode,
         sessionId,
       );
       updateLastAssistant(activeChatKey, result.reply);
@@ -532,6 +653,40 @@ export function MetaAgentPanel() {
         className="h-full border-l border-slate-800 flex flex-col bg-slate-950 transition-all duration-300 ease-in-out relative flex-shrink-0"
         style={{ width: open ? `${panelWidth}px` : '40px' }}
       >
+        {/* 模式切换 Toast */}
+        {modeToast && (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-[80] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl text-[11px] text-slate-200 whitespace-nowrap animate-fade-in">
+            {modeToast}
+          </div>
+        )}
+        {/* 模式切换 Popover — fixed 定位避免 overflow 裁剪 */}
+        {modePopoverOpen && modePopoverPos && (
+          <div
+            className="fixed z-[60] flex items-stretch bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/50 overflow-hidden"
+            style={{ top: modePopoverPos.top, left: modePopoverPos.left }}
+            onClick={e => e.stopPropagation()}
+          >
+            {(['work', 'chat', 'deep', 'admin'] as ChatMode[]).map(m => {
+              const mi = CHAT_MODE_INFO[m];
+              const isActive = m === currentChatMode;
+              return (
+                <button
+                  key={m}
+                  onClick={() => handleModeSwitch(m)}
+                  className={`relative flex flex-col items-center gap-1 px-3 py-2 transition-all min-w-[50px]
+                    ${isActive ? 'bg-forge-600/20 border-b-2 border-forge-500' : 'hover:bg-slate-800/80 border-b-2 border-transparent'}`}
+                >
+                  <span className="text-sm">{mi.icon}</span>
+                  <span
+                    className={`text-[9px] font-medium whitespace-nowrap ${isActive ? 'text-forge-400' : 'text-slate-400'}`}
+                  >
+                    {mi.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* 左边缘拖拽手柄 */}
         {open && (
           <div
@@ -550,7 +705,26 @@ export function MetaAgentPanel() {
             {open ? (
               <>
                 <span className="text-xs">🤖</span>
-                <span className="text-[11px] text-slate-400 font-medium flex-1 text-left truncate">{agentName}</span>
+                <span className="text-[11px] text-slate-400 font-medium flex-1 text-left truncate">
+                  {agentName}
+                  {/* 模式指示器 · 点击切换 */}
+                  <span className="inline-block ml-1" ref={modePopoverRef}>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!modePopoverOpen && modePopoverRef.current) {
+                          const rect = modePopoverRef.current.getBoundingClientRect();
+                          setModePopoverPos({ top: rect.bottom + 4, left: rect.left });
+                        }
+                        setModePopoverOpen(!modePopoverOpen);
+                      }}
+                      className={`text-[9px] px-1.5 py-0.5 rounded-md ${currentModeInfo.color} hover:bg-slate-800 transition-colors align-middle`}
+                      title={`${currentModeInfo.label}模式 · 点击切换`}
+                    >
+                      {currentModeInfo.icon} {currentModeInfo.label}
+                    </button>
+                  </span>
+                </span>
               </>
             ) : (
               <span className="text-sm" title={agentName}>
