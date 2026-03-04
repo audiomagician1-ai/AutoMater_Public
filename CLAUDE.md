@@ -1,10 +1,10 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-04 | 版本: v29.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-04 | 版本: v30.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v29.0 — Session-Agent调度系统 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化
+**当前阶段**: v30.0 — Session驱动并发开发 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化
 **最高优先级**: 实际运行时全链路验证 (PM→Dev→QA 全流程) + 竞争力 5.61→7.0 路线图执行
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
@@ -65,7 +65,7 @@ AutoMater/
 │       │   ├── computer-tools.ts, deploy-tools.ts
 │       │   └── admin-tools.ts, session-tools.ts
 │       ├── __tests__/          # 单元测试 (50 个文件, 918 tests)
-│       ├── orchestrator.ts     # 多阶段编排器 (入口, v12 可配置工作流)
+│       ├── orchestrator.ts     # 多阶段编排器 (入口, v30 Dev+QA委托scheduler)
 │       ├── react-loop.ts       # Developer ReAct 循环 (50 轮上限, 验证门控)
 │       ├── qa-loop.ts          # QA 审查 (程序化 + LLM + TDD)
 │       ├── tool-registry.ts    # 工具注册中心 + 角色权限矩阵
@@ -134,7 +134,7 @@ AutoMater/
 │       ├── workspace-git.ts    # 工作区 Git 管理
 │       ├── event-store.ts      # 事件流持久化
 │       ├── conversation-backup.ts  # 会话备份/恢复 + Session-Agent调度集成
-│       ├── session-scheduler.ts    # Session并发调度器 (并发上限+僵尸锁清理)
+│       ├── session-scheduler.ts    # Session并发调度器 (v30: Dev+QA唯一调度引擎, DevPhaseContext)
 │       ├── session-lifecycle.ts    # Session生命周期管理 (create/start/suspend/complete)
 │       ├── scheduler-bus.ts        # 调度事件总线 (发布/订阅调度事件)
 │       ├── cross-project.ts    # 跨项目经验共享
@@ -360,7 +360,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 ## 4. CURRENT STATE
 
-**版本**: v29.0 (Session-Agent调度系统 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化 + 130工具)
+**版本**: v30.0 (Session驱动并发开发 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化 + 130工具)
 
 ### 版本演进总览
 
@@ -391,6 +391,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 | v28 | MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示 + 管家上下文管理 |
 | v28.2 | 会话置顶/重命名/隐藏 + toast反馈 + 错误日志 + 工作过程默认展开 |
 | v29 | Session-Agent调度系统(并发调度+僵尸锁+生命周期) + 管家记忆项目隔离 + 模式切换增强 |
+| v30 | **Session驱动并发开发** — scheduler成为Dev+QA唯一调度引擎, orchestrator不再直接spawn worker, DevPhaseContext替代HotJoinContext, lockNextFeature补locked_at |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
@@ -425,6 +426,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 - [x] **v28.0 多模态补全** — MetaAgent附件UI + 管家产品知识库 + session工具 + 工作过程完成后保留展示
 - [x] **v28.1 上下文管理升级** — ContextPage支持管家Agent + 管家配置概览面板 + snapshot缓存
 - [x] **v28.2 会话管理增强** — 置顶/重命名/隐藏 + toast反馈 + 工作过程默认展开
+- [x] **v30.0 Session驱动并发开发** — session-scheduler成为Dev+QA唯一调度引擎, orchestrator.runSessionDrivenDevPhase()委托调度, DevPhaseContext替代HotJoinContext, 消除循环依赖
 - [x] **v29.0 Session-Agent调度系统** — session-scheduler(并发上限+僵尸锁清理) + session-lifecycle(状态机) + scheduler-bus(事件总线) + DB v17迁移
 - [x] **v29.0 管家记忆项目隔离** — meta_agent_memories.project_id + 按项目过滤/管理记忆 + DB v18迁移
 - [x] **v29.0 模式切换增强** — button嵌套修复 + chat模式不注入记忆/项目上下文 + 侧边栏查看/修改已有对话模式
@@ -481,7 +483,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 | 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 18 版) |
 | 密钥管理 | `electron/engine/secret-manager.ts` |
 | 会话管理 | `electron/engine/conversation-backup.ts` + `electron/ipc/sessions.ts` |
-| Session-Agent调度 | `electron/engine/session-scheduler.ts` + `session-lifecycle.ts` + `scheduler-bus.ts` |
+| Session-Agent调度 | `electron/engine/session-scheduler.ts` (DevPhaseContext + runSessionDrivenDevPhase + scheduleProject) + `session-lifecycle.ts` + `scheduler-bus.ts` |
 | 工作流预设 | `electron/ipc/workflow.ts` |
 | 前端状态 | `src/stores/app-store.ts` + `src/stores/slices/*.ts` |
 | 元Agent 后端 | `electron/ipc/meta-agent.ts` (含 4模式提示词 + admin工具执行 + ModeConfig) |
