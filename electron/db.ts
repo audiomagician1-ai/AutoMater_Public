@@ -362,6 +362,9 @@ const MIGRATIONS: Migration[] = [
     version: 15,
     description: 'v21.0: sessions.chat_mode — 管家会话模式 (work/chat/deep)',
     up: () => {
+      // sessions 表由 ensureSessionsTable() 创建，但它在 runMigrations() 之后才调用。
+      // 全新安装时 sessions 表尚不存在，必须先建表再加列。
+      ensureSessionsTable();
       safeAddColumn("ALTER TABLE sessions ADD COLUMN chat_mode TEXT NOT NULL DEFAULT 'work'");
     },
   },
