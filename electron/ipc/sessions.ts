@@ -13,6 +13,7 @@
 
 import { ipcMain, shell } from 'electron';
 import { assertProjectId, assertNonEmptyString, assertOptionalNumber } from './ipc-validator';
+import { getDb } from '../db';
 import {
   createSession,
   switchSession,
@@ -80,7 +81,6 @@ export function setupSessionHandlers() {
     const _backup = readSessionBackup(sessionId);
     // 尝试从 DB 获取 backup_path
     try {
-      const { getDb } = await import('../db');
       const db = getDb();
       const row = db.prepare('SELECT backup_path FROM sessions WHERE id = ?').get(sessionId) as
         | { backup_path: string | null }
@@ -147,7 +147,6 @@ export function setupSessionHandlers() {
   ipcMain.handle('session:update-chat-mode', (_event, sessionId: string, chatMode: string) => {
     assertNonEmptyString('session:update-chat-mode', 'sessionId', sessionId);
     assertNonEmptyString('session:update-chat-mode', 'chatMode', chatMode);
-    const { getDb } = require('../db');
     const db = getDb();
     db.prepare('UPDATE sessions SET chat_mode = ? WHERE id = ?').run(chatMode, sessionId);
     return { success: true };
@@ -156,7 +155,6 @@ export function setupSessionHandlers() {
   /** v27.0: 切换会话置顶状态 */
   ipcMain.handle('session:toggle-pin', (_event, sessionId: string) => {
     assertNonEmptyString('session:toggle-pin', 'sessionId', sessionId);
-    const { getDb } = require('../db');
     const db = getDb();
     // 翻转 pinned: 0→1, 1→0
     db.prepare('UPDATE sessions SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?').run(sessionId);
@@ -167,7 +165,6 @@ export function setupSessionHandlers() {
   /** v27.0: 重命名会话 (自定义标题) */
   ipcMain.handle('session:rename', (_event, sessionId: string, customTitle: string | null) => {
     assertNonEmptyString('session:rename', 'sessionId', sessionId);
-    const { getDb } = require('../db');
     const db = getDb();
     // null 或空字符串 = 清除自定义标题，恢复默认
     const title = customTitle?.trim() || null;
@@ -178,7 +175,6 @@ export function setupSessionHandlers() {
   /** v27.0: 切换会话隐藏状态 */
   ipcMain.handle('session:toggle-hidden', (_event, sessionId: string) => {
     assertNonEmptyString('session:toggle-hidden', 'sessionId', sessionId);
-    const { getDb } = require('../db');
     const db = getDb();
     db.prepare('UPDATE sessions SET hidden = CASE WHEN hidden = 1 THEN 0 ELSE 1 END WHERE id = ?').run(sessionId);
     const row = db.prepare('SELECT hidden FROM sessions WHERE id = ?').get(sessionId) as { hidden: number } | undefined;

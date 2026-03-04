@@ -398,6 +398,15 @@ const MIGRATIONS: Migration[] = [
       safeAddColumn('ALTER TABLE features ADD COLUMN locked_at TEXT');
     },
   },
+  {
+    version: 18,
+    description: 'v29.0: 管家记忆项目隔离 — meta_agent_memories 增加 project_id 字段',
+    up: () => {
+      // 记忆表增加 project_id: NULL 表示全局记忆，非 NULL 关联到特定项目
+      safeAddColumn('ALTER TABLE meta_agent_memories ADD COLUMN project_id TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_meta_memories_project ON meta_agent_memories(project_id)');
+    },
+  },
 ];
 
 /** 执行所有待执行的迁移脚本 */

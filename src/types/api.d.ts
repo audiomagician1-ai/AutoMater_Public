@@ -67,6 +67,8 @@ interface MetaAgentMemoryRecord {
   content: string;
   source: 'auto' | 'manual' | 'system';
   importance: number;
+  /** v29.0: 记忆所属项目 — null 为全局记忆 */
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -655,12 +657,13 @@ interface AutoMaterAPI {
     getConfig(): Promise<MetaAgentConfig>;
     saveConfig(config: Partial<MetaAgentConfig>): Promise<{ success: boolean; config: MetaAgentConfig }>;
     // Memory
-    listMemories(category?: string, limit?: number): Promise<MetaAgentMemoryRecord[]>;
+    listMemories(category?: string, limit?: number, projectId?: string | null): Promise<MetaAgentMemoryRecord[]>;
     addMemory(memory: {
       category: string;
       content: string;
       source?: string;
       importance?: number;
+      project_id?: string | null;
     }): Promise<MetaAgentMemoryRecord>;
     updateMemory(
       id: string,

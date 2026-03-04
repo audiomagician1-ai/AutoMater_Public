@@ -90,6 +90,8 @@ export interface MetaAgentMemory {
   content: string;
   source: 'auto' | 'manual' | 'system';
   importance: number; // 1-10, 越高越重要
+  /** v29.0: 记忆所属项目 — NULL 为全局记忆 */
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -175,14 +177,30 @@ function saveMetaAgentConfig(config: Partial<MetaAgentConfig>): MetaAgentConfig 
 // Memory Management
 // ═══════════════════════════════════════
 
-function getMemories(category?: string, limit?: number): MetaAgentMemory[] {
+function getMemories(category?: string, limit?: number, projectId?: string | null): MetaAgentMemory[] {
   const db = getDb();
   let sql = 'SELECT * FROM meta_agent_memories';
-  const params: Array<string | number> = [];
+  const conditions: string[] = [];
+  const params: Array<string | number | null> = [];
 
   if (category) {
-    sql += ' WHERE category = ?';
+    conditions.push('category = ?');
     params.push(category);
+  }
+
+  // v29.0: 按项目过滤 — 返回该项目的记忆 + 全局记忆 (project_id IS NULL)
+  if (projectId !== undefined) {
+    if (projectId) {
+      conditions.push('(project_id = ? OR project_id IS NULL)');
+      params.push(projectId);
+    } else {
+      // projectId 为 null → 只返回全局记忆
+      conditions.push('project_id IS NULL');
+    }
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
   }
 
   sql += ' ORDER BY importance DESC, updated_at DESC';
@@ -202,10 +220,10 @@ function addMemory(memory: Omit<MetaAgentMemory, 'id' | 'created_at' | 'updated_
 
   db.prepare(
     `
-    INSERT INTO meta_agent_memories (id, category, content, source, importance, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meta_agent_memories (id, category, content, source, importance, project_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `,
-  ).run(id, memory.category, memory.content, memory.source, memory.importance, now, now);
+  ).run(id, memory.category, memory.content, memory.source, memory.importance, memory.project_id ?? null, now, now);
 
   return { id, ...memory, created_at: now, updated_at: now };
 }
@@ -583,7 +601,7 @@ function collectProjectContext(projectId: string): string {
 // Auto Memory: Extract and store from conversations
 // ═══════════════════════════════════════
 
-function autoExtractMemory(memoryNotes: string): void {
+function autoExtractMemory(memoryNotes: string, projectId?: string | null): void {
   if (!memoryNotes || !memoryNotes.trim()) return;
 
   try {
@@ -614,6 +632,7 @@ function autoExtractMemory(memoryNotes: string): void {
       content: memoryNotes.trim(),
       source: 'auto',
       importance: 5,
+      project_id: projectId ?? null,
     });
 
     log.info('Auto-memory stored', { category, preview: memoryNotes.slice(0, 50) });
@@ -974,8 +993,8 @@ export function setupMetaAgentHandlers() {
 
   // ── Memory CRUD ──
 
-  ipcMain.handle('meta-agent:memory:list', (_event, category?: string, limit?: number) => {
-    return getMemories(category, limit);
+  ipcMain.handle('meta-agent:memory:list', (_event, category?: string, limit?: number, projectId?: string | null) => {
+    return getMemories(category, limit, projectId);
   });
 
   ipcMain.handle(
@@ -1055,7 +1074,8 @@ export function setupMetaAgentHandlers() {
       const mode = (chatMode as 'work' | 'chat' | 'deep' | 'admin') || 'work';
 
       // chat 模式不加载记忆 — 保持轻松对话，不带项目记忆上下文
-      const memories = mode === 'chat' ? [] : getMemories(undefined, config.memoryInjectLimit);
+      // v29.0: 按 projectId 过滤记忆 — 只加载当前项目 + 全局记忆
+      const memories = mode === 'chat' ? [] : getMemories(undefined, config.memoryInjectLimit, projectId);
 
       const systemPrompt = buildSystemPrompt(config, memories, mode);
       const messages: Array<{
@@ -1538,7 +1558,7 @@ export function setupMetaAgentHandlers() {
 
       // Auto-memory: extract and store notable info from conversation
       if (config.autoMemory && memoryNotes) {
-        autoExtractMemory(memoryNotes);
+        autoExtractMemory(memoryNotes, projectId);
       }
 
       // ── 将 meta-agent 的 token/cost 计入当前项目统计 ──

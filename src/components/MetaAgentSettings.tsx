@@ -68,9 +68,15 @@ export function MetaAgentSettings({ onClose }: Props) {
 
   // Load config on mount
   useEffect(() => {
-    window.automater.metaAgent.getConfig().then(setConfig).catch(e => log.error('init fetch failed', e));
+    window.automater.metaAgent
+      .getConfig()
+      .then(setConfig)
+      .catch(e => log.error('init fetch failed', e));
     loadMemories();
-    window.automater.metaAgent.getMemoryStats().then(setMemoryStats).catch(e => log.error('init fetch failed', e));
+    window.automater.metaAgent
+      .getMemoryStats()
+      .then(setMemoryStats)
+      .catch(e => log.error('init fetch failed', e));
   }, []);
 
   const loadMemories = async () => {
@@ -89,7 +95,9 @@ export function MetaAgentSettings({ onClose }: Props) {
     }
   };
 
-  useEffect(() => { loadMemories(); }, [memoryFilter, memorySearch]);
+  useEffect(() => {
+    loadMemories();
+  }, [memoryFilter, memorySearch]);
 
   const handleSaveConfig = async () => {
     setSaving(true);
@@ -213,7 +221,9 @@ export function MetaAgentSettings({ onClose }: Props) {
           >
             🧠 记忆管理
             {memoryStats && (
-              <span className="px-1.5 py-0.5 rounded-full bg-slate-700 text-[10px] text-slate-400">{memoryStats.total}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-slate-700 text-[10px] text-slate-400">
+                {memoryStats.total}
+              </span>
             )}
           </button>
           <button
@@ -233,7 +243,13 @@ export function MetaAgentSettings({ onClose }: Props) {
           {tab === 'config' ? (
             <ConfigTab config={config} setConfig={setConfig} onSave={handleSaveConfig} saving={saving} saved={saved} />
           ) : tab === 'modes' ? (
-            <ModeConfigTab config={config} setConfig={setConfig} onSave={handleSaveConfig} saving={saving} saved={saved} />
+            <ModeConfigTab
+              config={config}
+              setConfig={setConfig}
+              onSave={handleSaveConfig}
+              saving={saving}
+              saved={saved}
+            />
           ) : tab === 'memory' ? (
             <MemoryTab
               memories={memories}
@@ -266,14 +282,21 @@ export function MetaAgentSettings({ onClose }: Props) {
 // Config Tab
 // ═══════════════════════════════════════
 
-function ConfigTab({ config, setConfig, onSave, saving, saved }: {
+function ConfigTab({
+  config,
+  setConfig,
+  onSave,
+  saving,
+  saved,
+}: {
   config: MetaAgentConfig;
   setConfig: (c: MetaAgentConfig) => void;
   onSave: () => void;
   saving: boolean;
   saved: boolean;
 }) {
-  const update = (key: keyof MetaAgentConfig, value: string | number | boolean) => setConfig({ ...config, [key]: value });
+  const update = (key: keyof MetaAgentConfig, value: string | number | boolean) =>
+    setConfig({ ...config, [key]: value });
 
   return (
     <div className="space-y-5">
@@ -343,7 +366,8 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.contextHistoryLimit}
               onChange={e => update('contextHistoryLimit', parseInt(e.target.value) || 20)}
-              min={2} max={200}
+              min={2}
+              max={200}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -352,7 +376,9 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.contextTokenLimit}
               onChange={e => update('contextTokenLimit', parseInt(e.target.value) || 512000)}
-              min={4096} max={2000000} step={1024}
+              min={4096}
+              max={2000000}
+              step={1024}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -361,7 +387,9 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.maxResponseTokens}
               onChange={e => update('maxResponseTokens', parseInt(e.target.value) || 128000)}
-              min={1024} max={256000} step={1024}
+              min={1024}
+              max={256000}
+              step={1024}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -372,7 +400,8 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.maxReactIterations}
               onChange={e => update('maxReactIterations', Math.max(1, Math.min(200, parseInt(e.target.value) || 50)))}
-              min={1} max={200}
+              min={1}
+              max={200}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -380,8 +409,12 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
             <input
               type="number"
               value={config.readFileLineLimit}
-              onChange={e => update('readFileLineLimit', Math.max(50, Math.min(2000, parseInt(e.target.value) || 1000)))}
-              min={50} max={2000} step={50}
+              onChange={e =>
+                update('readFileLineLimit', Math.max(50, Math.min(2000, parseInt(e.target.value) || 1000)))
+              }
+              min={50}
+              max={2000}
+              step={50}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -398,7 +431,9 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
                 onClick={() => update('autoMemory', !config.autoMemory)}
                 className={`relative w-10 h-5 rounded-full transition-colors ${config.autoMemory ? 'bg-forge-600' : 'bg-slate-700'}`}
               >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.autoMemory ? 'left-[22px]' : 'left-0.5'}`} />
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.autoMemory ? 'left-[22px]' : 'left-0.5'}`}
+                />
               </button>
               <span className="text-xs text-slate-400">{config.autoMemory ? '已开启' : '已关闭'}</span>
             </div>
@@ -408,7 +443,8 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
               type="number"
               value={config.memoryInjectLimit}
               onChange={e => update('memoryInjectLimit', parseInt(e.target.value) || 30)}
-              min={0} max={200}
+              min={0}
+              max={200}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -423,7 +459,8 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
             <div className="flex-1 min-w-0 mr-4">
               <div className="text-xs text-slate-200 font-medium">GitHub / Git 访问权限</div>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                允许管家访问 Git 仓库历史、提交记录等信息。关闭时管家无法查看 git log 和 .git 目录内容，以防止敏感信息泄露。
+                允许管家访问 Git 仓库历史、提交记录等信息。关闭时管家无法查看 git log 和 .git
+                目录内容，以防止敏感信息泄露。
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -431,7 +468,9 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
                 onClick={() => update('allowGitAccess', !config.allowGitAccess)}
                 className={`relative w-10 h-5 rounded-full transition-colors ${config.allowGitAccess ? 'bg-amber-600' : 'bg-slate-700'}`}
               >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.allowGitAccess ? 'left-[22px]' : 'left-0.5'}`} />
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.allowGitAccess ? 'left-[22px]' : 'left-0.5'}`}
+                />
               </button>
               <span className={`text-[11px] ${config.allowGitAccess ? 'text-amber-400' : 'text-slate-500'}`}>
                 {config.allowGitAccess ? '已授权' : '已禁止'}
@@ -464,13 +503,25 @@ function ConfigTab({ config, setConfig, onSave, saving, saved }: {
 // ═══════════════════════════════════════
 
 const MODE_DEFS: Array<{ key: string; icon: string; label: string; desc: string; color: string }> = [
-  { key: 'work',  icon: '🔧', label: '工作模式',     desc: '指挥调度 · 派发任务给团队', color: 'border-amber-500/40' },
-  { key: 'chat',  icon: '💬', label: '闲聊模式',     desc: '自由对话 · 不触发工作流', color: 'border-blue-500/40' },
-  { key: 'deep',  icon: '🔬', label: '深度讨论模式', desc: '深入分析 · 可输出文件/派发任务', color: 'border-purple-500/40' },
-  { key: 'admin', icon: '🛠️', label: '管理模式',     desc: '修改团队/工作流/项目配置', color: 'border-rose-500/40' },
+  { key: 'work', icon: '🔧', label: '工作模式', desc: '指挥调度 · 派发任务给团队', color: 'border-amber-500/40' },
+  { key: 'chat', icon: '💬', label: '闲聊模式', desc: '自由对话 · 不触发工作流', color: 'border-blue-500/40' },
+  {
+    key: 'deep',
+    icon: '🔬',
+    label: '深度讨论模式',
+    desc: '深入分析 · 可输出文件/派发任务',
+    color: 'border-purple-500/40',
+  },
+  { key: 'admin', icon: '🛠️', label: '管理模式', desc: '修改团队/工作流/项目配置', color: 'border-rose-500/40' },
 ];
 
-function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
+function ModeConfigTab({
+  config,
+  setConfig,
+  onSave,
+  saving,
+  saved,
+}: {
   config: MetaAgentConfig;
   setConfig: (c: MetaAgentConfig) => void;
   onSave: () => void;
@@ -524,9 +575,14 @@ function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
             <Field label="ReAct 迭代轮数" desc={`全局默认: ${globalDefaults.maxReactIterations}`}>
               <input
                 type="number"
-                value={getVal(key, 'maxReactIterations', key === 'work' ? 50 : key === 'chat' ? 5 : key === 'deep' ? 80 : 30)}
+                value={getVal(
+                  key,
+                  'maxReactIterations',
+                  key === 'work' ? 50 : key === 'chat' ? 5 : key === 'deep' ? 80 : 30,
+                )}
                 onChange={e => updateMode(key, 'maxReactIterations', parseInt(e.target.value) || undefined)}
-                min={1} max={200}
+                min={1}
+                max={200}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
               />
             </Field>
@@ -535,7 +591,9 @@ function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
                 type="number"
                 value={getVal(key, 'maxResponseTokens', key === 'chat' ? 32000 : key === 'admin' ? 64000 : 128000)}
                 onChange={e => updateMode(key, 'maxResponseTokens', parseInt(e.target.value) || undefined)}
-                min={1024} max={256000} step={1024}
+                min={1024}
+                max={256000}
+                step={1024}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
               />
             </Field>
@@ -544,7 +602,8 @@ function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
                 type="number"
                 value={getVal(key, 'contextHistoryLimit', key === 'deep' ? 40 : key === 'chat' ? 30 : 20)}
                 onChange={e => updateMode(key, 'contextHistoryLimit', parseInt(e.target.value) || undefined)}
-                min={2} max={200}
+                min={2}
+                max={200}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
               />
             </Field>
@@ -553,7 +612,9 @@ function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
                 type="number"
                 value={getVal(key, 'contextTokenLimit', globalDefaults.contextTokenLimit)}
                 onChange={e => updateMode(key, 'contextTokenLimit', parseInt(e.target.value) || undefined)}
-                min={4096} max={2000000} step={1024}
+                min={4096}
+                max={2000000}
+                step={1024}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
               />
             </Field>
@@ -584,9 +645,22 @@ function ModeConfigTab({ config, setConfig, onSave, saving, saved }: {
 // ═══════════════════════════════════════
 
 function MemoryTab({
-  memories, memoryFilter, setMemoryFilter, memorySearch, setMemorySearch,
-  memoryStats, editingMemory, setEditingMemory, addingMemory, setAddingMemory,
-  newMemory, setNewMemory, onAdd, onUpdate, onDelete, onClearCategory,
+  memories,
+  memoryFilter,
+  setMemoryFilter,
+  memorySearch,
+  setMemorySearch,
+  memoryStats,
+  editingMemory,
+  setEditingMemory,
+  addingMemory,
+  setAddingMemory,
+  newMemory,
+  setNewMemory,
+  onAdd,
+  onUpdate,
+  onDelete,
+  onClearCategory,
 }: {
   memories: MetaAgentMemoryRecord[];
   memoryFilter: MemoryCategory | 'all';
@@ -610,21 +684,23 @@ function MemoryTab({
       {/* Stats Bar */}
       {memoryStats && (
         <div className="flex items-center gap-2 flex-wrap">
-          {(Object.entries(CATEGORY_LABELS) as [MemoryCategory, typeof CATEGORY_LABELS[MemoryCategory]][]).map(([key, { label, icon }]) => (
-            <button
-              key={key}
-              onClick={() => setMemoryFilter(memoryFilter === key ? 'all' : key)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] transition-all ${
-                memoryFilter === key
-                  ? 'bg-forge-600/20 text-forge-400 ring-1 ring-forge-500/30'
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              <span>{icon}</span>
-              <span>{label}</span>
-              <span className="text-[10px] text-slate-500 ml-0.5">{memoryStats.byCategory[key] || 0}</span>
-            </button>
-          ))}
+          {(Object.entries(CATEGORY_LABELS) as [MemoryCategory, (typeof CATEGORY_LABELS)[MemoryCategory]][]).map(
+            ([key, { label, icon }]) => (
+              <button
+                key={key}
+                onClick={() => setMemoryFilter(memoryFilter === key ? 'all' : key)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] transition-all ${
+                  memoryFilter === key
+                    ? 'bg-forge-600/20 text-forge-400 ring-1 ring-forge-500/30'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>{icon}</span>
+                <span>{label}</span>
+                <span className="text-[10px] text-slate-500 ml-0.5">{memoryStats.byCategory[key] || 0}</span>
+              </button>
+            ),
+          )}
           <span className="text-[10px] text-slate-600 ml-auto">共 {memoryStats.total} 条记忆</span>
         </div>
       )}
@@ -669,7 +745,9 @@ function MemoryTab({
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-semibold text-slate-300">新增记忆</h4>
-            <button onClick={() => setAddingMemory(false)} className="text-slate-500 hover:text-slate-300 text-xs">取消</button>
+            <button onClick={() => setAddingMemory(false)} className="text-slate-500 hover:text-slate-300 text-xs">
+              取消
+            </button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -679,9 +757,13 @@ function MemoryTab({
                 onChange={e => setNewMemory({ ...newMemory, category: e.target.value as MemoryCategory })}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
               >
-                {(Object.entries(CATEGORY_LABELS) as [MemoryCategory, typeof CATEGORY_LABELS[MemoryCategory]][]).map(([key, { label, icon }]) => (
-                  <option key={key} value={key}>{icon} {label}</option>
-                ))}
+                {(Object.entries(CATEGORY_LABELS) as [MemoryCategory, (typeof CATEGORY_LABELS)[MemoryCategory]][]).map(
+                  ([key, { label, icon }]) => (
+                    <option key={key} value={key}>
+                      {icon} {label}
+                    </option>
+                  ),
+                )}
               </select>
             </div>
             <div>
@@ -689,8 +771,11 @@ function MemoryTab({
               <input
                 type="number"
                 value={newMemory.importance}
-                onChange={e => setNewMemory({ ...newMemory, importance: Math.max(1, Math.min(10, parseInt(e.target.value) || 5)) })}
-                min={1} max={10}
+                onChange={e =>
+                  setNewMemory({ ...newMemory, importance: Math.max(1, Math.min(10, parseInt(e.target.value) || 5)) })
+                }
+                min={1}
+                max={10}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
               />
             </div>
@@ -739,15 +824,25 @@ function MemoryTab({
                       onChange={e => setEditingMemory({ ...editingMemory, category: e.target.value as MemoryCategory })}
                       className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
                     >
-                      {(Object.entries(CATEGORY_LABELS) as [MemoryCategory, typeof CATEGORY_LABELS[MemoryCategory]][]).map(([key, { label, icon }]) => (
-                        <option key={key} value={key}>{icon} {label}</option>
+                      {(
+                        Object.entries(CATEGORY_LABELS) as [MemoryCategory, (typeof CATEGORY_LABELS)[MemoryCategory]][]
+                      ).map(([key, { label, icon }]) => (
+                        <option key={key} value={key}>
+                          {icon} {label}
+                        </option>
                       ))}
                     </select>
                     <input
                       type="number"
                       value={editingMemory.importance}
-                      onChange={e => setEditingMemory({ ...editingMemory, importance: Math.max(1, Math.min(10, parseInt(e.target.value) || 5)) })}
-                      min={1} max={10}
+                      onChange={e =>
+                        setEditingMemory({
+                          ...editingMemory,
+                          importance: Math.max(1, Math.min(10, parseInt(e.target.value) || 5)),
+                        })
+                      }
+                      min={1}
+                      max={10}
                       className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-forge-500"
                     />
                   </div>
@@ -759,8 +854,18 @@ function MemoryTab({
                     autoFocus
                   />
                   <div className="flex gap-2 justify-end">
-                    <button onClick={() => setEditingMemory(null)} className="px-3 py-1 text-xs text-slate-500 hover:text-slate-300">取消</button>
-                    <button onClick={() => onUpdate(editingMemory)} className="px-3 py-1 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-xs">保存</button>
+                    <button
+                      onClick={() => setEditingMemory(null)}
+                      className="px-3 py-1 text-xs text-slate-500 hover:text-slate-300"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => onUpdate(editingMemory)}
+                      className="px-3 py-1 rounded-lg bg-forge-600 hover:bg-forge-500 text-white text-xs"
+                    >
+                      保存
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -769,7 +874,7 @@ function MemoryTab({
                   <span className="text-sm mt-0.5 shrink-0">{CATEGORY_LABELS[mem.category]?.icon || '📎'}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">{mem.content}</p>
-                    <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-600">
+                    <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-600 flex-wrap">
                       <span>{CATEGORY_LABELS[mem.category]?.label || mem.category}</span>
                       <span>·</span>
                       <span>重要性 {mem.importance}</span>
@@ -777,6 +882,16 @@ function MemoryTab({
                       <span>{mem.source === 'auto' ? '自动' : mem.source === 'manual' ? '手动' : '系统'}</span>
                       <span>·</span>
                       <span>{new Date(mem.created_at).toLocaleDateString()}</span>
+                      {mem.project_id ? (
+                        <span
+                          className="px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-500 text-[9px]"
+                          title={`项目 ID: ${mem.project_id}`}
+                        >
+                          📁 项目记忆
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-600 text-[9px]">🌐 全局</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -836,16 +951,22 @@ function DaemonTab() {
   const [newCron, setNewCron] = useState({ name: '', schedule: 'daily:09:00', prompt: '' });
 
   useEffect(() => {
-    window.automater.metaAgent.getDaemonStatus().then(s => {
-      setStatus(s);
-      setConfig(s.config);
-      setLogs(s.recentLogs);
-    }).catch(console.error);
+    window.automater.metaAgent
+      .getDaemonStatus()
+      .then(s => {
+        setStatus(s);
+        setConfig(s.config);
+        setLogs(s.recentLogs);
+      })
+      .catch(console.error);
   }, []);
 
   const refreshLogs = () => {
     window.automater.metaAgent.getDaemonLogs(30).then(setLogs).catch(console.error);
-    window.automater.metaAgent.getDaemonStatus().then(s => setStatus(s)).catch(console.error);
+    window.automater.metaAgent
+      .getDaemonStatus()
+      .then(s => setStatus(s))
+      .catch(console.error);
   };
 
   const handleSave = async () => {
@@ -858,8 +979,11 @@ function DaemonTab() {
         setTimeout(() => setSaved(false), 2000);
         refreshLogs();
       }
-    } catch (err) { log.error('Daemon config save failed', err); }
-    finally { setSaving(false); }
+    } catch (err) {
+      log.error('Daemon config save failed', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggle = async () => {
@@ -875,8 +999,11 @@ function DaemonTab() {
     try {
       await window.automater.metaAgent.triggerHeartbeat();
       setTimeout(refreshLogs, 3000); // Wait for LLM response
-    } catch (err) { log.error('Heartbeat trigger failed', err); }
-    finally { setTriggering(false); }
+    } catch (err) {
+      log.error('Heartbeat trigger failed', err);
+    } finally {
+      setTriggering(false);
+    }
   };
 
   const handleAddCron = () => {
@@ -902,7 +1029,7 @@ function DaemonTab() {
     if (!config) return;
     setConfig({
       ...config,
-      cronJobs: config.cronJobs.map(j => j.id === id ? { ...j, enabled: !j.enabled } : j),
+      cronJobs: config.cronJobs.map(j => (j.id === id ? { ...j, enabled: !j.enabled } : j)),
     });
   };
 
@@ -915,15 +1042,15 @@ function DaemonTab() {
         <div>
           <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
             💓 管家守护进程
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-              config.enabled && status?.running ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-500'
-            }`}>
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                config.enabled && status?.running ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-500'
+              }`}
+            >
               {config.enabled && status?.running ? '运行中' : '已停止'}
             </span>
           </h3>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            让管家持续监控项目进度，主动通知你需要关注的事情
-          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">让管家持续监控项目进度，主动通知你需要关注的事情</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -937,7 +1064,9 @@ function DaemonTab() {
             onClick={handleToggle}
             className={`relative w-11 h-6 rounded-full transition-colors ${config.enabled ? 'bg-forge-600' : 'bg-slate-700'}`}
           >
-            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${config.enabled ? 'left-[26px]' : 'left-1'}`} />
+            <div
+              className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${config.enabled ? 'left-[26px]' : 'left-1'}`}
+            />
           </button>
         </div>
       </section>
@@ -950,8 +1079,11 @@ function DaemonTab() {
             <input
               type="number"
               value={config.heartbeatIntervalMin}
-              onChange={e => setConfig({ ...config, heartbeatIntervalMin: Math.max(5, parseInt(e.target.value) || 30) })}
-              min={5} max={1440}
+              onChange={e =>
+                setConfig({ ...config, heartbeatIntervalMin: Math.max(5, parseInt(e.target.value) || 30) })
+              }
+              min={5}
+              max={1440}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -978,7 +1110,9 @@ function DaemonTab() {
               type="number"
               value={config.dailyTokenBudget}
               onChange={e => setConfig({ ...config, dailyTokenBudget: parseInt(e.target.value) || 50000 })}
-              min={1000} max={1000000} step={5000}
+              min={1000}
+              max={1000000}
+              step={5000}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-forge-500 transition-colors"
             />
           </Field>
@@ -995,12 +1129,14 @@ function DaemonTab() {
         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">🪝 事件钩子</h3>
         <p className="text-[10px] text-slate-600 mb-3">关键事件发生时，管家自动判断是否需要通知你</p>
         <div className="space-y-2">
-          {([
-            ['onFeatureFailed', 'Feature 失败', 'QA 审查未通过时通知'],
-            ['onProjectComplete', '项目完成', '项目开发完成时通知'],
-            ['onProjectStalled', '项目停滞', '项目长时间无进展时通知'],
-            ['onError', '严重错误', '出现严重错误时通知'],
-          ] as const).map(([key, label, desc]) => (
+          {(
+            [
+              ['onFeatureFailed', 'Feature 失败', 'QA 审查未通过时通知'],
+              ['onProjectComplete', '项目完成', '项目开发完成时通知'],
+              ['onProjectStalled', '项目停滞', '项目长时间无进展时通知'],
+              ['onError', '严重错误', '出现严重错误时通知'],
+            ] as const
+          ).map(([key, label, desc]) => (
             <div key={key} className="flex items-center justify-between bg-slate-800/30 rounded-lg px-4 py-2.5">
               <div>
                 <span className="text-xs text-slate-300">{label}</span>
@@ -1010,7 +1146,9 @@ function DaemonTab() {
                 onClick={() => setConfig({ ...config, hooks: { ...config.hooks, [key]: !config.hooks[key] } })}
                 className={`relative w-9 h-5 rounded-full transition-colors ${config.hooks[key] ? 'bg-forge-600' : 'bg-slate-700'}`}
               >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.hooks[key] ? 'left-[18px]' : 'left-0.5'}`} />
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${config.hooks[key] ? 'left-[18px]' : 'left-0.5'}`}
+                />
               </button>
             </div>
           ))}
@@ -1059,7 +1197,12 @@ function DaemonTab() {
               />
             </Field>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowAddCron(false)} className="px-3 py-1 text-xs text-slate-500 hover:text-slate-300">取消</button>
+              <button
+                onClick={() => setShowAddCron(false)}
+                className="px-3 py-1 text-xs text-slate-500 hover:text-slate-300"
+              >
+                取消
+              </button>
               <button
                 onClick={handleAddCron}
                 disabled={!newCron.name.trim() || !newCron.prompt.trim()}
@@ -1072,7 +1215,9 @@ function DaemonTab() {
         )}
 
         {config.cronJobs.length === 0 ? (
-          <div className="py-4 text-center text-[11px] text-slate-600">暂无定时任务。可添加日报、周报、定时检查等。</div>
+          <div className="py-4 text-center text-[11px] text-slate-600">
+            暂无定时任务。可添加日报、周报、定时检查等。
+          </div>
         ) : (
           <div className="space-y-2">
             {config.cronJobs.map(job => (
@@ -1081,11 +1226,15 @@ function DaemonTab() {
                   onClick={() => handleToggleCron(job.id)}
                   className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${job.enabled ? 'bg-forge-600' : 'bg-slate-700'}`}
                 >
-                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${job.enabled ? 'left-[16px]' : 'left-0.5'}`} />
+                  <div
+                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${job.enabled ? 'left-[16px]' : 'left-0.5'}`}
+                  />
                 </button>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-slate-300 truncate">{job.name}</div>
-                  <div className="text-[10px] text-slate-600">{job.schedule} · {job.prompt.slice(0, 40)}...</div>
+                  <div className="text-[10px] text-slate-600">
+                    {job.schedule} · {job.prompt.slice(0, 40)}...
+                  </div>
                 </div>
                 <button
                   onClick={() => handleRemoveCron(job.id)}
@@ -1101,10 +1250,7 @@ function DaemonTab() {
 
       {/* Save + Logs */}
       <div className="flex justify-between items-center pt-2">
-        <button
-          onClick={refreshLogs}
-          className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
-        >
+        <button onClick={refreshLogs} className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors">
           🔄 刷新日志
         </button>
         <button
@@ -1130,15 +1276,19 @@ function DaemonTab() {
                 <span className="shrink-0 mt-0.5">
                   {l.type === 'heartbeat' ? '💓' : l.type === 'hook' ? '🪝' : '⏰'}
                 </span>
-                <span className={`shrink-0 w-12 ${
-                  l.result === 'ok' ? 'text-slate-600' : l.result === 'notified' ? 'text-amber-400' : 'text-red-400'
-                }`}>
+                <span
+                  className={`shrink-0 w-12 ${
+                    l.result === 'ok' ? 'text-slate-600' : l.result === 'notified' ? 'text-amber-400' : 'text-red-400'
+                  }`}
+                >
                   {l.result === 'ok' ? '静默' : l.result === 'notified' ? '已通知' : '错误'}
                 </span>
                 <span className="text-slate-400 flex-1 truncate">{l.message.slice(0, 80)}</span>
                 <span className="text-slate-600 shrink-0">{l.tokens_used}t</span>
                 {l.created_at && (
-                  <span className="text-slate-700 shrink-0">{new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="text-slate-700 shrink-0">
+                    {new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 )}
               </div>
             ))}

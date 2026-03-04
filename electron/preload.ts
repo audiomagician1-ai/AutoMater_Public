@@ -269,9 +269,15 @@ contextBridge.exposeInMainWorld('automater', {
     getConfig: () => ipcRenderer.invoke('meta-agent:config:get'),
     saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('meta-agent:config:save', config),
     // Memory
-    listMemories: (category?: string, limit?: number) => ipcRenderer.invoke('meta-agent:memory:list', category, limit),
-    addMemory: (memory: { category: string; content: string; source?: string; importance?: number }) =>
-      ipcRenderer.invoke('meta-agent:memory:add', memory),
+    listMemories: (category?: string, limit?: number, projectId?: string | null) =>
+      ipcRenderer.invoke('meta-agent:memory:list', category, limit, projectId),
+    addMemory: (memory: {
+      category: string;
+      content: string;
+      source?: string;
+      importance?: number;
+      project_id?: string | null;
+    }) => ipcRenderer.invoke('meta-agent:memory:add', memory),
     updateMemory: (id: string, updates: { content?: string; importance?: number; category?: string }) =>
       ipcRenderer.invoke('meta-agent:memory:update', id, updates),
     deleteMemory: (id: string) => ipcRenderer.invoke('meta-agent:memory:delete', id),
