@@ -104,17 +104,19 @@ export function setupSettingsHandlers() {
 
     // 提取 apiKey, 加密存储到 secret-manager
     const apiKey = settings.apiKey || '';
+    let encryptedOk = false;
     if (apiKey) {
       try {
         setSecret(GLOBAL_PROJECT_ID, 'llm_api_key', apiKey, 'custom');
+        encryptedOk = true;
       } catch (err) {
         log.warn('Failed to encrypt API key, storing in settings table as fallback', { error: String(err) });
         // 降级: 保留明文 (不中断保存流程)
       }
     }
 
-    // 写入 settings 表时, apiKey 置空 (已加密存储)
-    const settingsForDb = { ...settings, apiKey: '' };
+    // 写入 settings 表时: 加密成功 → 清空明文; 加密失败 → 保留明文作为 fallback
+    const settingsForDb = { ...settings, apiKey: encryptedOk ? '' : apiKey };
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
       'app_settings',
       JSON.stringify(settingsForDb),
