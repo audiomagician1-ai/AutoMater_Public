@@ -9,6 +9,8 @@ import type { OpenAIFunctionTool } from './types';
 import { TOOL_DEFINITIONS } from './tool-definitions';
 import { type AgentRole, ROLE_TOOLS } from './tool-permissions';
 import { safeParseToolArgs } from './safe-json';
+import { mcpManager } from './mcp-client';
+import { skillManager } from './skill-loader';
 
 // Re-export for backward compatibility
 export { TOOL_DEFINITIONS } from './tool-definitions';
@@ -154,9 +156,6 @@ export function getToolsForLLM(gitMode: string = 'local'): OpenAIFunctionTool[] 
  */
 function getExternalMcpTools(_role?: string): OpenAIFunctionTool[] {
   try {
-    // Lazy import to avoid circular dependency
-
-    const { mcpManager } = require('./mcp-client') as typeof import('./mcp-client');
     const allTools = mcpManager.getAllTools();
 
     return allTools.map(t =>
@@ -177,9 +176,6 @@ function getExternalMcpTools(_role?: string): OpenAIFunctionTool[] {
  */
 function getExternalSkillTools(role?: string): OpenAIFunctionTool[] {
   try {
-    // Lazy import to avoid circular dependency
-
-    const { skillManager } = require('./skill-loader') as typeof import('./skill-loader');
     const defs = role ? skillManager.getDefinitionsForRole(role) : skillManager.getAllDefinitions();
     return defs.map(toOpenAITool);
   } catch {

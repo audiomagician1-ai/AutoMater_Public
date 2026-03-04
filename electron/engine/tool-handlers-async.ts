@@ -111,6 +111,7 @@ import {
 import { executeTool, checkExternalReadPermission, checkMetaAgentPathBlock } from './tool-executor';
 import { executeMcpTool, executeSkillTool } from './tool-handlers-external';
 import { compressSubAgentResult, compressParallelResults } from './sub-agent-compressor';
+import { getSecret } from './secret-manager';
 
 const log = createLogger('tool-handlers-async');
 
@@ -1119,7 +1120,6 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
 
   // ── v14.0: Supabase Tools ──
   if (call.name.startsWith('supabase_')) {
-    const { getSecret } = await import('./secret-manager');
     const accessToken = getSecret(ctx.projectId, 'supabase_access_token');
     const projectRef = getSecret(ctx.projectId, 'supabase_project_ref');
 
@@ -1210,7 +1210,6 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
 
   // ── v14.0: Cloudflare Tools ──
   if (call.name.startsWith('cloudflare_')) {
-    const { getSecret } = await import('./secret-manager');
     const apiToken = getSecret(ctx.projectId, 'cloudflare_api_token');
     const accountId = getSecret(ctx.projectId, 'cloudflare_account_id');
 

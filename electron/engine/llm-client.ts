@@ -14,6 +14,7 @@ import { NetworkError } from './types';
 import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TIMEOUT_MS } from './constants';
 import { createLogger } from './logger';
 import { safeJsonParse, safeParseToolArgs } from './safe-json';
+import { getSecret } from './secret-manager';
 
 const log = createLogger('llm-client');
 
@@ -163,7 +164,6 @@ export function getSettings(): AppSettings | null {
   // v19.1: 解密 apiKey — 优先从 secret-manager 获取加密版本
   if (!settings.apiKey) {
     try {
-      const { getSecret } = require('./secret-manager'); // require-ok: 条件加载避免循环
       const encrypted = getSecret('__global__', 'llm_api_key');
       if (encrypted) settings.apiKey = encrypted;
     } catch {

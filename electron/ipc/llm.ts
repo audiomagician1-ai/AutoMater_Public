@@ -1,6 +1,6 @@
 ﻿/**
  * LLM IPC — 在主进程中直接调用 LLM API
- * 
+ *
  * 没有后端服务，没有 sidecar — 直接 fetch
  * API Key 安全地存在主进程侧，渲染进程无法直接访问
  */
@@ -11,6 +11,7 @@ import type { AppSettings } from '../engine/types';
 import { toErrorMessage } from '../engine/logger';
 import { assertObject } from './ipc-validator';
 import { safeJsonParse } from '../engine/safe-json';
+import { getSecret } from '../engine/secret-manager';
 
 interface LLMProvider {
   type: 'openai' | 'anthropic' | 'custom';
@@ -39,23 +40,25 @@ function normalizeBaseUrl(url: string): string {
 
 function getSettings() {
   const db = getDb();
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as { value: string } | undefined;
-  const settings = row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings) : {} as AppSettings;
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('app_settings') as
+    | { value: string }
+    | undefined;
+  const settings = row ? safeJsonParse<AppSettings>(row.value, {} as AppSettings) : ({} as AppSettings);
 
   // v19.1: 解密 apiKey — 优先从 secret-manager 获取加密版本
   if (!settings.apiKey) {
     try {
-      const { getSecret } = require('../engine/secret-manager'); // require-ok: 避免循环导入
       const encrypted = getSecret('__global__', 'llm_api_key');
       if (encrypted) settings.apiKey = encrypted;
-    } catch { /* silent: secret-manager 不可用 */ }
+    } catch {
+      /* silent: secret-manager 不可用 */
+    }
   }
 
   return settings;
 }
 
 export function setupLLMHandlers() {
-
   // ── 连通性测试 ──
   ipcMain.handle('llm:test-connection', async (_event, provider: LLMProvider) => {
     assertObject('llm:test-connection', 'provider', provider);
@@ -80,10 +83,12 @@ export function setupLLMHandlers() {
         // OpenAI 兼容 — 先尝试 /v1/models，失败则用轻量 chat 测试
         try {
           const res = await fetch(`${base}/v1/models`, {
-            headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+            headers: { Authorization: `Bearer ${provider.apiKey}` },
           });
           if (res.ok) return { success: true, status: res.status, message: 'Connected!' };
-        } catch { /* models endpoint not available, try chat */ }
+        } catch {
+          /* models endpoint not available, try chat */
+        }
 
         // Fallback: 轻量 chat 测试 — 用已保存的模型名，或通用名
         const savedSettings = getSettings();
@@ -92,7 +97,7 @@ export function setupLLMHandlers() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
+            Authorization: `Bearer ${provider.apiKey}`,
           },
           body: JSON.stringify({
             model: testModel,
@@ -132,13 +137,14 @@ export function setupLLMHandlers() {
         };
       }
       const res = await fetch(`${base}/v1/models`, {
-        headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+        headers: { Authorization: `Bearer ${provider.apiKey}` },
       });
       if (!res.ok) return { success: false, models: [] };
-      const data = await res.json() as { data?: Array<{ id: string }> };
-      const models = (data.data || []).map((m) => m.id).sort();
+      const data = (await res.json()) as { data?: Array<{ id: string }> };
+      const models = (data.data || []).map(m => m.id).sort();
       return { success: true, models };
-    } catch { /* silent: model list fetch failed */
+    } catch {
+      /* silent: model list fetch failed */
       return { success: false, models: [] };
     }
   });
@@ -165,7 +171,7 @@ async function chatOpenAI(settings: AppSettings, request: ChatRequest) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`,
+      Authorization: `Bearer ${settings.apiKey}`,
     },
     body: JSON.stringify({
       model: request.model,
@@ -180,7 +186,11 @@ async function chatOpenAI(settings: AppSettings, request: ChatRequest) {
     return { success: false, error: `API error ${res.status}: ${text}`, content: '' };
   }
 
-  const data = await res.json() as { choices: Array<{ message: { content: string | null } }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string | null } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    model?: string;
+  };
   const choice = data.choices[0];
   return {
     success: true,
@@ -219,11 +229,15 @@ async function chatAnthropic(settings: AppSettings, request: ChatRequest) {
     return { success: false, error: `API error ${res.status}: ${text}`, content: '' };
   }
 
-  const data = await res.json() as { content: Array<{ type: string; text?: string }>; usage?: { input_tokens: number; output_tokens: number }; model?: string };
-  const textBlocks = data.content.filter((b) => b.type === 'text');
+  const data = (await res.json()) as {
+    content: Array<{ type: string; text?: string }>;
+    usage?: { input_tokens: number; output_tokens: number };
+    model?: string;
+  };
+  const textBlocks = data.content.filter(b => b.type === 'text');
   return {
     success: true,
-    content: textBlocks.map((b) => b.text ?? '').join(''),
+    content: textBlocks.map(b => b.text ?? '').join(''),
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
     model: data.model,

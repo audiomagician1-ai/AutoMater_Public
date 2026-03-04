@@ -37,6 +37,7 @@ import type { FileTreeNode } from './types';
 import { trimToolResult } from './context-collector';
 import { configureSearch, getAvailableProviders } from './search-provider';
 import { configureImageGen } from './image-gen';
+import { getActiveSubAgents, cancelSubAgent } from './sub-agent-framework';
 
 const _log = createLogger('tool-executor');
 
@@ -706,8 +707,6 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
 
       // Sync-only tools
       case 'list_sub_agents': {
-        // Lazy import: sub-agent-framework → tool-executor circular dep
-        const { getActiveSubAgents } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
         const agents = getActiveSubAgents();
         if (agents.length === 0) return { success: true, output: '无活跃子 Agent', action: 'read' };
         const lines = agents.map(a => `${a.id} [${a.preset}] 运行 ${Math.round(a.runningMs / 1000)}s — ${a.task}`);
@@ -715,8 +714,6 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
       }
 
       case 'cancel_sub_agent': {
-        // Lazy import: sub-agent-framework → tool-executor circular dep
-        const { cancelSubAgent } = require('./sub-agent-framework') as typeof import('./sub-agent-framework');
         const ok = cancelSubAgent(call.arguments.agent_id);
         return ok
           ? { success: true, output: `已取消子 Agent: ${call.arguments.agent_id}`, action: 'write' }

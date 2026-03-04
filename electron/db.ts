@@ -14,6 +14,8 @@ import { ensureCheckpointTable } from './engine/mission';
 import { ensureSessionsTable } from './engine/conversation-backup';
 import { ensureHeartbeatTable } from './engine/meta-agent-daemon';
 import { createLogger } from './engine/logger';
+import { migrateGitHubTokensFromProjects } from './engine/secret-manager';
+import { migrateApiKeyToSecretManager } from './ipc/settings';
 
 const log = createLogger('db');
 
@@ -271,8 +273,6 @@ const MIGRATIONS: Migration[] = [
 
       // 迁移旧 github_token 到 project_secrets
       try {
-        const { migrateGitHubTokensFromProjects } =
-          require('./engine/secret-manager') as typeof import('./engine/secret-manager');
         migrateGitHubTokensFromProjects();
       } catch (err) {
         // 非致命: 首次安装时 projects 表可能为空
@@ -281,7 +281,6 @@ const MIGRATIONS: Migration[] = [
 
       // v19.1: 迁移全局 API Key 到加密存储
       try {
-        const { migrateApiKeyToSecretManager } = require('./ipc/settings') as typeof import('./ipc/settings');
         migrateApiKeyToSecretManager();
       } catch (err) {
         log.debug('API key migration skipped', { error: String(err) });
