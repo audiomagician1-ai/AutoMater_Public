@@ -34,6 +34,7 @@ import {
   emitScheduleEvent,
   createCheckpoint,
   resolveMemberModel,
+  resolveModel,
   safeJsonParse,
   PM_SYSTEM_PROMPT,
   PM_ACCEPTANCE_PROMPT,
@@ -263,12 +264,63 @@ export async function phasePMAnalysis(
       }
       addLog(projectId, pmId, 'log', `Parsed via strategy: ${parseResult.strategy}`);
     } else {
+      // ── v33.1: Rescue — 解析失败时尝试用 LLM 从终止总结中提取 Feature JSON ──
+      addLog(projectId, pmId, 'warning', `Parse failed (${parseResult.error}), attempting rescue extraction...`);
       sendToUI(win, 'agent:log', {
         projectId,
         agentId: pmId,
-        content: `❌ PM 输出解析失败: ${parseResult.error}\n原始输出: ${parseResult.rawPreview}`,
+        content: `⚠️ PM 输出解析失败，尝试 Rescue 提取 Feature JSON...`,
       });
-      addLog(projectId, pmId, 'error', `Parse failed: ${parseResult.error}`);
+      try {
+        const rescueModel = resolveModel('mini', settings);
+        const rescueResult = await callLLM(
+          settings,
+          rescueModel,
+          [
+            {
+              role: 'system',
+              content:
+                'You are a JSON extraction assistant. Extract the Feature list from the provided PM analysis summary and output ONLY a valid JSON array. Each feature must have: name (string), description (string), priority ("P0"|"P1"|"P2"), acceptance_criteria (string[]), estimated_effort ("small"|"medium"|"large"). Output nothing but the JSON array.',
+            },
+            {
+              role: 'user',
+              content: `用户需求: ${project.wish}\n\nPM 分析输出 (终止总结):\n${textToParse.slice(0, 8000)}\n\n请提取上述分析中的 Feature 清单，输出为 JSON 数组。`,
+            },
+          ],
+          signal,
+          8192,
+          1,
+          undefined,
+          30000,
+        );
+        const rescueParsed = parseStructuredOutput<ParsedFeature[]>(rescueResult.content, PM_FEATURE_SCHEMA);
+        if (rescueParsed.ok) {
+          features = rescueParsed.data;
+          const rescueCost = calcCost(rescueModel, rescueResult.inputTokens, rescueResult.outputTokens);
+          updateAgentStats(pmId, projectId, rescueResult.inputTokens, rescueResult.outputTokens, rescueCost);
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: pmId,
+            content: `🔧 Rescue 成功: 从终止总结中提取了 ${features.length} 个 Feature ($${rescueCost.toFixed(4)})`,
+          });
+          addLog(projectId, pmId, 'log', `Rescue extracted ${features.length} features via ${rescueParsed.strategy}`);
+        } else {
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: pmId,
+            content: `❌ Rescue 也失败: ${rescueParsed.error}\n原始输出: ${parseResult.rawPreview}`,
+          });
+          addLog(projectId, pmId, 'error', `Rescue also failed: ${rescueParsed.error}`);
+        }
+      } catch (rescueErr: unknown) {
+        const msg = rescueErr instanceof Error ? rescueErr.message : String(rescueErr);
+        addLog(projectId, pmId, 'error', `Rescue LLM call failed: ${msg}`);
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: pmId,
+          content: `❌ PM 输出解析失败: ${parseResult.error}\n原始输出: ${parseResult.rawPreview}`,
+        });
+      }
     }
     db.prepare(
       "UPDATE agents SET status = 'idle', session_count = 1, total_input_tokens = ?, total_output_tokens = ?, total_cost_usd = ?, last_active_at = datetime('now') WHERE id = ? AND project_id = ?",
