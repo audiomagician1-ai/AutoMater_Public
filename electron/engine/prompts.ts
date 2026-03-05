@@ -584,45 +584,57 @@ export type FeatureCategory = 'infrastructure' | 'core' | 'ui' | 'api' | 'testin
 export function getCategoryGuidance(category: FeatureCategory): string {
   switch (category) {
     case 'ui':
-      return `\n## 🎨 UI Feature 特别指导\n` +
+      return (
+        `\n## 🎨 UI Feature 特别指导\n` +
         `- 完成 UI 修改后，你**必须**启动 dev server 并截图验证效果\n` +
         `- 推荐流程: write_file/edit_file → run_command(启动 dev server) → browser_launch → browser_navigate → browser_screenshot\n` +
         `- 关注: 响应式布局、暗色模式兼容、无障碍性 (aria-label)\n` +
         `- CSS 变量优先于硬编码颜色值\n` +
-        `- 组件命名遵循 PascalCase，文件命名遵循项目约定`;
+        `- 组件命名遵循 PascalCase，文件命名遵循项目约定`
+      );
 
     case 'api':
-      return `\n## 🔌 API Feature 特别指导\n` +
+      return (
+        `\n## 🔌 API Feature 特别指导\n` +
         `- 完成 API 实现后，你**必须**用 http_request 工具测试每个端点\n` +
         `- 推荐流程: 实现代码 → run_command(启动服务) → http_request(测试端点) → 验证响应\n` +
         `- 关注: 输入验证、错误状态码、认证/授权、速率限制\n` +
-        `- 所有 API 响应必须有一致的 JSON 结构 (如 {success, data, error})`;
+        `- 所有 API 响应必须有一致的 JSON 结构 (如 {success, data, error})`
+      );
 
     case 'infrastructure':
-      return `\n## 🏗️ 基础设施 Feature 特别指导\n` +
+      return (
+        `\n## 🏗️ 基础设施 Feature 特别指导\n` +
         `- 基础设施代码影响面大，修改前必须充分理解现有架构\n` +
         `- 推荐流程: code_graph_query(related) 了解依赖 → search_files 定位关键代码 → read_file(offset, limit) 精读 → think 分析影响范围 → 逐步修改 → run_command 验证\n` +
         `- 关注: 向后兼容性、配置文件格式、数据库迁移脚本、环境变量\n` +
-        `- 修改 package.json/tsconfig.json 等全局配置后必须验证构建`;
+        `- 修改 package.json/tsconfig.json 等全局配置后必须验证构建`
+      );
 
     case 'testing':
-      return `\n## 🧪 测试 Feature 特别指导\n` +
+      return (
+        `\n## 🧪 测试 Feature 特别指导\n` +
         `- 测试文件命名遵循项目约定 (*.test.ts, *.spec.ts, test_*.py)\n` +
         `- 推荐流程: 分析被测代码 → write_file(测试文件) → run_test → 确认通过率\n` +
         `- 关注: 覆盖正常路径、边界条件、错误路径\n` +
-        `- Mock/Stub 只在必要时使用，优先使用真实依赖`;
+        `- Mock/Stub 只在必要时使用，优先使用真实依赖`
+      );
 
     case 'core':
-      return `\n## ⚙️ 核心功能 Feature 特别指导\n` +
+      return (
+        `\n## ⚙️ 核心功能 Feature 特别指导\n` +
         `- 核心功能必须有完整的错误处理和日志记录\n` +
         `- 关注: 类型安全、接口契约、向后兼容\n` +
-        `- 修改已有接口时，用 code_search 搜索所有调用方（而非逐文件 read_file），然后用 batch_edit 同步更新`;
+        `- 修改已有接口时，用 code_search 搜索所有调用方（而非逐文件 read_file），然后用 batch_edit 同步更新`
+      );
 
     case 'docs':
-      return `\n## 📝 文档 Feature 特别指导\n` +
+      return (
+        `\n## 📝 文档 Feature 特别指导\n` +
         `- 文档内容应准确反映当前代码实现\n` +
         `- 使用 read_file 确认文档描述与实际代码一致\n` +
-        `- Markdown 格式规范: 标题层级、代码块语言标记、链接有效性`;
+        `- Markdown 格式规范: 标题层级、代码块语言标记、链接有效性`
+      );
 
     default:
       return '';
@@ -952,10 +964,10 @@ export const PM_WISH_TRIAGE_PROMPT = `你是一位资深产品经理。你的任
 
 /**
  * 通用的上下文管理纪律指令。
- * 
+ *
  * 这是底层工作模式，不是某个角色的特权。所有使用工具的 Agent
  * （Developer、QA、PM ReAct、Sub-Agent）都必须遵守。
- * 
+ *
  * 灵感来源：Anthropic Context Engineering — proactive note-taking,
  * summarize-then-discard, sub-agent isolation。
  */
@@ -1010,17 +1022,125 @@ spawn_parallel(tasks=[
 
 /**
  * 将角色专属 system prompt 与全局上下文管理纪律合并。
- * 
+ *
  * 所有构建 system prompt 的入口都应调用此函数，确保纪律统一注入。
  * 纪律追加在角色 prompt 末尾，不改变角色定义和工作流指令。
- * 
+ *
  * @param rolePrompt 角色专属的 system prompt
  * @param options.skipForShortLived 对于超短生命周期调用（如单次 callLLM 不走 react loop）可跳过
  */
-export function withContextDiscipline(
-  rolePrompt: string,
-  options?: { skipForShortLived?: boolean },
-): string {
+export function withContextDiscipline(rolePrompt: string, options?: { skipForShortLived?: boolean }): string {
   if (options?.skipForShortLived) return rolePrompt;
   return rolePrompt + CONTEXT_MANAGEMENT_DIRECTIVE;
+}
+
+// ═══════════════════════════════════════
+// v31.0: 三层 Prompt 解析 — WORKFLOW.md > team_members > 内置默认
+// ═══════════════════════════════════════
+
+import { getWorkflowPrompt, interpolatePrompt } from './workflow-config';
+
+/** 内置默认 prompt 映射 */
+const BUILTIN_PROMPTS: Record<string, string> = {
+  pm: PM_SYSTEM_PROMPT,
+  architect: ARCHITECT_SYSTEM_PROMPT,
+  developer: DEVELOPER_REACT_PROMPT,
+  qa: QA_REACT_PROMPT,
+  planner: PLANNER_FEATURE_PROMPT,
+};
+
+/**
+ * v31.0: 统一 Prompt 解析 — 三层 fallback
+ *
+ * 优先级: WORKFLOW.md > team_members.system_prompt > 内置默认
+ *
+ * 这是所有 prompt 获取的推荐入口。调用方不再需要自己写
+ * `getTeamPrompt(pid, role) ?? BUILT_IN_PROMPT`，直接用 resolvePrompt。
+ *
+ * @param workspacePath 项目工作区 (null 则跳过 WORKFLOW.md 层)
+ * @param role 角色名 (pm / architect / developer / qa)
+ * @param teamPrompt team_members 表中的自定义 prompt (null 表示无)
+ * @param vars 可选的变量插值 ({{project_name}} 等)
+ */
+export function resolvePrompt(
+  workspacePath: string | null,
+  role: string,
+  teamPrompt: string | null,
+  vars?: Record<string, string | number>,
+): string {
+  const normalizedRole = role.toLowerCase();
+
+  // Layer 1: WORKFLOW.md
+  if (workspacePath) {
+    const workflowPrompt = getWorkflowPrompt(workspacePath, normalizedRole);
+    if (workflowPrompt) {
+      return vars ? interpolatePrompt(workflowPrompt, vars) : workflowPrompt;
+    }
+  }
+
+  // Layer 2: team_members.system_prompt
+  if (teamPrompt && teamPrompt.trim().length > 10) {
+    return vars ? interpolatePrompt(teamPrompt, vars) : teamPrompt;
+  }
+
+  // Layer 3: 内置默认
+  return BUILTIN_PROMPTS[normalizedRole] ?? DEVELOPER_REACT_PROMPT;
+}
+
+// ═══════════════════════════════════════
+// v31.0: Feature 状态驱动行为指导 (Status Map)
+// ═══════════════════════════════════════
+
+/**
+ * 根据 Feature 的当前状态生成行为指导, 注入 prompt。
+ *
+ * 灵感: Symphony 的 "state-driven prompt augmentation"。
+ * 不同状态下 Agent 的行为重点完全不同:
+ *   - todo → 全新实现
+ *   - in_progress → 首次开发
+ *   - rework → 修复 QA 问题 (最常见)
+ *   - paused/resumed → 恢复中断
+ *
+ * @param status 当前 Feature 状态
+ * @param qaAttempt 第几次 QA 尝试
+ * @param qaFeedback 最近的 QA 反馈 (rework 时有)
+ */
+export function getStatusGuidance(status: string, qaAttempt: number, qaFeedback?: string): string {
+  switch (status) {
+    case 'rework':
+      return (
+        `\n## 🔄 状态: 重做 (第 ${qaAttempt} 次 QA 尝试)\n` +
+        `**核心指令: 修复 QA 反馈, 不要重写无关代码**\n` +
+        `- 先 search_files 定位 QA 指出的问题文件和行号\n` +
+        `- 针对性修复每个 QA issue, 用 edit_file 精确修改\n` +
+        `- 修复后必须 run_command 验证编译, run_test 验证测试\n` +
+        `- 不要大范围重构 — 只修复 QA 问题 + 相关联动\n` +
+        (qaFeedback ? `\n### QA 反馈:\n${qaFeedback.slice(0, 500)}` : '')
+      );
+
+    case 'paused':
+    case 'resumed':
+      return (
+        `\n## ⏯️ 状态: 恢复执行 (从暂停中继续)\n` +
+        `**核心指令: 了解已完成的部分, 从断点继续**\n` +
+        `- 先用 scratchpad_read 和 search_files 了解已完成的进度\n` +
+        `- 不要重做已有的文件 — 检查它们是否正确\n` +
+        `- 从 todo_read 的未完成项继续\n` +
+        `- 如果 todo 为空, 用 list_files + read_file 审查已有代码, 找到缺失部分`
+      );
+
+    case 'in_progress':
+      if (qaAttempt > 1) {
+        return (
+          `\n## 🔄 状态: 重做 (第 ${qaAttempt} 次 QA 尝试)\n` +
+          `**核心指令: 修复 QA 反馈, 不要重写无关代码**\n` +
+          `- 针对性修复每个 QA issue\n` +
+          `- 修复后必须验证编译和测试`
+        );
+      }
+      return ''; // 首次开发, 不需要额外指导
+
+    default:
+      return '';
+  }
 }

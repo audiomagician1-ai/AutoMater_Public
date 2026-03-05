@@ -3,6 +3,7 @@
  *
  * Phase functions are extracted to phases/ directory for maintainability.
  * v30.0: Dev+QA 阶段完全委托给 Session Scheduler 驱动。
+ * v32.0: 1-Session-1-Feature — scheduler 为每个 Feature spawn 独立 session+worker。
  * This file retains: runOrchestrator (main entry), workflow resolver, ensureAgentsMd.
  */
 
@@ -17,6 +18,7 @@ const log = createLogger('orchestrator');
 // ── Core engine imports (used directly in runOrchestrator) ──
 import { getSettings, validateModel } from './llm-client';
 import { sendToUI, notify } from './ui-bridge';
+import { emitScheduleEvent } from './scheduler-bus';
 import {
   registerOrchestrator,
   unregisterOrchestrator,
@@ -34,8 +36,7 @@ import { cleanExpiredLocks } from './file-lock';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import type { AppSettings, ProjectRow, CountResult, WorkflowStage, WorkflowStageId, PhaseResult } from './types';
 import type { GitProviderConfig } from './git-provider';
-import { runSessionDrivenDevPhase } from './session-scheduler';
-import { emitScheduleEvent } from './scheduler-bus';
+import { runSessionDrivenDevPhase, getDevPhaseContext } from './session-scheduler';
 
 // ── Phase modules (all logic extracted) ──
 import {
@@ -68,8 +69,8 @@ function getActiveWorkflow(projectId: string): WorkflowStage[] {
   try {
     const stages: WorkflowStage[] = JSON.parse(row.stages);
     return stages;
-  } catch (err) {
-    log.debug('Workflow stages parse failed, using default pipeline', { error: String(err) });
+  } catch {
+    /* silent: stages JSON parse — use default pipeline */
     return PRESET_FULL_DEVELOPMENT;
   }
 }
@@ -104,19 +105,34 @@ export type {
 } from './react-loop';
 
 // ═══════════════════════════════════════
-// Hot-Join: 热加入事件路由 — 委托给 scheduler-bus
+// Hot-Join: v32.0 — 统一由 session-scheduler 管理
 // ═══════════════════════════════════════
 
+/** @deprecated v32.0: 使用 DevPhaseContext from session-scheduler */
+export type HotJoinContext = import('./session-scheduler').DevPhaseContext;
+
+/** @deprecated v32.0: 使用 getDevPhaseContext from session-scheduler */
+export function getHotJoinContext(projectId: string): HotJoinContext | undefined {
+  return getDevPhaseContext(projectId);
+}
+
 /**
- * 团队成员新增时触发 — project.ts 调用此函数
- * Developer 角色通过 scheduler-bus 路由到 session-scheduler 自动调度
+ * 热加入 — 委托给 scheduler-bus 的 member_added 事件
+ * project.ts 调用此函数触发热加入事件
  */
 export function emitMemberAdded(payload: { projectId: string; memberId: string; role: string; name: string }) {
+  // 只对 developer 角色触发调度
   if (payload.role !== 'developer') return;
+  // 通过 scheduler-bus 触发 → session-scheduler 自动处理
   emitScheduleEvent('schedule:member_added', {
     projectId: payload.projectId,
     memberId: payload.memberId,
   });
+}
+
+/** @deprecated v32.0: no-op，scheduler 自动注册监听器 */
+export function ensureHotJoinListener() {
+  // no-op: session-scheduler.registerSchedulerListeners() 已取代此功能
 }
 
 // ═══════════════════════════════════════
@@ -196,8 +212,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         shellExec: cfg.permissions.shellExec === true,
       };
     }
-  } catch (err) {
-    log.debug('Project config parse failed, using defaults', { error: String(err) });
+  } catch {
+    /* config parse error — use defaults (all denied) */
   }
 
   ensureGlobalMemory();
@@ -224,8 +240,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
           content: `📚 已从全局经验库注入 ${injected} 条相关经验`,
         });
       }
-    } catch (err) {
-      log.debug('Cross-project experience injection failed', { error: String(err) });
+    } catch {
+      /* silent: non-critical path */
     }
   }
 
@@ -685,8 +701,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const deps = Object.keys(pkg.dependencies || {}).slice(0, 20);
       const devDeps = Object.keys(pkg.devDependencies || {}).slice(0, 10);
       depsInfo = `### 依赖\n- 运行时: ${deps.join(', ') || '无'}\n- 开发: ${devDeps.join(', ') || '无'}`;
-    } catch (err) {
-      log.debug('package.json parse failed', { error: String(err) });
+    } catch {
+      /* parse error */
     }
   }
 
@@ -710,8 +726,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const tsConfig = JSON.parse(fs.readFileSync(tsConfigPath, 'utf-8'));
       const co = tsConfig.compilerOptions || {};
       tsInfo = `### TypeScript 配置\n- target: ${co.target || 'N/A'}\n- module: ${co.module || 'N/A'}\n- strict: ${co.strict ?? 'N/A'}\n- outDir: ${co.outDir || 'N/A'}`;
-    } catch (err) {
-      log.debug('tsconfig.json parse failed', { error: String(err) });
+    } catch {
+      /* parse error */
     }
   }
 
@@ -724,8 +740,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       .map(e => e.name);
     const files = entries.filter(e => e.isFile()).map(e => e.name);
     dirStructure = `### 项目结构\n- 目录: ${dirs.join(', ') || '无'}\n- 根文件: ${files.slice(0, 15).join(', ')}`;
-  } catch (err) {
-    log.debug('Directory structure read failed', { error: String(err) });
+  } catch {
+    /* read error */
   }
 
   const content = [

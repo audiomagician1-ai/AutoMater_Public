@@ -1,6 +1,11 @@
 ﻿/**
  * Worker Phase — Developer ReAct + QA + Lesson Extraction per Feature
  * Extracted from orchestrator.ts for maintainability.
+ *
+ * v32.0: 1-Session-1-Feature — workerLoop 不再自循环取 feature。
+ *   当 scheduler 传入 assignedFeature 时，只处理该 feature 后退出。
+ *   scheduler 在 Feature 完成/失败事件后自动 spawn 新 session+worker。
+ *
  * @module phases/worker-phase
  */
 
@@ -44,6 +49,14 @@ import {
   getOrCreateSession,
   type WorkType,
   resolveMemberModel,
+  workpadDevStart,
+  workpadDevDone,
+  workpadQAResult,
+  workpadPaused,
+  formatWorkpadForPrompt,
+  buildContinuationDirective,
+  getWorkflowConfig,
+  getWorkflowHooks,
   type AppSettings,
   type CountResult,
   type EnrichedFeature,
@@ -65,14 +78,16 @@ const _log = createLogger('phase:worker');
 // ═══════════════════════════════════════
 
 /**
- * Worker 循环配置 (v28.0)
- * 当由 Scheduler 驱动时传入 member 信息，用于 Session 生命周期管理。
+ * Worker 配置 (v32.0)
+ * v32.0: 1-Session-1-Feature 模型 — scheduler 预分配 feature + session，worker 只执行一个 feature 后退出。
  */
 export interface WorkerLoopOptions {
   /** Agent 类定义（来自 team_members 表）。传入后启用 Session 生命周期追踪。 */
   member?: TeamMemberRow;
-  /** 预创建的 Session ID — 如果 scheduler 已提前创建了 session */
+  /** 预创建的 Session ID — scheduler 已提前创建了 session */
   preCreatedSessionId?: string;
+  /** v32.0: Scheduler 预分配的 Feature — worker 只执行此 feature，不自行取活 */
+  assignedFeature?: FeatureRow;
 }
 
 export async function workerLoop(
@@ -92,10 +107,23 @@ export async function workerLoop(
   let featuresPassed = 0;
   let featuresFailed = 0;
   const db = getDb();
-  const maxQARetries = 3;
+  // v31.0: maxQARetries 可通过 WORKFLOW.md 覆盖
+  const workflowConfig = workspacePath ? getWorkflowConfig(workspacePath) : null;
+  const maxQARetries = workflowConfig?.frontmatter.maxQARetries ?? 3;
   const member = options?.member;
 
-  while (!signal.aborted) {
+  // v32.0: 1-Session-1-Feature — scheduler 预分配 feature，worker 不再自行取活
+  // 兼容模式: 如果没有传入 assignedFeature，退回旧行为（self-loop）供测试或手动触发
+  const assignedFeature = options?.assignedFeature;
+
+  // === Feature 获取循环 (v32.0: 预分配模式只执行一次) ===
+  let continueLoop = true;
+  while (continueLoop && !signal.aborted) {
+    // v32.0: 预分配模式只执行一轮后退出
+    if (assignedFeature) {
+      continueLoop = false; // 确保只执行一次
+    }
+
     const budget = checkBudget(projectId, settings);
     if (!budget.ok) {
       sendToUI(win, 'agent:log', {
@@ -108,14 +136,19 @@ export async function workerLoop(
       break;
     }
 
-    // v28.0: 使用 member.id 作为锁定身份（如果有），否则用 workerId
+    // v32.0: 使用 scheduler 预分配的 feature，仅 fallback 时自行锁定
     const lockIdentity = member?.id ?? workerId;
-    const lockedFeature = (await import('../agent-manager')).lockNextFeature(projectId, lockIdentity);
+    let lockedFeature: FeatureRow | null;
+    if (assignedFeature) {
+      lockedFeature = assignedFeature; // scheduler 已锁定
+    } else {
+      lockedFeature = (await import('../agent-manager')).lockNextFeature(projectId, lockIdentity);
+    }
     if (!lockedFeature) {
       const inProgress = db
         .prepare("SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('in_progress', 'reviewing')")
         .get(projectId) as CountResult;
-      if (inProgress.c > 0) {
+      if (inProgress.c > 0 && !assignedFeature) {
         await sleep(3000);
         continue;
       }
@@ -129,19 +162,25 @@ export async function workerLoop(
 
     const feature: EnrichedFeature = { ...lockedFeature };
 
-    // v28.0: Session 生命周期 — 为每个 Feature 创建或复用 Session
+    // v32.0: Session 生命周期 — 使用 scheduler 预创建的 session
     let featureSessionId: string | null = null;
-    if (member) {
+    if (options?.preCreatedSessionId) {
+      featureSessionId = options.preCreatedSessionId;
       try {
-        // 如果 scheduler 预创建了 session 且是第一个 feature，使用它；否则新建
-        if (options?.preCreatedSessionId && featuresProcessed === 0) {
-          featureSessionId = options.preCreatedSessionId;
-          transitionSession(featureSessionId, 'running');
-        } else {
-          const sess = createSessionForFeature(member.id, feature.id, projectId, workerId, member.role);
-          featureSessionId = sess.id;
-          transitionSession(featureSessionId, 'running');
-        }
+        transitionSession(featureSessionId, 'running');
+        sendToUI(win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `📋 Session ${featureSessionId} 启动 (Feature: ${feature.id})`,
+        });
+      } catch (err) {
+        _log.warn('Failed to transition session', { sessionId: featureSessionId, error: String(err) });
+      }
+    } else if (member) {
+      try {
+        const sess = createSessionForFeature(member.id, feature.id, projectId, workerId, member.role);
+        featureSessionId = sess.id;
+        transitionSession(featureSessionId, 'running');
         sendToUI(win, 'agent:log', {
           projectId,
           agentId: workerId,
@@ -297,6 +336,49 @@ export async function workerLoop(
     let lastErrorMsg = '';
 
     for (let qaAttempt = 1; qaAttempt <= maxQARetries && !signal.aborted; qaAttempt++) {
+      // v31.0: Feature Workpad — 记录开发阶段开始
+      if (workspacePath) {
+        try {
+          workpadDevStart(workspacePath, feature.id, projectId, workerId, qaAttempt, qaFeedback || undefined);
+        } catch {
+          /* non-critical */
+        }
+      }
+
+      // v31.0: Inject workpad continuation context into feature
+      if (workspacePath && qaAttempt > 1) {
+        const workpadContext = formatWorkpadForPrompt(workspacePath, feature.id);
+        if (workpadContext) {
+          feature._workpadContext = workpadContext;
+        }
+        const continuationDirective = buildContinuationDirective(workspacePath, feature.id, qaAttempt);
+        if (continuationDirective) {
+          feature._continuationDirective = continuationDirective;
+        }
+      }
+
+      // v31.0: Workflow hooks — before_run
+      if (workspacePath) {
+        const hooks = getWorkflowHooks(workspacePath);
+        if (hooks?.before_run) {
+          try {
+            const { execSync } = await import('child_process');
+            execSync(hooks.before_run, { cwd: workspacePath, timeout: 30_000, stdio: 'pipe' });
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: workerId,
+              content: `🪝 before_run hook 完成: ${hooks.before_run}`,
+            });
+          } catch (err) {
+            sendToUI(win, 'agent:log', {
+              projectId,
+              agentId: workerId,
+              content: `⚠️ before_run hook 失败: ${String(err).slice(0, 100)}`,
+            });
+          }
+        }
+      }
+
       const devSession = getOrCreateSession(projectId, workerId, 'developer');
       const devWorkType: WorkType = qaAttempt === 1 ? 'dev-implement' : 'dev-rework';
       const devLinkId = linkFeatureSession({
@@ -335,9 +417,8 @@ export async function workerLoop(
               reactResult.totalOutputTokens,
               reactResult.totalCost,
             );
-          } catch (err) {
+          } catch {
             /* safe */
-            _log.debug('Catch at worker-phase.ts:338', { error: String(err) });
           }
         }
 
@@ -346,6 +427,14 @@ export async function workerLoop(
           const isMaxIter = reactResult.terminationReason === 'max_iterations';
           if (isMaxIter) {
             // 保存续跑快照 — 标记 feature 为 paused，用户可手动继续
+            // v31.0: 同时更新 workpad
+            if (workspacePath) {
+              try {
+                workpadPaused(workspacePath, feature.id, reactResult.iterations, 'max_iterations');
+              } catch {
+                /* non-critical */
+              }
+            }
             const snapshot = JSON.stringify({
               workerId,
               qaAttempt,
@@ -384,6 +473,21 @@ export async function workerLoop(
           `完成: ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代, $${reactResult.totalCost.toFixed(4)}`,
           true,
         );
+
+        // v31.0: Feature Workpad — 记录开发完成
+        if (workspacePath) {
+          try {
+            workpadDevDone(
+              workspacePath,
+              feature.id,
+              reactResult.filesWritten,
+              reactResult.iterations,
+              reactResult.totalCost,
+            );
+          } catch {
+            /* non-critical */
+          }
+        }
 
         // v20.0: Feature 级成本异常预警 (P3-3) — 成本超过 $1 或 30 轮迭代
         if (reactResult.totalCost > 1.0 || reactResult.iterations > 30) {
@@ -454,15 +558,22 @@ export async function workerLoop(
           if (featureSessionId) {
             try {
               updateSessionStats(featureSessionId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
-            } catch (err) {
+            } catch {
               /* safe */
-              _log.debug('Catch at worker-phase.ts:457', { error: String(err) });
             }
           }
           db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(localQaId, projectId);
 
           if (qaResult.verdict === 'pass') {
             passed = true;
+            // v31.0: Feature Workpad — 记录 QA 通过
+            if (workspacePath) {
+              try {
+                workpadQAResult(workspacePath, feature.id, 'pass', qaResult.score, qaResult.summary || '');
+              } catch {
+                /* */
+              }
+            }
             completeFeatureSessionLink(qaLinkId, `QA 通过 (分数: ${qaResult.score})`, true);
             sendToUI(win, 'agent:log', {
               projectId,
@@ -505,15 +616,42 @@ export async function workerLoop(
                   `${feature.id} 完成: ${(feature.title || '').slice(0, 80)} — ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代`,
                   undefined,
                 );
-              } catch (err) {
+              } catch {
                 /* non-critical */
-                _log.debug('Catch at worker-phase.ts:508', { error: String(err) });
               }
             }
             broadcastFilesCreated(workerId, feature.id, reactResult.filesWritten);
+
+            // v31.0: Workflow hooks — after_feature_done
+            if (workspacePath) {
+              const hooks = getWorkflowHooks(workspacePath);
+              if (hooks?.after_feature_done) {
+                try {
+                  const { execSync } = await import('child_process');
+                  execSync(hooks.after_feature_done, { cwd: workspacePath, timeout: 60_000, stdio: 'pipe' });
+                } catch {
+                  /* hook failure non-blocking */
+                }
+              }
+            }
+
             break;
           } else {
             qaFeedback = qaResult.feedbackText;
+            // v31.0: Feature Workpad — 记录 QA 失败
+            if (workspacePath) {
+              try {
+                workpadQAResult(
+                  workspacePath,
+                  feature.id,
+                  'fail',
+                  qaResult.score,
+                  qaResult.feedbackText || qaResult.summary || '',
+                );
+              } catch {
+                /* */
+              }
+            }
             completeFeatureSessionLink(
               qaLinkId,
               `QA 未通过 (分数: ${qaResult.score}): ${(qaResult.summary || '').slice(0, 100)}`,
@@ -551,9 +689,8 @@ export async function workerLoop(
                   `${feature.id} QA 驳回 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`,
                   undefined,
                 );
-              } catch (err) {
+              } catch {
                 /* silent */
-                _log.debug('silent', { error: String(err) });
               }
             }
           }
@@ -593,9 +730,8 @@ export async function workerLoop(
       if (featureSessionId) {
         try {
           transitionSession(featureSessionId, 'suspended', 'Signal aborted');
-        } catch (err) {
+        } catch {
           /* safe */
-          _log.debug('Catch at worker-phase.ts:596', { error: String(err) });
         }
       }
       break;
@@ -615,9 +751,8 @@ export async function workerLoop(
           passed ? 'completed' : 'failed',
           passed ? undefined : lastErrorMsg || 'Feature not passed',
         );
-      } catch (err) {
+      } catch {
         /* session lifecycle non-critical */
-        _log.debug('session lifecycle', { error: String(err) });
       }
     }
 
@@ -676,9 +811,8 @@ export async function workerLoop(
       // v22.0: project-memory.md 容量自治 — 每完成一个 feature 检查并压缩
       try {
         compactProjectMemory(workspacePath, 8000);
-      } catch (err) {
+      } catch {
         /* silent */
-        _log.debug('silent', { error: String(err) });
       }
     }
 
@@ -751,9 +885,8 @@ export async function workerLoop(
     if (issueBranch && workspacePath && gitConfig.mode === 'github') {
       try {
         await switchBranch(gitConfig, 'main');
-      } catch (err) {
+      } catch {
         /* silent: 分支切回main失败不影响主流程 */
-        _log.debug('分支切回main失败不影响主流程', { error: String(err) });
         // Non-fatal: might not have a main branch
       }
     }

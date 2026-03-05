@@ -22,7 +22,7 @@ import { getActiveProcess } from './sandbox-executor';
 import { readMemoryForRole, appendProjectMemory, appendRoleMemory } from './memory-system';
 import { getDb } from '../db';
 
-import { think, todoWrite, todoRead, batchEdit, type EditOperation } from './extended-tools';
+import { think, todoWrite, todoRead, batchEdit, type EditOperation, type TodoItem } from './extended-tools';
 import {
   agentScratchpadWrite,
   agentScratchpadRead,
@@ -497,7 +497,7 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (ctx.workspacePath) {
           return { success: true, output: todoWritePersist(ctx.workspacePath, agentId, todos), action: 'plan' };
         }
-        return { success: true, output: todoWrite(agentId, todos as any), action: 'plan' };
+        return { success: true, output: todoWrite(agentId, todos as TodoItem[]), action: 'plan' };
       }
 
       case 'todo_read': {
@@ -519,7 +519,10 @@ function executeToolRaw(call: ToolCall, ctx: ToolContext): ToolResult {
         if (!content) {
           return { success: false, output: '内容不能为空', action: 'think' };
         }
-        const result = agentScratchpadWrite(ctx.workspacePath, agentId, category as any, content);
+        const validCategory: 'decision' | 'progress' | 'key_fact' = (
+          ['decision', 'progress', 'key_fact'].includes(category) ? category : 'key_fact'
+        ) as 'decision' | 'progress' | 'key_fact';
+        const result = agentScratchpadWrite(ctx.workspacePath, agentId, validCategory, content);
         return { success: true, output: result, action: 'think' };
       }
 

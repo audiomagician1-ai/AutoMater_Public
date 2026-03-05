@@ -59,6 +59,8 @@ export {
   PM_SPLIT_REQS_PROMPT,
   QA_TEST_SPEC_PROMPT,
   PM_ACCEPTANCE_PROMPT,
+  resolvePrompt,
+  getStatusGuidance,
 } from '../prompts';
 export { parseFileBlocks, writeFileBlocks } from '../file-writer';
 export { parseStructuredOutput, PM_FEATURE_SCHEMA, PM_ACCEPTANCE_SCHEMA } from '../output-parser';
@@ -90,6 +92,16 @@ export {
 } from '../decision-log';
 export { releaseFeatureLocks, cleanExpiredLocks } from '../file-lock';
 export { incrementalUpdate, scanProjectSkeleton, type ProjectSkeleton } from '../project-importer';
+export { getWorkflowConfig, getWorkflowHooks, ensureWorkflowFile } from '../workflow-config';
+export {
+  workpadDevStart,
+  workpadDevDone,
+  workpadQAResult,
+  workpadPaused,
+  workpadResumed,
+  formatWorkpadForPrompt,
+  buildContinuationDirective,
+} from '../feature-workpad';
 export {
   backupConversation,
   linkFeatureSession,

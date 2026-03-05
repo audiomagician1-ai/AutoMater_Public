@@ -1,10 +1,10 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-04 | 版本: v30.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-05 | 版本: v32.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v30.0 — Session驱动并发开发 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化
+**当前阶段**: v32.0 — 1-Session-1-Feature并发模型 + Scheduler完全控制Worker生命周期
 **最高优先级**: 实际运行时全链路验证 (PM→Dev→QA 全流程) + 竞争力 5.61→7.0 路线图执行
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
@@ -25,7 +25,7 @@
 | LLM | 统一适配层: OpenAI 兼容 + Anthropic 原生双协议 |
 | Database | SQLite (better-sqlite3, 同步 API, **22 张表**, 18 版迁移) |
 | Build | pnpm + Vite (renderer) + tsc (main/preload) + electron-builder |
-| Test | Vitest 4 + @vitest/coverage-v8 (50 测试文件, 918 tests) |
+| Test | Vitest 4 + @vitest/coverage-v8 (57 测试文件, 1073 tests) |
 | Lint | ESLint 10 + Prettier 3 |
 | Package | ~355MB Windows installer (win:dir) |
 
@@ -64,7 +64,7 @@ AutoMater/
 │       │   ├── web-tools.ts, memory-tools.ts, agent-tools.ts
 │       │   ├── computer-tools.ts, deploy-tools.ts
 │       │   └── admin-tools.ts, session-tools.ts
-│       ├── __tests__/          # 单元测试 (50 个文件, 918 tests)
+│       ├── __tests__/          # 单元测试 (57 个文件, 1073 tests)
 │       ├── orchestrator.ts     # 多阶段编排器 (入口, v30 Dev+QA委托scheduler)
 │       ├── react-loop.ts       # Developer ReAct 循环 (50 轮上限, 验证门控)
 │       ├── qa-loop.ts          # QA 审查 (程序化 + LLM + TDD)
@@ -134,9 +134,11 @@ AutoMater/
 │       ├── workspace-git.ts    # 工作区 Git 管理
 │       ├── event-store.ts      # 事件流持久化
 │       ├── conversation-backup.ts  # 会话备份/恢复 + Session-Agent调度集成
-│       ├── session-scheduler.ts    # Session并发调度器 (v30: Dev+QA唯一调度引擎, DevPhaseContext)
+│       ├── session-scheduler.ts    # Session并发调度器 (v32: 1-Session-1-Feature, 完全控制worker生命周期)
 │       ├── session-lifecycle.ts    # Session生命周期管理 (create/start/suspend/complete)
 │       ├── scheduler-bus.ts        # 调度事件总线 (发布/订阅调度事件)
+│       ├── workflow-config.ts      # WORKFLOW.md加载器 (v31: YAML frontmatter+角色prompt+热更新)
+│       ├── feature-workpad.ts      # Feature Workpad (v31: 每Feature持久化续跑上下文)
 │       ├── cross-project.ts    # 跨项目经验共享
 │       ├── decision-log.ts     # 决策日志
 │       ├── file-lock.ts        # 文件级锁 (并行 Worker)
@@ -360,7 +362,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 ## 4. CURRENT STATE
 
-**版本**: v30.0 (Session驱动并发开发 + 管家记忆项目隔离 + DAG工作流引擎 + 思维链可视化 + 130工具)
+**版本**: v32.0 (1-Session-1-Feature: Scheduler完全控制Worker并发生命周期 + 130工具)
 
 ### 版本演进总览
 
@@ -392,6 +394,8 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 | v28.2 | 会话置顶/重命名/隐藏 + toast反馈 + 错误日志 + 工作过程默认展开 |
 | v29 | Session-Agent调度系统(并发调度+僵尸锁+生命周期) + 管家记忆项目隔离 + 模式切换增强 |
 | v30 | **Session驱动并发开发** — scheduler成为Dev+QA唯一调度引擎, orchestrator不再直接spawn worker, DevPhaseContext替代HotJoinContext, lockNextFeature补locked_at |
+| v31 | **Symphony先进经验吸纳** — WORKFLOW.md prompt外部化(YAML frontmatter+角色分段), Feature Workpad持久化续跑上下文, 状态驱动Prompt(rework/resume行为指导), Workflow Hooks(before_run/after_feature_done), resolvePrompt三层fallback, 配置热更新, 69新测试 |
+| v32 | **1-Session-1-Feature并发模型** — workerLoop不再自循环取feature, scheduler为每个Feature spawn独立session+worker, worker完成即退出由scheduler事件驱动补充调度, awaitAllFeaturesDone精确按capacity调度, HotJoinContext标记@deprecated, 57测试文件/1073 tests |
 
 ### 已完成功能
 - [x] 5 阶段编排流水线 + 可配置工作流预设 (PM→Arch→Reqs→Dev+QA→Accept)
@@ -427,6 +431,8 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 - [x] **v28.1 上下文管理升级** — ContextPage支持管家Agent + 管家配置概览面板 + snapshot缓存
 - [x] **v28.2 会话管理增强** — 置顶/重命名/隐藏 + toast反馈 + 工作过程默认展开
 - [x] **v30.0 Session驱动并发开发** — session-scheduler成为Dev+QA唯一调度引擎, orchestrator.runSessionDrivenDevPhase()委托调度, DevPhaseContext替代HotJoinContext, 消除循环依赖
+- [x] **v31.0 Symphony先进经验吸纳** — WORKFLOW.md prompt外部化(YAML frontmatter+角色分段), Feature Workpad持久化续跑上下文, 状态驱动Prompt(rework/resume行为指导), Workflow Hooks(before_run/after_feature_done), resolvePrompt三层fallback(WORKFLOW.md>team_members>内置), 配置热更新, 69新测试
+- [x] **v32.0 1-Session-1-Feature并发模型** — workerLoop单Feature执行后退出(不再自循环取活), scheduler为每个Feature独立spawn session+worker, 事件驱动补充调度(onFeatureCompleted→scheduleProject), awaitAllFeaturesDone精确按capacity补充, WorkerLoopOptions.assignedFeature预分配, HotJoinContext/ensureHotJoinListener标记@deprecated
 - [x] **v29.0 Session-Agent调度系统** — session-scheduler(并发上限+僵尸锁清理) + session-lifecycle(状态机) + scheduler-bus(事件总线) + DB v17迁移
 - [x] **v29.0 管家记忆项目隔离** — meta_agent_memories.project_id + 按项目过滤/管理记忆 + DB v18迁移
 - [x] **v29.0 模式切换增强** — button嵌套修复 + chat模式不注入记忆/项目上下文 + 侧边栏查看/修改已有对话模式
@@ -483,7 +489,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 | 数据库 schema + 迁移 | `electron/db.ts` (MIGRATIONS 数组, 18 版) |
 | 密钥管理 | `electron/engine/secret-manager.ts` |
 | 会话管理 | `electron/engine/conversation-backup.ts` + `electron/ipc/sessions.ts` |
-| Session-Agent调度 | `electron/engine/session-scheduler.ts` (DevPhaseContext + runSessionDrivenDevPhase + scheduleProject) + `session-lifecycle.ts` + `scheduler-bus.ts` |
+| Session-Agent调度 | `electron/engine/session-scheduler.ts` (1-Session-1-Feature + DevPhaseContext + scheduleProject) + `session-lifecycle.ts` + `scheduler-bus.ts` |
 | 工作流预设 | `electron/ipc/workflow.ts` |
 | 前端状态 | `src/stores/app-store.ts` + `src/stores/slices/*.ts` |
 | 元Agent 后端 | `electron/ipc/meta-agent.ts` (含 4模式提示词 + admin工具执行 + ModeConfig) |
@@ -492,15 +498,15 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 | 项目导入分析 | `electron/engine/project-importer.ts` + `electron/engine/probes/*.ts` |
 | 系统监控 | `electron/engine/system-monitor.ts` + `src/components/SystemMonitor.tsx` |
 
-## 6. CODE HEALTH (2026-03-04 快照)
+## 6. CODE HEALTH (2026-03-05 快照)
 
 > 详见 `MEMO.md` §2 技术债
 
 | 指标 | 值 | 备注 |
 |------|-----|------|
 | tsc --noEmit 错误 | **0** | 全量通过 |
-| `any` 使用量 | **2** | 从 389 → 2 (99.5% 消除) |
-| 测试文件/用例 | 50 / 918 | 50 skipped (native SQLite) |
+| `any` 使用量 | **0 (生产)** | 从 389 → 0 (100% 消除); 测试文件 ~45 个 any (mock/cast 可接受) |
+| 测试文件/用例 | 57 / 1073 | 50 skipped (native SQLite) |
 | IPC 输入校验 | 50+ 断言 | 覆盖关键 handlers |
 | 空 catch 块 | ~5 (标注意图) | 42 个 catch 已加注释 |
 | 主进程 main.js | 617 KB | Vite tree-shaking 后 |

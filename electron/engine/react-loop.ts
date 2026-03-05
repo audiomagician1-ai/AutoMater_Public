@@ -32,7 +32,7 @@ import {
 } from './tool-system';
 import { safeJsonParse } from './safe-json';
 import { parsePlanFromLLM, getPlanSummary, type FeaturePlan } from './planner';
-import { DEVELOPER_REACT_PROMPT, getCategoryGuidance, withContextDiscipline } from './prompts';
+import { DEVELOPER_REACT_PROMPT, getCategoryGuidance, withContextDiscipline, getStatusGuidance } from './prompts';
 import { parseFileBlocks, writeFileBlocks } from './file-writer';
 import {
   guardToolCall,
@@ -354,14 +354,20 @@ export async function reactDeveloperLoop(
   const baseDevPrompt = getTeamPrompt(projectId, 'developer', workerIndex) ?? DEVELOPER_REACT_PROMPT;
   // v20.0: 按 feature category 注入特定指导
   const categoryGuidance = getCategoryGuidance(feature.category || '');
+  // v31.0: 按 feature 状态注入行为指导 (rework/resume 等)
+  const statusGuidance = getStatusGuidance(
+    qaFeedback ? 'rework' : 'in_progress',
+    qaFeedback ? 2 : 1, // qaAttempt not directly available here; >1 if qaFeedback exists
+    qaFeedback || undefined,
+  );
   // v10.2: 全局上下文管理纪律
-  const devSystemPrompt = withContextDiscipline(categoryGuidance ? baseDevPrompt + categoryGuidance : baseDevPrompt);
+  const devSystemPrompt = withContextDiscipline(baseDevPrompt + (categoryGuidance || '') + (statusGuidance || ''));
 
   const messages: LLMMessage[] = [
     { role: 'system', content: devSystemPrompt },
     {
       role: 'user',
-      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${errorExperienceText ? `\n\n${errorExperienceText}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${experienceText ? experienceText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
+      content: `## 任务\nFeature: ${feature.id}\n标题: ${feature.title}\n描述: ${feature.description}\n验收标准: ${feature.acceptance_criteria}\n${qaFeedback ? `\n## QA 审查反馈（必须修复）\n${qaFeedback}` : ''}${feature._continuationDirective ? `\n${feature._continuationDirective}` : ''}${feature._workpadContext ? `\n\n${feature._workpadContext}` : ''}${errorExperienceText ? `\n\n${errorExperienceText}` : ''}${feature._docContext ? `\n\n## 需求与测试文档\n${feature._docContext}` : ''}${feature._tddContext ? `\n\n${feature._tddContext}` : ''}${feature._conflictWarning ? `\n\n## ⚠️ 文件冲突警告\n${feature._conflictWarning}` : ''}${feature._teamContext ? `\n\n${feature._teamContext}` : ''}\n\n${planText}\n\n${sharedDecisionsText ? sharedDecisionsText + '\n\n' : ''}${skillContextText ? skillContextText + '\n\n' : ''}${experienceText ? experienceText + '\n\n' : ''}${knownIssuesText ? knownIssuesText + '\n\n' : ''}## 项目上下文\n${initialContext.contextText}`,
     },
   ];
 

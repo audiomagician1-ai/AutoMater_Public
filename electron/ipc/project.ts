@@ -38,6 +38,7 @@ import { exportWorkspaceZip } from '../engine/workspace-git';
 import { readDoc, getChangelog, listDocs } from '../engine/doc-manager';
 import { importProject, deriveArchTreeFromModuleGraph } from '../engine/project-importer';
 import { collectBaselineContext, loadModuleGraph, loadKnownIssues } from '../engine/context-collector';
+import type { ArchTree, ArchNode, ArchEdge, ModuleGraphNode } from '../engine/probe-types';
 import {
   detectIncrementalChanges,
   applyUserCorrection,
@@ -422,6 +423,14 @@ export function setupProjectHandlers() {
         log.info(`Auto-initialized team for ${id}`, { count: initResult.count });
       } catch (err) {
         log.error('Failed to auto-init team', err);
+      }
+
+      // v31.0: 自动创建 WORKFLOW.md
+      try {
+        const { ensureWorkflowFile } = await import('../engine/workflow-config');
+        ensureWorkflowFile(workspacePath, displayName);
+      } catch (err) {
+        log.warn('Failed to create WORKFLOW.md', { error: String(err) });
       }
 
       return { success: true, projectId: id, name: displayName, workspacePath };
@@ -1070,14 +1079,14 @@ export function setupProjectHandlers() {
           try {
             const archTreePath = path.join(proj.workspace_path, '.automater/analysis/architecture-tree.json');
             if (fs.existsSync(archTreePath)) {
-              const archTree = JSON.parse(fs.readFileSync(archTreePath, 'utf-8'));
+              const archTree: ArchTree = JSON.parse(fs.readFileSync(archTreePath, 'utf-8'));
               if (Array.isArray(archTree.nodes) && archTree.nodes.length > 0) {
-                const componentNodes = archTree.nodes.filter((n: any) => n.level === 'component');
-                const moduleNodes = archTree.nodes.filter((n: any) => n.level === 'module');
-                const domainNodes = archTree.nodes.filter((n: any) => n.level === 'domain');
+                const componentNodes = archTree.nodes.filter((n: ArchNode) => n.level === 'component');
+                const moduleNodes = archTree.nodes.filter((n: ArchNode) => n.level === 'module');
+                const domainNodes = archTree.nodes.filter((n: ArchNode) => n.level === 'domain');
 
                 // Build lookup maps for names
-                const nodeById = new Map<string, any>();
+                const nodeById = new Map<string, ArchNode>();
                 for (const n of archTree.nodes) nodeById.set(n.id, n);
 
                 const insertArchFeature = db.prepare(
@@ -1086,15 +1095,15 @@ export function setupProjectHandlers() {
 
                 db.transaction(() => {
                   for (const comp of componentNodes) {
-                    const parentModule = nodeById.get(comp.parentId);
-                    const parentDomain = parentModule ? nodeById.get(parentModule.parentId) : null;
+                    const parentModule = comp.parentId ? nodeById.get(comp.parentId) : undefined;
+                    const parentDomain = parentModule?.parentId ? nodeById.get(parentModule.parentId) : undefined;
                     const groupName = parentDomain?.name || parentModule?.name || 'Architecture';
                     const subGroup = parentModule?.name || '';
 
                     // Find edges involving this component for depends_on
                     const deps = (archTree.edges || [])
-                      .filter((e: any) => e.target === comp.id)
-                      .map((e: any) => e.source);
+                      .filter((e: ArchEdge) => e.target === comp.id)
+                      .map((e: ArchEdge) => e.source);
 
                     insertArchFeature.run(
                       comp.id, // id
@@ -1793,7 +1802,7 @@ export function setupProjectHandlers() {
       const moduleGraph = loadModuleGraph(project.workspace_path);
       if (moduleGraph && moduleGraph.nodes.length > 0) {
         try {
-          const stubModules = moduleGraph.nodes.map((n: any) => ({
+          const stubModules = moduleGraph.nodes.map((n: ModuleGraphNode) => ({
             id: n.id,
             rootPath: n.path,
             files: [] as string[],

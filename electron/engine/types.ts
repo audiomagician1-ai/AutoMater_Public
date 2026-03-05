@@ -401,6 +401,10 @@ export interface EnrichedFeature extends FeatureRow {
   _tddContext?: string;
   /** v6.1 (构想D): 其他 Worker 的近期成果广播 */
   _teamContext?: string;
+  /** v31.0: Feature Workpad 续跑上下文 */
+  _workpadContext?: string;
+  /** v31.0: 续跑行为指令 (rework/resume 时注入) */
+  _continuationDirective?: string;
 }
 
 // ═══════════════════════════════════════
