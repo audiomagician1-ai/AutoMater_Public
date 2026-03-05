@@ -1,10 +1,10 @@
 ﻿# 智械母机 AutoMater — 项目大脑
 
-> 最后更新: 2026-03-05 | 版本: v32.0 | **由代码实际盘点生成，非手工维护**
+> 最后更新: 2026-03-05 | 版本: v33.0 | **由代码实际盘点生成，非手工维护**
 
 ## 1. PRIME DIRECTIVE
 
-**当前阶段**: v32.0 — 1-Session-1-Feature并发模型 + Scheduler完全控制Worker生命周期
+**当前阶段**: v33.0 — PM实时需求分析 + 1-Session-1-Feature并发模型 + Scheduler完全控制Worker生命周期
 **最高优先级**: 实际运行时全链路验证 (PM→Dev→QA 全流程) + 竞争力 5.61→7.0 路线图执行
 **MUST NOT**: 不破坏现有流水线, 不明文存储密钥, 不新增 `any`
 
@@ -362,7 +362,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 
 ## 4. CURRENT STATE
 
-**版本**: v32.0 (1-Session-1-Feature: Scheduler完全控制Worker并发生命周期 + 130工具)
+**版本**: v33.0 (PM实时分析 + 1-Session-1-Feature: Scheduler完全控制Worker并发生命周期 + 130工具)
 
 ### 版本演进总览
 
@@ -432,6 +432,7 @@ v18: 管家记忆项目隔离 — meta_agent_memories.project_id + 索引
 - [x] **v28.2 会话管理增强** — 置顶/重命名/隐藏 + toast反馈 + 工作过程默认展开
 - [x] **v30.0 Session驱动并发开发** — session-scheduler成为Dev+QA唯一调度引擎, orchestrator.runSessionDrivenDevPhase()委托调度, DevPhaseContext替代HotJoinContext, 消除循环依赖
 - [x] **v31.0 Symphony先进经验吸纳** — WORKFLOW.md prompt外部化(YAML frontmatter+角色分段), Feature Workpad持久化续跑上下文, 状态驱动Prompt(rework/resume行为指导), Workflow Hooks(before_run/after_feature_done), resolvePrompt三层fallback(WORKFLOW.md>team_members>内置), 配置热更新, 69新测试
+- [x] **v33.0 PM实时需求分析** — dev阶段中新增wish自动触发PM增量分析(onWishCreated→runInlineWishAnalysis→phaseIncrementalPM), PM分析与developer完全并行不阻塞, per-project防并发锁, awaitAllFeaturesDone增加PM分析感知(不会在PM分析中提前退出), wish状态自动流转(pending→analyzing→analyzed), 修复"需要手动暂停再启动PM才分析新需求"的bug
 - [x] **v32.0 1-Session-1-Feature并发模型** — workerLoop单Feature执行后退出(不再自循环取活), scheduler为每个Feature独立spawn session+worker, 事件驱动补充调度(onFeatureCompleted→scheduleProject), awaitAllFeaturesDone精确按capacity补充, WorkerLoopOptions.assignedFeature预分配, HotJoinContext/ensureHotJoinListener标记@deprecated
 - [x] **v29.0 Session-Agent调度系统** — session-scheduler(并发上限+僵尸锁清理) + session-lifecycle(状态机) + scheduler-bus(事件总线) + DB v17迁移
 - [x] **v29.0 管家记忆项目隔离** — meta_agent_memories.project_id + 按项目过滤/管理记忆 + DB v18迁移
