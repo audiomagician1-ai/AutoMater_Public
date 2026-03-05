@@ -10,6 +10,9 @@
 import * as os from 'os';
 import { getDb } from '../db';
 import { MODEL_PRICING } from './llm-client';
+import { createLogger } from './logger';
+const log = createLogger('system-monitor');
+
 
 // ═══════════════════════════════════════
 // Types

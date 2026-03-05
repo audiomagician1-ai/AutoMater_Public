@@ -368,7 +368,7 @@ export function MetaAgentPanel() {
 
   // chatKey: session 优先, 否则用 projectId/_global
   const chatKey = currentSessionId || currentProjectId || '_global';
-  const messages = messagesMap.get(chatKey) || [];
+  const messages = useMemo(() => messagesMap.get(chatKey) || [], [messagesMap, chatKey]);
 
   // ── 模式管理 ──
   const [pendingMode, setPendingMode] = useState<ChatMode>('work');

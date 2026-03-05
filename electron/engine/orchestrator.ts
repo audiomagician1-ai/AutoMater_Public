@@ -67,8 +67,8 @@ function getActiveWorkflow(projectId: string): WorkflowStage[] {
   try {
     const stages: WorkflowStage[] = JSON.parse(row.stages);
     return stages;
-  } catch {
-    /* silent: stages JSON parse — use default pipeline */
+  } catch (err) {
+    log.debug('Workflow stages parse failed, using default pipeline', { error: String(err) });
     return PRESET_FULL_DEVELOPMENT;
   }
 }
@@ -213,8 +213,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
         shellExec: cfg.permissions.shellExec === true,
       };
     }
-  } catch {
-    /* config parse error — use defaults (all denied) */
+  } catch (err) {
+    log.debug('Project config parse failed, using defaults', { error: String(err) });
   }
 
   ensureGlobalMemory();
@@ -241,8 +241,8 @@ export async function runOrchestrator(projectId: string, win: BrowserWindow | nu
           content: `📚 已从全局经验库注入 ${injected} 条相关经验`,
         });
       }
-    } catch {
-      /* silent: non-critical path */
+    } catch (err) {
+      log.debug('Cross-project experience injection failed', { error: String(err) });
     }
   }
 
@@ -702,8 +702,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const deps = Object.keys(pkg.dependencies || {}).slice(0, 20);
       const devDeps = Object.keys(pkg.devDependencies || {}).slice(0, 10);
       depsInfo = `### 依赖\n- 运行时: ${deps.join(', ') || '无'}\n- 开发: ${devDeps.join(', ') || '无'}`;
-    } catch {
-      /* parse error */
+    } catch (err) {
+      log.debug('package.json parse failed', { error: String(err) });
     }
   }
 
@@ -727,8 +727,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       const tsConfig = JSON.parse(fs.readFileSync(tsConfigPath, 'utf-8'));
       const co = tsConfig.compilerOptions || {};
       tsInfo = `### TypeScript 配置\n- target: ${co.target || 'N/A'}\n- module: ${co.module || 'N/A'}\n- strict: ${co.strict ?? 'N/A'}\n- outDir: ${co.outDir || 'N/A'}`;
-    } catch {
-      /* parse error */
+    } catch (err) {
+      log.debug('tsconfig.json parse failed', { error: String(err) });
     }
   }
 
@@ -741,8 +741,8 @@ function ensureAgentsMd(workspacePath: string, wish: string) {
       .map(e => e.name);
     const files = entries.filter(e => e.isFile()).map(e => e.name);
     dirStructure = `### 项目结构\n- 目录: ${dirs.join(', ') || '无'}\n- 根文件: ${files.slice(0, 15).join(', ')}`;
-  } catch {
-    /* read error */
+  } catch (err) {
+    log.debug('Directory structure read failed', { error: String(err) });
   }
 
   const content = [

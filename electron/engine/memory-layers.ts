@@ -13,6 +13,9 @@ import fs from 'fs';
 import path from 'path';
 import { readWorkspaceFile } from './file-writer';
 import type { FeatureRow } from './types';
+import { createLogger } from './logger';
+const log = createLogger('memory-layers');
+
 
 // 粗略估算 token 数（中英文混合约 1.5 字符/token）
 function estimateTokens(text: string): number {
@@ -139,7 +142,7 @@ export function loadColdMemory(workspacePath: string, moduleId: string): MemoryL
         tokens: estimateTokens(summary.fullText || ''),
       };
     }
-  } catch { /* */ }
+  } catch (err) { log.debug('Cold memory load failed', { moduleId, error: String(err) }); }
   return { tier: 'cold', moduleId, content: '', tokens: 0 };
 }
 
@@ -179,12 +182,12 @@ export function selectColdModules(
           const affectedFiles: string[] = JSON.parse(feature.affected_files || '[]');
           const allRelated = [...depFiles, ...affectedFiles];
           if (allRelated.some(f => f.includes(summary.rootPath))) score += 5;
-        } catch { /* */ }
+        } catch (err) { log.debug('Failed to parse feature deps/affected_files', { error: String(err) }); }
 
         if (score > 0) scores.set(summary.moduleId, score);
-      } catch { /* */ }
+      } catch (err) { log.debug('Failed to parse module summary', { file, error: String(err) }); }
     }
-  } catch { /* */ }
+  } catch (err) { log.debug('Cold module selection failed', { error: String(err) }); }
 
   return [...scores.entries()]
     .sort((a, b) => b[1] - a[1])

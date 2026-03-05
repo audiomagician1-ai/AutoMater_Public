@@ -16,6 +16,9 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { maskOldToolOutputs } from './scratchpad';
 import { withContextDiscipline } from './prompts';
+import { createLogger } from './logger';
+const log = createLogger('sub-agent');
+
 
 const execAsync = promisify(exec);
 import type { ToolContext } from './tool-system';

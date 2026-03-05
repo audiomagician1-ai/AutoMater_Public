@@ -426,8 +426,8 @@ export async function reactDeveloperLoop(
   let depCount = 0;
   try {
     depCount = JSON.parse(feature.depends_on || '[]').length;
-  } catch {
-    /* malformed JSON in depends_on */
+  } catch (err) {
+    log.debug('depends_on parse failed', { featureId: feature.id, error: String(err) });
   }
   const taskComplexity: TaskComplexity = {
     type: 'development',
@@ -478,8 +478,8 @@ export async function reactDeveloperLoop(
         });
       }
     }
-  } catch {
-    // 自适应工具选择失败时使用完整工具列表
+  } catch (err) {
+    log.debug('Adaptive tool selection failed, using full toolset', { error: String(err) });
     tools = allTools;
   }
 
@@ -566,9 +566,8 @@ export async function reactDeveloperLoop(
     if (skillContextText) {
       log.debug('Matched skills for feature', { featureId: feature.id, length: skillContextText.length });
     }
-  } catch {
-    /* silent: 技能上下文加载失败,非关键路径 */
-    // skill-evolution 模块可能未初始化, 跳过
+  } catch (err) {
+    log.debug('Skill context load failed', { error: String(err) });
   }
 
   // v7.0: Known Issues — inject tech-debt warnings from import probes
@@ -592,8 +591,8 @@ export async function reactDeveloperLoop(
     try {
       const domains = inferDomainsFromFeature(feature);
       experienceText = getProjectExperienceContext(workspacePath, domains, 2000);
-    } catch {
-      /* silent: experience library non-critical */
+    } catch (err) {
+      log.debug('Experience library load failed', { error: String(err) });
     }
   }
 
@@ -603,8 +602,8 @@ export async function reactDeveloperLoop(
     try {
       const domains = inferDomainsFromFeature(feature);
       errorExperienceText = retrieveErrorExperience(workspacePath, qaFeedback, domains, 1500);
-    } catch {
-      /* silent: error experience retrieval non-critical */
+    } catch (err) {
+      log.debug('Error experience retrieval failed', { error: String(err) });
     }
   }
 

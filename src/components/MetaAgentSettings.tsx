@@ -8,7 +8,7 @@
  * v7.0: 初始创建
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createLogger } from '../utils/logger';
 import { confirm as showConfirm } from '../stores/toast-store';
 
@@ -77,9 +77,10 @@ export function MetaAgentSettings({ onClose }: Props) {
       .getMemoryStats()
       .then(setMemoryStats)
       .catch(e => log.error('init fetch failed', e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: loadMemories is stable via useCallback
   }, []);
 
-  const loadMemories = async () => {
+  const loadMemories = useCallback(async () => {
     try {
       const cat = memoryFilter === 'all' ? undefined : memoryFilter;
       let mems: MetaAgentMemoryRecord[];
@@ -93,11 +94,11 @@ export function MetaAgentSettings({ onClose }: Props) {
     } catch (err) {
       log.error('Failed to load memories:', err);
     }
-  };
+  }, [memoryFilter, memorySearch]);
 
   useEffect(() => {
     loadMemories();
-  }, [memoryFilter, memorySearch]);
+  }, [loadMemories]);
 
   const handleSaveConfig = async () => {
     setSaving(true);

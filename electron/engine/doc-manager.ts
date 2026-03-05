@@ -25,6 +25,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createLogger } from './logger';
+const log = createLogger('doc-manager');
+
 
 // ═══════════════════════════════════════
 // Types

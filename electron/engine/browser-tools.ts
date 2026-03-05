@@ -9,6 +9,9 @@
 
 import type { Browser, Page, BrowserContext, Response as PwResponse } from 'playwright-core';
 import type { A11yTreeNode } from './types';
+import { createLogger } from './logger';
+const log = createLogger('browser-tools');
+
 
 // ── 延迟加载 playwright-core (减少启动开销 + 未安装时不崩溃) ──
 let _chromium: typeof import('playwright-core')['chromium'] | null = null;

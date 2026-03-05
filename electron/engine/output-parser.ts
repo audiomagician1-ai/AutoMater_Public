@@ -1,3 +1,6 @@
+import { createLogger } from './logger';
+const log = createLogger('output-parser');
+
 ﻿/**
  * Output Parser — LLM 输出的程序化解析 + 结构化验证
  *

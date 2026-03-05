@@ -1,3 +1,6 @@
+import { createLogger } from './logger';
+const log = createLogger('context-compaction');
+
 ﻿/**
  * Context Compaction — 对话历史压缩 + 工具结果裁剪
  *

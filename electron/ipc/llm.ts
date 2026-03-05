@@ -12,6 +12,9 @@ import { toErrorMessage } from '../engine/logger';
 import { assertObject } from './ipc-validator';
 import { safeJsonParse } from '../engine/safe-json';
 import { getSecret } from '../engine/secret-manager';
+import { createLogger } from '../engine/logger';
+const log = createLogger('ipc:llm');
+
 
 interface LLMProvider {
   type: 'openai' | 'anthropic' | 'custom';

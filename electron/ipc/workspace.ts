@@ -10,6 +10,9 @@ import { getDb } from '../db';
 import { readDirectoryTree, readWorkspaceFile } from '../engine/file-writer';
 import { codeSearchAsync, codeSearchFiles, type SearchResult, type FileSearchResult } from '../engine/code-search';
 import { assertProjectId, assertNonEmptyString } from './ipc-validator';
+import { createLogger } from '../engine/logger';
+const log = createLogger('ipc:workspace');
+
 
 function getWorkspacePath(projectId: string): string | null {
   const db = getDb();

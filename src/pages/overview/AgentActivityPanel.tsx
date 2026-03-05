@@ -71,7 +71,7 @@ export function AgentActivityPanel() {
     if (working) setSelectedAgent(working.id);
     else if (activeAgents.length > 0) setSelectedAgent(activeAgents[0].id);
     prevAgentIdsRef.current = agentIdsKey;
-  }, [agentIdsKey]); // 只依赖稳定的字符串 key，不依赖 selectedAgent
+  }, [agentIdsKey, activeAgents, selectedAgent]); // agentIdsKey guards against unnecessary updates
 
   const workingCount = activeAgents.filter(a => a.isWorking).length;
   const totalMsgs = activeAgents.reduce((sum, a) => sum + a.msgCount, 0);

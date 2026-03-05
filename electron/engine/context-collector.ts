@@ -27,6 +27,9 @@ import type { FeatureRow } from './types';
 import type { ModuleGraph, ModuleGraphNode } from './probe-types';
 import { buildHotMemory, buildWarmMemory, selectColdModules, loadColdMemory, extractKeywords } from './memory-layers';
 import { extractRecentFeatureLessons } from './experience-harvester';
+import { createLogger } from './logger';
+const log = createLogger('context-collector');
+
 
 // Re-export extracted memory-layers for backwards compatibility
 export { buildHotMemory, buildWarmMemory, loadColdMemory, selectColdModules, extractKeywords, type MemoryLayer } from './memory-layers';
@@ -482,11 +485,11 @@ export async function collectDeveloperContext(
         if (depFeature) {
           try {
             depFiles.push(...JSON.parse(depFeature.affected_files || '[]'));
-          } catch { /* */ }
+          } catch (err) { log.debug('Failed to parse depFeature.affected_files', { error: String(err) }); }
         }
       }
     }
-  } catch { /* */ }
+  } catch (err) { log.debug('Failed to collect dependency files', { error: String(err) }); }
 
   depFiles = [...new Set(depFiles)];
 
@@ -753,11 +756,11 @@ export function collectLayeredContext(
             "SELECT affected_files FROM features WHERE id = ? AND project_id = ? AND status = 'passed'",
           ).get(depId, projectId) as { affected_files: string } | undefined;
           if (depFeature) {
-            try { depFiles.push(...JSON.parse(depFeature.affected_files || '[]')); } catch { /**/ }
+            try { depFiles.push(...JSON.parse(depFeature.affected_files || '[]')); } catch (err) { log.debug('Failed to parse dep affected_files', { error: String(err) }); }
           }
         }
       }
-    } catch { /**/ }
+    } catch (err) { log.debug('Failed to collect warm dependency files', { error: String(err) }); }
 
     const uniqueDeps = [...new Set(depFiles)];
     depFiles.length = 0;

@@ -9,6 +9,9 @@ import { BrowserWindow } from 'electron';
 import { getDb } from '../db';
 import { sendToUI } from './ui-bridge';
 import type { MemberLLMConfig, AppSettings, FeatureRow } from './types';
+import { createLogger } from './logger';
+const log = createLogger('agent-manager');
+
 
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
@@ -146,8 +149,8 @@ export function getTeamPrompt(projectId: string, role: string, agentIndex: numbe
     const member = members[Math.min(agentIndex, members.length - 1)];
     const prompt = member?.system_prompt?.trim();
     return prompt && prompt.length > 10 ? prompt : null;
-  } catch {
-    /* silent: DB/team lookup fallback */
+  } catch (err) {
+    log.debug('Team member lookup failed', { error: String(err) });
     return null;
   }
 }
@@ -197,8 +200,8 @@ export function getTeamMemberLLMConfig(
           baseUrl: cfg.baseUrl || fallback.baseUrl,
           model: cfg.model || fallback.model,
         };
-      } catch {
-        /* JSON parse error — fallback */
+      } catch (err) {
+        log.debug('Team member llm_config parse failed', { error: String(err) });
       }
     }
 
@@ -208,8 +211,8 @@ export function getTeamMemberLLMConfig(
     }
 
     return fallback;
-  } catch {
-    /* silent: model config parse fallback */
+  } catch (err) {
+    log.debug('Model config parse fallback', { error: String(err) });
     return fallback;
   }
 }
@@ -232,8 +235,8 @@ export function getTeamMemberMcpServers(
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.mcp_servers) return [];
     return JSON.parse(member.mcp_servers);
-  } catch {
-    /* silent: mcp_servers JSON parse fallback */
+  } catch (err) {
+    log.debug('mcp_servers parse failed', { error: String(err) });
     return [];
   }
 }
@@ -252,8 +255,8 @@ export function getTeamMemberSkills(projectId: string, role: string, agentIndex:
     const member = members[Math.min(agentIndex, members.length - 1)];
     if (!member.skills) return [];
     return JSON.parse(member.skills);
-  } catch {
-    /* silent: skills JSON parse fallback */
+  } catch (err) {
+    log.debug('Skills parse failed', { error: String(err) });
     return [];
   }
 }
@@ -271,7 +274,8 @@ export function getTeamMemberMaxIterations(projectId: string, role: string, agen
     if (members.length === 0) return null;
     const member = members[Math.min(agentIndex, members.length - 1)];
     return member.max_iterations ?? null;
-  } catch {
+  } catch (err) {
+    log.debug('Team member max_iterations lookup failed', { error: String(err) });
     return null;
   }
 }
@@ -312,9 +316,7 @@ export function lockNextFeature(projectId: string, workerId: string): FeatureRow
       let deps: string[] = [];
       try {
         deps = JSON.parse(f.depends_on || '[]');
-      } catch {
-        /* */
-      }
+      } catch (err) { log.debug('Failed to parse feature.depends_on', { featureId: f.id, error: String(err) }); }
       const depsOk = deps.every((d: string) => passedSet.has(d));
       if (!depsOk) continue;
 

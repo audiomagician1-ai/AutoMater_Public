@@ -28,6 +28,9 @@ import {
   listFeatureSessionLinks,
   batchGetFeatureSessionSummaries,
 } from '../engine/conversation-backup';
+import { createLogger } from '../engine/logger';
+const log = createLogger('ipc:sessions');
+
 
 export function setupSessionHandlers() {
   // ── Session CRUD ──

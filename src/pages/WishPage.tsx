@@ -209,7 +209,7 @@ function SessionListPanel() {
 
   useEffect(() => {
     loadSessions();
-  }, [currentProjectId]);
+  }, [currentProjectId, loadSessions]);
   useEffect(() => {
     const t = setInterval(loadSessions, 15_000);
     return () => clearInterval(t);
@@ -262,7 +262,6 @@ function SessionListPanel() {
 
   const handleTogglePin = async () => {
     if (!ctxMenu) return;
-    const sess = sessionList.find(s => s.id === ctxMenu.sessId);
     try {
       const res = await window.automater.session.togglePin(ctxMenu.sessId);
       await loadSessions();
@@ -671,10 +670,10 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const sessionList = useAppStore(s => s.metaSessionList);
 
   const chatKey = currentSessionId || currentProjectId || '_global';
-  const messages = messagesMap.get(chatKey) || [];
+  const messages = useMemo(() => messagesMap.get(chatKey) || [], [messagesMap, chatKey]);
 
   // v26.0: 全局开关 — 显示工作过程细节
-  const [showWorkDetails, setShowWorkDetails] = useState(false);
+  const [_showWorkDetails, _setShowWorkDetails] = useState(false); // reserved for future work-details toggle
   const [modeToast, setModeToast] = useState<string | null>(null);
   const showModeToast = (msg: string) => {
     setModeToast(msg);

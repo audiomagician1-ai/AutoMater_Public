@@ -4,8 +4,12 @@
  * 所有从外部 / 数据库 / LLM 返回值读取的 JSON 都应使用此模块，
  * 防止 SyntaxError 导致未处理异常。
  *
- * v1.0 — 2026-03-02
+ * v1.1 — 2026-03-05  console.warn → createLogger
  */
+
+import { createLogger } from './logger';
+
+const log = createLogger('safe-json');
 
 /**
  * 安全解析 JSON 字符串。
@@ -20,7 +24,7 @@ export function safeJsonParse<T>(text: string, fallback: T, label?: string): T {
     return JSON.parse(text) as T;
   } catch {
     if (label) {
-      console.warn(`[safeJsonParse] ${label}: invalid JSON, using fallback`, text?.slice(0, 200));
+      log.warn(`${label}: invalid JSON, using fallback`, { preview: text?.slice(0, 200) });
     }
     return fallback;
   }

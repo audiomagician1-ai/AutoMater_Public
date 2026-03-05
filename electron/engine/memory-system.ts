@@ -15,6 +15,9 @@
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
+import { createLogger } from './logger';
+const log = createLogger('memory-system');
+
 
 // ═══════════════════════════════════════
 // 路径辅助

@@ -25,6 +25,9 @@ import { parseStructuredOutput } from './output-parser';
 import { emitEvent } from './event-store';
 import { createCheckpoint } from './mission';
 import type { AppSettings, ProjectRow } from './types';
+import { createLogger } from './logger';
+const log = createLogger('change-manager');
+
 
 // ═══════════════════════════════════════
 // Types

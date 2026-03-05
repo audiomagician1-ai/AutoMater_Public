@@ -19,6 +19,9 @@
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
+import { createLogger } from './logger';
+const log = createLogger('cross-project');
+
 
 // ═══════════════════════════════════════
 // Types

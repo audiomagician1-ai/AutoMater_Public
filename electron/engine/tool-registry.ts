@@ -11,6 +11,9 @@ import { type AgentRole, ROLE_TOOLS } from './tool-permissions';
 import { safeParseToolArgs } from './safe-json';
 import { mcpManager } from './mcp-client';
 import { skillManager } from './skill-loader';
+import { createLogger } from './logger';
+const log = createLogger('tool-registry');
+
 
 // Re-export for backward compatibility
 export { TOOL_DEFINITIONS } from './tool-definitions';

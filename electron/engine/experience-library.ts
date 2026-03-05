@@ -571,7 +571,7 @@ function extractErrorKeywords(errorText: string): string[] {
 }
 
 /** 从 instances 中模糊匹配关键词 */
-function matchInstances(instances: Instance[], keywords: string[], domains?: string[]): Instance[] {
+function matchInstances(instances: Instance[], keywords: string[], _domains?: string[]): Instance[] {
   const scored = instances.map(inst => {
     const text = inst.summary.toLowerCase();
     let score = 0;

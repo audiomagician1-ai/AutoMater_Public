@@ -16,6 +16,9 @@
 import { execSync, spawn, type ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import { createLogger } from './logger';
+const log = createLogger('sandbox-executor');
+
 
 // ═══════════════════════════════════════
 // 配置

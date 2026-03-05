@@ -10,6 +10,9 @@ import { ipcMain } from 'electron';
 import { getDb } from '../db';
 import type { WorkflowPresetRow, WorkflowPreset, WorkflowStage, WorkflowTransition } from '../engine/types';
 import { assertNonEmptyString, assertProjectId, assertObject } from './ipc-validator';
+import { createLogger } from '../engine/logger';
+const log = createLogger('ipc:workflow');
+
 
 // ═══════════════════════════════════════
 // Built-in Workflow Presets (3 种常用预设)

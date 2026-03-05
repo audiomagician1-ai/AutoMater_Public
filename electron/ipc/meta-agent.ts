@@ -56,8 +56,6 @@ import {
   SelfEvolutionEngine,
   ImmutableGuard,
   FitnessEvaluator,
-  DEFAULT_IMMUTABLE_FILES,
-  DEFAULT_EVOLUTION_CONFIG,
 } from '../engine/self-evolution-engine';
 import {
   EvolutionMutator,

@@ -5,7 +5,7 @@
  * 团队配置 tab: 成员 CRUD
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../stores/app-store';
 import { SessionPanel } from '../../components/SessionPanel';
 import { toast, confirm } from '../../stores/toast-store';
@@ -32,28 +32,28 @@ export function TeamPage() {
   const [newCaps, setNewCaps] = useState('');
   const [newMaxTokens, setNewMaxTokens] = useState('128000');
 
-  const loadAgents = async () => {
+  const loadAgents = useCallback(async () => {
     if (!currentProjectId) return;
     const data = await window.automater.project.getAgents(currentProjectId);
     setAgents(data || []);
-  };
+  }, [currentProjectId]);
 
-  const loadMembers = async () => {
+  const loadMembers = useCallback(async () => {
     if (!currentProjectId) return;
     const data = await window.automater.team.list(currentProjectId);
     setMembers(data || []);
-  };
+  }, [currentProjectId]);
 
   useEffect(() => {
     loadAgents();
     loadMembers();
-  }, [currentProjectId]);
+  }, [loadAgents, loadMembers]);
   useEffect(() => {
     const timer = setInterval(() => {
       loadAgents();
     }, 3000);
     return () => clearInterval(timer);
-  }, [currentProjectId]);
+  }, [loadAgents]);
 
   // v9.0: 监听 team:member-added 事件
   useEffect(() => {
@@ -67,7 +67,7 @@ export function TeamPage() {
       },
     );
     return unsub;
-  }, [currentProjectId]);
+  }, [currentProjectId, loadMembers, loadAgents]);
 
   // 首次加载时拉取缓存的 react states
   useEffect(() => {
@@ -438,17 +438,10 @@ export function TeamPage() {
           {/* ── 左侧: 成员列表 (合并活跃 agent + 全部 members 兜底) ── */}
           <div className="w-56 shrink-0 border-r border-slate-800 bg-slate-950 overflow-y-auto p-2 space-y-1.5">
             {(() => {
-              // v29.1: 合并 agents + members，过滤掉无意义的 idle agents
-              // 只展示: (1) 正在工作的 agent, (2) 有统计数据的 agent, (3) team_members 中的配置成员
-              const meaningfulAgents = agents.filter(
-                a =>
-                  a.status === 'working' ||
-                  (a as unknown as Record<string, number>).total_input_tokens > 0 ||
-                  (a as unknown as Record<string, number>).total_cost_usd > 0,
-              );
-              const agentIds = new Set(meaningfulAgents.map(a => a.id));
+              // 以 agents (含运行状态) 为主，补充 members 中未出现的成员
+              const agentIds = new Set(agents.map(a => a.id));
               const merged: (TeamMember & { status?: string; current_task?: string })[] = [
-                ...meaningfulAgents,
+                ...agents,
                 ...members
                   .filter(m => !agentIds.has(m.id))
                   .map(m => ({ ...m, status: 'idle' as const, current_task: undefined })),

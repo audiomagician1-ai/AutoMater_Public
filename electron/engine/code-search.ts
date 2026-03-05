@@ -16,6 +16,9 @@
 
 import { execSync, spawnSync, exec as execCb } from 'child_process';
 import { promisify } from 'util';
+import { createLogger } from './logger';
+const log = createLogger('code-search');
+
 
 const execAsync = promisify(execCb);
 import fs from 'fs';

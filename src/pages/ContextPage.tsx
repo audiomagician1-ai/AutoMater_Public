@@ -525,7 +525,7 @@ function BaselinePanel({ member, projectId }: { member: TeamMember; projectId: s
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [projectId, member.id, member.role]);
+  }, [projectId, member.id, member.role, member.max_context_tokens]);
 
   const budget = member.max_context_tokens ?? 128000;
   const used = baseline?.totalTokens ?? 0;
@@ -749,8 +749,8 @@ export function ContextPage() {
   );
 
   // 按角色排序: pm → architect → tech_lead → developer → qa → devops → 其他
-  const ROLE_ORDER = ['pm', 'architect', 'tech_lead', 'developer', 'qa', 'devops'];
   const sortedMembers = useMemo(() => {
+    const ROLE_ORDER = ['pm', 'architect', 'tech_lead', 'developer', 'qa', 'devops'];
     const sorted = [...members].sort((a, b) => {
       const ia = ROLE_ORDER.indexOf(a.role);
       const ib = ROLE_ORDER.indexOf(b.role);

@@ -15,7 +15,7 @@
  *   - 导入分析仅在分析时显示
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { filterByProject } from '../stores/slices/agent-slice';
 import { TechBackground } from '../components/TechBackground';
@@ -61,6 +61,8 @@ export function OverviewPage() {
     done?: boolean;
     error?: boolean;
   } | null>(null);
+  const importProgressRef = useRef(importProgress);
+  importProgressRef.current = importProgress;
 
   // 切换项目时清空残留的分析进度，并从后端恢复真实进度
   useEffect(() => {
@@ -89,7 +91,7 @@ export function OverviewPage() {
     setStats(st);
     setProject(proj);
     // 如果项目进入 analyzing 状态但没有进度信息，从后端查询真实进度
-    if (proj?.status === 'analyzing' && !importProgress) {
+    if (proj?.status === 'analyzing' && !importProgressRef.current) {
       window.automater.project
         .getImportProgress(currentProjectId)
         .then(cached => {
@@ -104,7 +106,7 @@ export function OverviewPage() {
         });
     }
     // 分析完成后清除进度
-    if (proj?.status !== 'analyzing' && importProgress?.done) {
+    if (proj?.status !== 'analyzing' && importProgressRef.current?.done) {
       // 保留完成消息 5 秒后清除
       setTimeout(() => setImportProgress(null), 8000);
     }

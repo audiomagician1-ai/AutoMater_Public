@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { filterByProject } from '../stores/slices/agent-slice';
 
@@ -48,7 +48,7 @@ export function BoardPage() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [sessionSummaries, setSessionSummaries] = useState<Record<string, FeatureSessionSummary>>({});
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!currentProjectId) return;
     const data = await window.automater.project.getFeatures(currentProjectId);
     setFeatures(data || []);
@@ -59,15 +59,15 @@ export function BoardPage() {
     } catch {
       /* session API 可能未就绪 */
     }
-  };
+  }, [currentProjectId]);
 
   useEffect(() => {
     load();
-  }, [currentProjectId]);
+  }, [load]);
   useEffect(() => {
     const t = setInterval(load, 4000);
     return () => clearInterval(t);
-  }, [currentProjectId]);
+  }, [load]);
 
   const enriched = features.map(f => ({
     ...f,

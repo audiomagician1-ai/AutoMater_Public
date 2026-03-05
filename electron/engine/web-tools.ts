@@ -17,6 +17,9 @@ import {
   getAvailableProviders,
   type SearchProviderConfig,
 } from './search-provider';
+import { createLogger } from './logger';
+const log = createLogger('web-tools');
+
 
 // ═══════════════════════════════════════
 // Re-exports (方便外部直接配置)
