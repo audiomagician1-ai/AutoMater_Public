@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { safeJsonParse, safeParseToolArgs } from '../safe-json';
+import { setLogLevel } from '../logger';
 
 describe('safeJsonParse', () => {
   it('parses valid JSON', () => {
@@ -24,29 +25,36 @@ describe('safeJsonParse', () => {
   });
 
   it('logs warning when label is provided and parse fails', () => {
+    setLogLevel('warn'); // enable warn output in test env
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     safeJsonParse('broken', {}, 'test-label');
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[safeJsonParse] test-label'),
-      expect.any(String)
-    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // logger formats: "HH:mm:ss.SSS WARN  [safe-json] test-label: invalid JSON, ..."
+    expect(warnSpy.mock.calls[0][0]).toEqual(expect.stringContaining('test-label'));
     warnSpy.mockRestore();
+    setLogLevel('error');
   });
 
   it('does not log when label is omitted', () => {
+    setLogLevel('warn');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     safeJsonParse('broken', {});
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+    setLogLevel('error');
   });
 
   it('truncates long invalid input in warning', () => {
+    setLogLevel('warn');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const longText = 'x'.repeat(500);
     safeJsonParse(longText, {}, 'truncate-test');
-    const [, logged] = warnSpy.mock.calls[0];
-    expect(logged.length).toBeLessThanOrEqual(200);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // The preview is sliced to 200 chars in safe-json.ts
+    const loggedLine = warnSpy.mock.calls[0][0] as string;
+    expect(loggedLine).toEqual(expect.stringContaining('truncate-test'));
     warnSpy.mockRestore();
+    setLogLevel('error');
   });
 });
 

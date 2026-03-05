@@ -1,9 +1,9 @@
 /**
- * orchestrator.ts tests — Hot-Join events + ensureHotJoinListener + runOrchestrator guards
+ * orchestrator.ts tests — emitMemberAdded + runOrchestrator guards
  *
  * Heavy Electron/DB dependencies are fully mocked.
  * Tests focus on:
- *   - emitMemberAdded / ensureHotJoinListener event bus behavior
+ *   - emitMemberAdded scheduler-bus routing
  *   - runOrchestrator early-exit guards (duplicate run, missing settings, missing project)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -101,6 +101,16 @@ vi.mock('../change-manager', () => ({
   runChangeRequest: vi.fn(() => ({ success: true })),
 }));
 
+const mockEmitScheduleEvent = vi.fn();
+vi.mock('../scheduler-bus', () => ({
+  emitScheduleEvent: (...args: unknown[]) => mockEmitScheduleEvent(...args),
+}));
+
+vi.mock('../session-scheduler', () => ({
+  runSessionDrivenDevPhase: vi.fn(() => Promise.resolve()),
+  getDevPhaseContext: vi.fn(() => undefined),
+}));
+
 vi.mock('../phases', () => ({
   phasePMAnalysis: vi.fn(() => [{ id: 'F1', title: 'Test' }]),
   phaseIncrementalPM: vi.fn(() => []),
@@ -132,53 +142,36 @@ vi.mock('../cross-project', () => ({
   inferTags: vi.fn(() => ['typescript']),
 }));
 
-import {
-  emitMemberAdded,
-  ensureHotJoinListener,
-  runOrchestrator,
-} from '../orchestrator';
+import { emitMemberAdded, runOrchestrator } from '../orchestrator';
 import { isOrchestratorRunning } from '../agent-manager';
 import { getSettings } from '../llm-client';
 import { sendToUI } from '../ui-bridge';
 
 // ═══════════════════════════════════════
-// emitMemberAdded & ensureHotJoinListener
+// emitMemberAdded — scheduler-bus routing
 // ═══════════════════════════════════════
 
 describe('emitMemberAdded', () => {
-  it('does not throw when called with valid payload', () => {
-    expect(() =>
-      emitMemberAdded({ projectId: 'p1', memberId: 'm1', role: 'developer', name: 'Dev 1' })
-    ).not.toThrow();
+  beforeEach(() => {
+    mockEmitScheduleEvent.mockClear();
   });
 
-  it('does not throw for non-developer role', () => {
-    expect(() =>
-      emitMemberAdded({ projectId: 'p1', memberId: 'm1', role: 'architect', name: 'Arch' })
-    ).not.toThrow();
-  });
-});
-
-describe('ensureHotJoinListener', () => {
-  it('is idempotent — calling twice does not throw', () => {
-    expect(() => {
-      ensureHotJoinListener();
-      ensureHotJoinListener();
-    }).not.toThrow();
+  it('emits schedule:member_added for developer role', () => {
+    emitMemberAdded({ projectId: 'p1', memberId: 'm1', role: 'developer', name: 'Dev 1' });
+    expect(mockEmitScheduleEvent).toHaveBeenCalledWith('schedule:member_added', {
+      projectId: 'p1',
+      memberId: 'm1',
+    });
   });
 
-  it('after registration, emitMemberAdded for developer does not throw', () => {
-    ensureHotJoinListener();
-    expect(() =>
-      emitMemberAdded({ projectId: 'p1', memberId: 'm1', role: 'developer', name: 'Dev' })
-    ).not.toThrow();
+  it('does not emit for non-developer role', () => {
+    emitMemberAdded({ projectId: 'p1', memberId: 'm1', role: 'architect', name: 'Arch' });
+    expect(mockEmitScheduleEvent).not.toHaveBeenCalled();
   });
 
-  it('after registration, emitMemberAdded for non-developer does not throw', () => {
-    ensureHotJoinListener();
-    expect(() =>
-      emitMemberAdded({ projectId: 'p1', memberId: 'm2', role: 'qa', name: 'QA' })
-    ).not.toThrow();
+  it('does not emit for qa role', () => {
+    emitMemberAdded({ projectId: 'p1', memberId: 'm2', role: 'qa', name: 'QA' });
+    expect(mockEmitScheduleEvent).not.toHaveBeenCalled();
   });
 });
 
@@ -196,34 +189,50 @@ describe('runOrchestrator', () => {
   it('rejects duplicate run when already running', async () => {
     vi.mocked(isOrchestratorRunning).mockReturnValueOnce(true);
     await runOrchestrator('proj-dup', null);
-    expect(sendToUI).toHaveBeenCalledWith(null, 'agent:log', expect.objectContaining({
-      content: expect.stringContaining('忽略重复启动'),
-    }));
+    expect(sendToUI).toHaveBeenCalledWith(
+      null,
+      'agent:log',
+      expect.objectContaining({
+        content: expect.stringContaining('忽略重复启动'),
+      }),
+    );
   });
 
   it('rejects when settings missing apiKey', async () => {
     vi.mocked(getSettings).mockReturnValueOnce({ llmProvider: 'openai', apiKey: '' } as ReturnType<typeof getSettings>);
     await runOrchestrator('proj-nokey', null);
-    expect(sendToUI).toHaveBeenCalledWith(null, 'agent:error', expect.objectContaining({
-      error: expect.stringContaining('API Key'),
-    }));
+    expect(sendToUI).toHaveBeenCalledWith(
+      null,
+      'agent:error',
+      expect.objectContaining({
+        error: expect.stringContaining('API Key'),
+      }),
+    );
   });
 
   it('rejects when project not found in DB', async () => {
     // validateModel returns null (OK), but project is undefined
     mockDbGet.mockReturnValue(undefined);
     await runOrchestrator('proj-missing', null);
-    expect(sendToUI).toHaveBeenCalledWith(null, 'agent:error', expect.objectContaining({
-      error: expect.stringContaining('项目不存在'),
-    }));
+    expect(sendToUI).toHaveBeenCalledWith(
+      null,
+      'agent:error',
+      expect.objectContaining({
+        error: expect.stringContaining('项目不存在'),
+      }),
+    );
   });
 
   it('handles model validation failure', async () => {
     const { validateModel } = await import('../llm-client');
     vi.mocked(validateModel).mockResolvedValueOnce('Model not available: gpt-4o');
     await runOrchestrator('proj-model-fail', null);
-    expect(sendToUI).toHaveBeenCalledWith(null, 'agent:error', expect.objectContaining({
-      error: expect.stringContaining('模型预检失败'),
-    }));
+    expect(sendToUI).toHaveBeenCalledWith(
+      null,
+      'agent:error',
+      expect.objectContaining({
+        error: expect.stringContaining('模型预检失败'),
+      }),
+    );
   });
 });

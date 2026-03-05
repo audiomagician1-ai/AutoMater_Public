@@ -1,5 +1,5 @@
 /**
- * Session Scheduler — Session 驱动的并发调度引擎 (v30.0)
+ * Session Scheduler — Feature 级并发调度引擎 (v30.1)
  *
  * 核心职责:
  *   1. 成为 Dev+QA 阶段的 **唯一** 调度入口
@@ -8,10 +8,12 @@
  *   4. 提供 awaitAllFeaturesDone 阻塞式等待，供 orchestrator 使用
  *   5. 提供 fallbackCheck 供 daemon 定时兜底调用
  *
- * 调度模型 (v30.0 — Session 即并发单元):
- *   team_members 行 = Agent 类定义 (角色模板)
- *   sessions 行    = Agent 实例 (由 Scheduler spawn, 绑定 Feature)
+ * 调度模型 (v30.0+):
+ *   并发单元 = Feature (lockNextFeature 互斥)
+ *   team_members 行 = Agent 类定义 (角色模板 + 并发配额)
+ *   sessions 行    = 工作记录 (由 Scheduler spawn, 绑定 Feature)
  *   一个 Agent 可同时有 N 个 running session (N = max_concurrent_sessions)
+ *   workerLoop 内部 ReAct 循环是串行的，并行发生在多 Feature 之间
  *
  * 与 orchestrator 的关系:
  *   orchestrator 负责 pre-dev (PM/Architect/Docs) 和 post-dev (PM验收/文档同步/DevOps)
@@ -38,17 +40,22 @@ const log = createLogger('session-scheduler');
 // Config
 // ═══════════════════════════════════════
 
-/** Scheduler 全局开关 — 通过 daemon config 控制 */
-let _enabled = false;
+/**
+ * Scheduler 启用状态 — 按项目追踪 (v30.1)
+ * 改进: 不再使用全局 boolean，避免多项目并发时的竞态。
+ * daemon 级 enable/disable 通过 _daemonEnabled 控制 fallbackCheck;
+ * 项目级启用通过 devPhaseContexts.has(projectId) 隐式判断。
+ */
+let _daemonEnabled = false;
 
 export function enableScheduler(): void {
-  _enabled = true;
+  _daemonEnabled = true;
 }
 export function disableScheduler(): void {
-  _enabled = false;
+  _daemonEnabled = false;
 }
 export function isSchedulerEnabled(): boolean {
-  return _enabled;
+  return _daemonEnabled;
 }
 
 // ═══════════════════════════════════════
@@ -104,7 +111,8 @@ export function getDevPhaseContext(projectId: string): DevPhaseContext | undefin
  * v30.0: scheduler 自持 DevPhaseContext, 不再依赖 orchestrator 的 HotJoinContext
  */
 export async function scheduleProject(projectId: string): Promise<{ spawned: number }> {
-  if (!_enabled) return { spawned: 0 };
+  // 项目级判断: 有活跃 DevPhaseContext 即可调度 (不依赖全局开关)
+  // 全局开关仅控制 daemon fallbackCheck
 
   const ctx = devPhaseContexts.get(projectId);
   if (!ctx || ctx.signal.aborted) {
@@ -292,9 +300,8 @@ export async function runSessionDrivenDevPhase(params: {
   devPhaseContexts.set(projectId, ctx);
   activeWorkerPromises.set(projectId, new Set());
 
-  // 2. 启用 scheduler (如果还没启用)
-  const wasEnabled = _enabled;
-  _enabled = true;
+  // 2. 确保 daemon 级 scheduler 已启用 (用于 fallbackCheck 兜底)
+  _daemonEnabled = true;
 
   sendToUI(params.win, 'agent:log', {
     projectId,
@@ -313,7 +320,7 @@ export async function runSessionDrivenDevPhase(params: {
     // 5. 清理
     devPhaseContexts.delete(projectId);
     activeWorkerPromises.delete(projectId);
-    if (!wasEnabled) _enabled = false;
+    // 如果没有其他活跃项目，daemon 级开关保持不变 (由 stopDaemon 统一关闭)
 
     sendToUI(params.win, 'agent:log', {
       projectId,
@@ -356,8 +363,15 @@ async function awaitAllFeaturesDone(projectId: string, signal: AbortSignal, win:
       break;
     }
 
-    // 如果有 todo 但没有 active worker → 补充调度
-    if (todoCount > 0 && activeCount < 3) {
+    // 如果有 todo 但 active worker 未满 → 补充调度
+    const ctx = devPhaseContexts.get(projectId);
+    const DEFAULT_MAX_WORKERS = 3;
+    const maxSlots = ctx
+      ? ctx.settings.workerCount > 0
+        ? ctx.settings.workerCount
+        : DEFAULT_MAX_WORKERS
+      : DEFAULT_MAX_WORKERS;
+    if (todoCount > 0 && activeCount < maxSlots) {
       await scheduleProject(projectId);
     }
 
@@ -430,7 +444,7 @@ async function onSessionFailed(payload: ScheduleEventPayload): Promise<void> {
  * 扫描所有 developing 项目，如果有未被调度的 todo feature 则触发调度
  */
 export async function fallbackCheck(): Promise<void> {
-  if (!_enabled) return;
+  if (!_daemonEnabled) return;
 
   const db = getDb();
   const projects = db.prepare("SELECT id FROM projects WHERE status = 'developing'").all() as Array<{ id: string }>;

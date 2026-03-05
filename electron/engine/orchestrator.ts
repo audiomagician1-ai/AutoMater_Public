@@ -34,7 +34,8 @@ import { cleanExpiredLocks } from './file-lock';
 import { detectImplicitChanges, runChangeRequest, type WishTriageResult } from './change-manager';
 import type { AppSettings, ProjectRow, CountResult, WorkflowStage, WorkflowStageId, PhaseResult } from './types';
 import type { GitProviderConfig } from './git-provider';
-import { runSessionDrivenDevPhase, getDevPhaseContext } from './session-scheduler';
+import { runSessionDrivenDevPhase } from './session-scheduler';
+import { emitScheduleEvent } from './scheduler-bus';
 
 // ── Phase modules (all logic extracted) ──
 import {
@@ -103,37 +104,19 @@ export type {
 } from './react-loop';
 
 // ═══════════════════════════════════════
-// Hot-Join: v30.0 — 统一由 session-scheduler 管理
-// 旧 HotJoinContext 已迁移到 session-scheduler.ts 的 DevPhaseContext
+// Hot-Join: 热加入事件路由 — 委托给 scheduler-bus
 // ═══════════════════════════════════════
 
-/** v30.0: 向后兼容 — HotJoinContext 类型别名 (已迁移到 session-scheduler) */
-export type HotJoinContext = import('./session-scheduler').DevPhaseContext;
-
-/** v30.0: 向后兼容 — 获取项目的 Dev 阶段上下文 */
-export function getHotJoinContext(projectId: string): HotJoinContext | undefined {
-  return getDevPhaseContext(projectId);
-}
-
 /**
- * v30.0: 热加入 — 委托给 scheduler-bus 的 member_added 事件
- * project.ts 调用此函数触发热加入事件
+ * 团队成员新增时触发 — project.ts 调用此函数
+ * Developer 角色通过 scheduler-bus 路由到 session-scheduler 自动调度
  */
 export function emitMemberAdded(payload: { projectId: string; memberId: string; role: string; name: string }) {
-  // 只对 developer 角色触发调度
   if (payload.role !== 'developer') return;
-  // 通过 scheduler-bus 触发 → session-scheduler 自动处理
-  import('./scheduler-bus').then(({ emitScheduleEvent }) => {
-    emitScheduleEvent('schedule:member_added', {
-      projectId: payload.projectId,
-      memberId: payload.memberId,
-    });
+  emitScheduleEvent('schedule:member_added', {
+    projectId: payload.projectId,
+    memberId: payload.memberId,
   });
-}
-
-/** v30.0: 向后兼容 (no-op，scheduler 自动注册监听器) */
-export function ensureHotJoinListener() {
-  // no-op: session-scheduler.registerSchedulerListeners() 已取代此功能
 }
 
 // ═══════════════════════════════════════
