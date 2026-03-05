@@ -461,7 +461,9 @@ export async function reactDeveloperLoop(
       // v26.0: 流式推送思维链 — 创建 stream callback 将 content/reasoning 实时推送到前端
       sendToUI(win, 'agent:stream-start', { agentId: workerId, label: `${feature.id} [${iter}] 思考中` });
       let streamedReasoning = '';
+      let chunkReceived = false;
       const onContentChunk: ContentChunkCallback = (chunk, type) => {
+        chunkReceived = true;
         if (type === 'reasoning') {
           streamedReasoning += chunk;
           sendToUI(win, 'agent:stream', { agentId: workerId, chunk });
@@ -470,7 +472,22 @@ export async function reactDeveloperLoop(
         }
       };
 
-      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384, onContentChunk);
+      // v33.1: 等待中提示 — 如果 LLM 30s 内无 chunk 输出，通知 UI 仍在等待
+      const waitHintTimer = setTimeout(() => {
+        if (!chunkReceived && !signal.aborted) {
+          sendToUI(win, 'agent:log', {
+            projectId,
+            agentId: workerId,
+            content: `⏳ [${iter}] 等待 LLM 响应中... (模型: ${model})`,
+          });
+        }
+      }, 30_000);
+      let result: Awaited<ReturnType<typeof callLLMWithTools>>;
+      try {
+        result = await callLLMWithTools(settings, model, messages, tools, signal, 16384, onContentChunk);
+      } finally {
+        clearTimeout(waitHintTimer);
+      }
       sendToUI(win, 'agent:stream-end', { agentId: workerId });
 
       const cost = calcCost(model, result.inputTokens, result.outputTokens);

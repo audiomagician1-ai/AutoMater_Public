@@ -776,6 +776,7 @@ async function _callAnthropicWithTools(
     tools: anthropicTools,
     max_tokens: maxTokens,
     temperature: 0.2,
+    stream: true, // v33.1: streaming 支持 — 实时推送思考过程
   };
   if (systemMsg)
     body.system = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
@@ -792,34 +793,119 @@ async function _callAnthropicWithTools(
   });
   if (!res.ok) await throwOnHttpError(res, 'Anthropic');
 
-  const data = (await res.json()) as {
-    content?: AnthropicToolBlock[];
-    usage?: { input_tokens: number; output_tokens: number };
-  };
-
-  // Convert Anthropic response back to OpenAI format
+  // ── v33.1: 流式解析 Anthropic SSE ──
   let textContent = '';
-  let reasoningContent = ''; // v26.0: Anthropic extended_thinking
+  let reasoningContent = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
   const toolCalls: ToolCallMessage['tool_calls'] = [];
 
-  for (const block of data.content || []) {
-    if (block.type === 'thinking') {
-      // v26.0: Anthropic extended_thinking block
-      const thinkText = block.text ?? '';
-      reasoningContent += thinkText;
-      onContentChunk?.(thinkText, 'reasoning');
-    } else if (block.type === 'text') {
-      textContent += block.text ?? '';
-      onContentChunk?.(block.text ?? '', 'content');
-    } else if (block.type === 'tool_use') {
-      toolCalls.push({
-        id: block.id ?? '',
-        type: 'function',
-        function: {
-          name: block.name ?? '',
-          arguments: JSON.stringify(block.input),
-        },
-      });
+  // 用 index 追踪 content_block 类型: tool_use blocks 需要累积 JSON input
+  const blockTypes = new Map<number, string>(); // blockIndex → 'text' | 'thinking' | 'tool_use'
+  const toolUseBlocks = new Map<number, { id: string; name: string; inputJson: string }>();
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Anthropic: Response body is null');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(':')) continue; // SSE comment or empty
+
+      if (trimmed.startsWith('event: ')) {
+        // event type line — skip, we parse data lines
+        continue;
+      }
+      if (!trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+
+        switch (json.type) {
+          case 'message_start': {
+            // usage in message_start.message.usage
+            const usage = json.message?.usage;
+            if (usage) inputTokens = usage.input_tokens ?? 0;
+            break;
+          }
+          case 'content_block_start': {
+            const idx = json.index as number;
+            const block = json.content_block;
+            if (block) {
+              blockTypes.set(idx, block.type);
+              if (block.type === 'tool_use') {
+                toolUseBlocks.set(idx, {
+                  id: block.id ?? '',
+                  name: block.name ?? '',
+                  inputJson: '',
+                });
+              }
+            }
+            break;
+          }
+          case 'content_block_delta': {
+            const idx = json.index as number;
+            const delta = json.delta;
+            if (!delta) break;
+
+            const blockType = blockTypes.get(idx);
+            if (delta.type === 'text_delta' && delta.text) {
+              if (blockType === 'thinking') {
+                reasoningContent += delta.text;
+                onContentChunk?.(delta.text, 'reasoning');
+              } else {
+                textContent += delta.text;
+                onContentChunk?.(delta.text, 'content');
+              }
+            } else if (delta.type === 'thinking_delta' && delta.thinking) {
+              reasoningContent += delta.thinking;
+              onContentChunk?.(delta.thinking, 'reasoning');
+            } else if (delta.type === 'input_json_delta' && delta.partial_json) {
+              const tu = toolUseBlocks.get(idx);
+              if (tu) tu.inputJson += delta.partial_json;
+            }
+            break;
+          }
+          case 'content_block_stop': {
+            const idx = json.index as number;
+            const tu = toolUseBlocks.get(idx);
+            if (tu) {
+              let parsedInput: unknown;
+              try {
+                parsedInput = JSON.parse(tu.inputJson || '{}');
+              } catch {
+                parsedInput = {};
+              }
+              toolCalls.push({
+                id: tu.id,
+                type: 'function',
+                function: {
+                  name: tu.name,
+                  arguments: JSON.stringify(parsedInput),
+                },
+              });
+            }
+            break;
+          }
+          case 'message_delta': {
+            const usage = json.usage;
+            if (usage) outputTokens = usage.output_tokens ?? outputTokens;
+            break;
+          }
+          // message_stop, ping — ignore
+        }
+      } catch {
+        /* skip malformed SSE JSON chunk */
+      }
     }
   }
 
@@ -829,8 +915,8 @@ async function _callAnthropicWithTools(
       content: textContent || null,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     },
-    inputTokens: data.usage?.input_tokens ?? 0,
-    outputTokens: data.usage?.output_tokens ?? 0,
+    inputTokens,
+    outputTokens,
     reasoning: reasoningContent || undefined,
   };
 }

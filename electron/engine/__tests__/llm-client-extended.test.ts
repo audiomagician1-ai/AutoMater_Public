@@ -177,8 +177,9 @@ describe('callLLM', () => {
   it('throws on aborted signal', async () => {
     const ctrl = new AbortController();
     ctrl.abort();
-    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], ctrl.signal))
-      .rejects.toThrow('Aborted');
+    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], ctrl.signal)).rejects.toThrow(
+      'Aborted',
+    );
   });
 
   it('calls OpenAI endpoint and returns result', async () => {
@@ -204,7 +205,11 @@ describe('callLLM', () => {
   });
 
   it('calls Anthropic endpoint when provider is anthropic', async () => {
-    const anthropicSettings = { ...mockSettings, llmProvider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com' };
+    const anthropicSettings = {
+      ...mockSettings,
+      llmProvider: 'anthropic' as const,
+      baseUrl: 'https://api.anthropic.com',
+    };
     const mockResponse = {
       ok: true,
       json: async () => ({
@@ -215,9 +220,17 @@ describe('callLLM', () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
-    const result = await callLLM(anthropicSettings, 'claude-3-5-sonnet-20241022',
-      [{ role: 'system', content: 'you are helpful' }, { role: 'user', content: 'hi' }],
-      undefined, 100, 0);
+    const result = await callLLM(
+      anthropicSettings,
+      'claude-3-5-sonnet-20241022',
+      [
+        { role: 'system', content: 'you are helpful' },
+        { role: 'user', content: 'hi' },
+      ],
+      undefined,
+      100,
+      0,
+    );
     expect(result.content).toBe('Bonjour!');
     expect(result.inputTokens).toBe(8);
     expect(result.outputTokens).toBe(3);
@@ -234,8 +247,9 @@ describe('callLLM', () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
-    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 0))
-      .rejects.toThrow(NonRetryableError);
+    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 0)).rejects.toThrow(
+      NonRetryableError,
+    );
   });
 
   it('throws NonRetryableError on 404', async () => {
@@ -246,20 +260,22 @@ describe('callLLM', () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
-    await expect(callLLM(mockSettings, 'fake-model', [{ role: 'user', content: 'hi' }], undefined, 100, 0))
-      .rejects.toThrow(NonRetryableError);
+    await expect(
+      callLLM(mockSettings, 'fake-model', [{ role: 'user', content: 'hi' }], undefined, 100, 0),
+    ).rejects.toThrow(NonRetryableError);
   });
 
   it('retries on 500 then succeeds', async () => {
     const errorResponse = { ok: false, status: 500, text: async () => 'Internal Server Error' };
     const okResponse = {
       ok: true,
-      json: async () => ({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 5, completion_tokens: 2 } }),
+      json: async () => ({
+        choices: [{ message: { content: 'ok' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      }),
       body: null,
     };
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce(errorResponse)
-      .mockResolvedValueOnce(okResponse);
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(errorResponse).mockResolvedValueOnce(okResponse);
 
     vi.useFakeTimers();
     const resultP = callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 1);
@@ -275,8 +291,9 @@ describe('callLLM', () => {
     const mockResponse = { ok: false, status: 403, text: async () => 'Forbidden' };
     globalThis.fetch = vi.fn().mockResolvedValue(mockResponse);
 
-    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 3))
-      .rejects.toThrow(NonRetryableError);
+    await expect(callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 3)).rejects.toThrow(
+      NonRetryableError,
+    );
     // Only 1 attempt — no retries for NonRetryableError
     expect((globalThis.fetch as any).mock.calls.length).toBe(1);
   });
@@ -285,12 +302,13 @@ describe('callLLM', () => {
     const rateLimitResponse = { ok: false, status: 429, text: async () => 'Rate limited' };
     const okResponse = {
       ok: true,
-      json: async () => ({ choices: [{ message: { content: 'done' } }], usage: { prompt_tokens: 3, completion_tokens: 1 } }),
+      json: async () => ({
+        choices: [{ message: { content: 'done' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 1 },
+      }),
       body: null,
     };
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce(rateLimitResponse)
-      .mockResolvedValueOnce(okResponse);
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(rateLimitResponse).mockResolvedValueOnce(okResponse);
 
     vi.useFakeTimers();
     const p = callLLM(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], undefined, 100, 1);
@@ -315,8 +333,9 @@ describe('callLLMWithTools', () => {
   it('throws on aborted signal', async () => {
     const ctrl = new AbortController();
     ctrl.abort();
-    await expect(callLLMWithTools(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], [], ctrl.signal))
-      .rejects.toThrow('Aborted');
+    await expect(
+      callLLMWithTools(mockSettings, 'gpt-4o', [{ role: 'user', content: 'hi' }], [], ctrl.signal),
+    ).rejects.toThrow('Aborted');
   });
 
   it('returns tool call result from OpenAI', async () => {
@@ -337,10 +356,16 @@ describe('callLLMWithTools', () => {
     const mockResponse = { ok: true, body: stream };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
-    const tools = [{
-      type: 'function' as const,
-      function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
-    }];
+    const tools = [
+      {
+        type: 'function' as const,
+        function: {
+          name: 'read_file',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+        },
+      },
+    ];
 
     const result = await callLLMWithTools(mockSettings, 'gpt-4o', [{ role: 'user', content: 'read test.ts' }], tools);
     expect(result.message.tool_calls).toHaveLength(1);
@@ -351,25 +376,45 @@ describe('callLLMWithTools', () => {
 
   it('returns tool call result from Anthropic with format conversion', async () => {
     const anthropicSettings = { ...mockSettings, llmProvider: 'anthropic' as const };
-    const mockResponse = {
-      ok: true,
-      json: async () => ({
-        content: [
-          { type: 'text', text: 'I will read the file.' },
-          { type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'test.ts' } },
-        ],
-        usage: { input_tokens: 18, output_tokens: 12 },
-      }),
-    };
+    // v33.1: Anthropic 现在是 streaming — mock SSE response
+    const sseData = [
+      'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":18}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I will read the file."}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"test.ts\\"}"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":12}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join('');
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseData));
+        controller.close();
+      },
+    });
+    const mockResponse = { ok: true, body: stream };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(mockResponse);
 
-    const tools = [{
-      type: 'function' as const,
-      function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
-    }];
+    const tools = [
+      {
+        type: 'function' as const,
+        function: {
+          name: 'read_file',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+        },
+      },
+    ];
 
-    const result = await callLLMWithTools(anthropicSettings, 'claude-3-5-sonnet-20241022',
-      [{ role: 'user', content: 'read test.ts' }], tools);
+    const result = await callLLMWithTools(
+      anthropicSettings,
+      'claude-3-5-sonnet-20241022',
+      [{ role: 'user', content: 'read test.ts' }],
+      tools,
+    );
     expect(result.message.content).toBe('I will read the file.');
     expect(result.message.tool_calls).toHaveLength(1);
     expect(result.message.tool_calls?.[0].function.name).toBe('read_file');
