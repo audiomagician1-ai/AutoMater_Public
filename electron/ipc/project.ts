@@ -326,23 +326,23 @@ function getGitConfig(project: {
 }
 
 export function setupProjectHandlers() {
-  // ── 启动时清理: 重置残留的 analyzing 状态 ──
-  // 应用重启后，之前正在分析的项目进程已丢失，把状态改为 paused 让用户可重新启动
+  // ── 启动时清理: 重置所有活跃运行状态 ──
+  // 应用重启后，之前正在运行的编排进程已丢失，把状态改为 paused 让用户手动启动
   try {
     const db = getDb();
-    const stuckProjects = db.prepare("SELECT id, name FROM projects WHERE status = 'analyzing'").all() as {
-      id: string;
-      name: string;
-    }[];
+    const activeStatuses = ['analyzing', 'developing', 'initializing'];
+    const stuckProjects = db
+      .prepare(`SELECT id, name, status FROM projects WHERE status IN (${activeStatuses.map(() => '?').join(',')})`)
+      .all(...activeStatuses) as { id: string; name: string; status: string }[];
     if (stuckProjects.length > 0) {
-      log.info(`Resetting ${stuckProjects.length} stuck analyzing project(s)`, {
-        projects: stuckProjects.map(p => p.name),
+      log.info(`Resetting ${stuckProjects.length} active project(s) to paused on startup`, {
+        projects: stuckProjects.map(p => `${p.name}(${p.status})`),
       });
       db.prepare(
-        "UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE status = 'analyzing'",
-      ).run();
+        `UPDATE projects SET status = 'paused', updated_at = datetime('now') WHERE status IN (${activeStatuses.map(() => '?').join(',')})`,
+      ).run(...activeStatuses);
       for (const p of stuckProjects) {
-        addLog(p.id, 'system', 'info', '🔄 应用重启：分析状态已重置，可点击"启动"重新分析');
+        addLog(p.id, 'system', 'info', `🔄 应用重启：${p.status} 状态已重置为暂停，可点击"启动"继续`);
       }
     }
   } catch (err) {
