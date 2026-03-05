@@ -236,17 +236,41 @@ function spawnSessionWorker(
       workerOpts,
     );
 
-    // 5. 追踪 Promise
+    // 5. 追踪 Promise — v33.1: catch 异常退出时发射 session_failed 事件并释放 feature 锁
     let promiseSet = activeWorkerPromises.get(projectId);
     if (!promiseSet) {
       promiseSet = new Set();
       activeWorkerPromises.set(projectId, promiseSet);
     }
-    promiseSet.add(promise);
-    promise.finally(() => {
-      promiseSet!.delete(promise);
-      activeSessions.delete(session.id);
-    });
+    const wrappedPromise = promise
+      .catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.error('Session worker crashed unexpectedly', {
+          sessionId: session.id,
+          featureId: feature.id,
+          error: errMsg,
+        });
+        // 释放 feature 锁 → 变回 todo，允许重新调度
+        try {
+          db.prepare(
+            "UPDATE features SET status = 'todo', locked_by = NULL, locked_at = NULL WHERE id = ? AND project_id = ?",
+          ).run(feature.id, projectId);
+        } catch {
+          /* DB failure is non-fatal here */
+        }
+        // 发射 session_failed → 触发重新调度
+        emitScheduleEvent('schedule:session_failed', { projectId, sessionId: session.id, featureId: feature.id });
+        sendToUI(ctx.win, 'agent:log', {
+          projectId,
+          agentId: workerId,
+          content: `❌ Session ${session.id} 异常终止: ${errMsg.slice(0, 120)}`,
+        });
+      })
+      .finally(() => {
+        promiseSet!.delete(wrappedPromise);
+        activeSessions.delete(session.id);
+      });
+    promiseSet.add(wrappedPromise);
 
     activeSessions.set(session.id, new AbortController());
 
