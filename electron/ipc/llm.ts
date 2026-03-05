@@ -59,8 +59,9 @@ function getSettings() {
     try {
       const encrypted = getSecret('__global__', 'llm_api_key');
       if (encrypted) settings.apiKey = encrypted;
-    } catch {
+    } catch (err) {
       /* silent: secret-manager 不可用 */
+      log.debug('secret-manager 不可用', { error: String(err) });
     }
   }
 
@@ -107,8 +108,9 @@ export function setupLLMHandlers() {
           });
           if (res.ok && isJsonResponse(res)) return { success: true, status: res.status, message: 'Connected!' };
           // 200 but not JSON = wrong URL (e.g. HTML page); fall through to chat test
-        } catch {
+        } catch (err) {
           /* models endpoint not available, try chat */
+          log.debug('models endpoint not available, try chat', { error: String(err) });
         }
 
         // Fallback: 轻量 chat 测试 — 用已保存的模型名，或通用名
@@ -175,8 +177,9 @@ export function setupLLMHandlers() {
       const data = (await res.json()) as { data?: Array<{ id: string }> };
       const models = (data.data || []).map(m => m.id).sort();
       return { success: true, models };
-    } catch {
+    } catch (err) {
       /* silent: model list fetch failed */
+      log.debug('model list fetch failed', { error: String(err) });
       return { success: false, models: [] };
     }
   });

@@ -211,7 +211,8 @@ ${config.appUrl ? `\nApp URL for E2E: ${config.appUrl}` : ''}
       steps: t.steps as E2EStep[] | undefined,
       expected: (t.expected as string) || '',
     }));
-  } catch { /* silent: test spec parse failed — use single fallback test */
+  } catch (err) { /* silent: test spec parse failed — use single fallback test */
+    _log.debug('Catch at blackbox-test-runner.ts:214', { error: String(err) });
     tests = [{
       id: 'T001',
       name: 'Basic functionality test',
@@ -313,8 +314,9 @@ async function executeCommandTest(
           }
         }
       }
-    } catch { /* silent: 测试清理失败不影响结果 */
+    } catch (err) { /* silent: 测试清理失败不影响结果 */
       // Docker 不可用, fallback
+      _log.debug('// Docker 不可用, fallback', { error: String(err) });
     }
   }
 
@@ -530,7 +532,7 @@ async function generateFix(
         const absPath = path.join(config.workspacePath, file);
         const content = fs.readFileSync(absPath, 'utf-8');
         codeContext += `\n### ${file}\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\`\n`;
-      } catch { /* skip */ }
+      } catch (err) { /* skip */ }
     }
   }
 
@@ -581,7 +583,8 @@ ${codeContext || '(no code files provided)'}
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     };
-  } catch { /* silent: fix analysis parse failed */
+  } catch (err) { /* silent: fix analysis parse failed */
+    _log.debug('Catch at blackbox-test-runner.ts:586', { error: String(err) });
     return {
       description: 'Fix analysis (unparsed)',
       filesToModify: [],

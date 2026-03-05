@@ -81,8 +81,9 @@ function isRipgrepAvailable(): boolean {
         }
       }
     }
-  } catch {
+  } catch (err) {
     /* silent: ripgrep执行失败,降级搜索 */
+    log.debug('ripgrep执行失败,降级搜索', { error: String(err) });
     _rgAvailable = false;
   }
   return _rgAvailable;
@@ -189,8 +190,9 @@ function ripgrepSearch(
 
     const stdout = result.stdout || '';
     return parseRipgrepJson(stdout, options.maxResults, startTime);
-  } catch {
+  } catch (err) {
     /* silent: ripgrep JSON解析失败 */
+    log.debug('ripgrep JSON解析失败', { error: String(err) });
     return fallbackSearch(workspacePath, pattern, options, startTime);
   }
 }
@@ -229,7 +231,8 @@ function parseRipgrepJson(stdout: string, maxResults: number, startTime: number)
     let parsed: RgJsonLine;
     try {
       parsed = JSON.parse(raw);
-    } catch {
+    } catch (err) {
+      log.debug('Catch at code-search.ts:234', { error: String(err) });
       continue;
     }
 
@@ -315,8 +318,9 @@ function fallbackSearch(
       engine: 'fallback',
       durationMs: Date.now() - startTime,
     };
-  } catch {
+  } catch (err) {
     /* silent: grep搜索异常 */
+    log.debug('grep搜索异常', { error: String(err) });
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
 }
@@ -402,8 +406,9 @@ async function fallbackSearchAsync(
       engine: 'fallback',
       durationMs: Date.now() - startTime,
     };
-  } catch {
+  } catch (err) {
     /* silent: grep搜索异常 */
+    log.debug('grep搜索异常', { error: String(err) });
     return { matches: [], totalMatches: 0, truncated: false, engine: 'fallback', durationMs: Date.now() - startTime };
   }
 }
@@ -553,8 +558,9 @@ export function codeSearchFiles(
         totalFound: files.length,
         truncated: files.length > maxResults,
       };
-    } catch {
+    } catch (err) {
       /* silent: 文件列表搜索异常 */
+      log.debug('文件列表搜索异常', { error: String(err) });
       // fallthrough to fallback
     }
   }
@@ -581,7 +587,8 @@ function fallbackFileSearch(workspacePath: string, pattern: string, maxResults: 
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      log.debug('Catch at code-search.ts:590', { error: String(err) });
       return;
     }
 
@@ -685,7 +692,8 @@ export function readManyFiles(
       });
       result.totalLines += lines.length;
       totalChars += fileContent.length;
-    } catch {
+    } catch (err) {
+      log.debug('Catch at code-search.ts:695', { error: String(err) });
       continue;
     }
   }

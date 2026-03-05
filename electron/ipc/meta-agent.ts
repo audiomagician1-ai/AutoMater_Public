@@ -166,8 +166,9 @@ function getMetaAgentConfig(): MetaAgentConfig {
   if (row) {
     try {
       return { ...DEFAULT_CONFIG, ...JSON.parse(row.value) };
-    } catch {
+    } catch (err) {
       /* fallback */
+      log.debug('fallback', { error: String(err) });
     }
   }
   return { ...DEFAULT_CONFIG };
@@ -725,7 +726,8 @@ function executeAdminTool(
           const caps = (() => {
             try {
               return JSON.parse((r.capabilities as string) || '[]');
-            } catch {
+            } catch (err) {
+              log.debug('Catch at meta-agent.ts:729', { error: String(err) });
               return [];
             }
           })();
@@ -869,7 +871,8 @@ function executeAdminTool(
           let stages: WorkflowStage[] = [];
           try {
             stages = JSON.parse(r.stages);
-          } catch {
+          } catch (err) {
+            log.debug('Catch at meta-agent.ts:874', { error: String(err) });
             stages = [];
           }
           const active = r.is_active === 1 ? ' ⭐ **当前激活**' : '';
@@ -933,8 +936,9 @@ function executeAdminTool(
           let oldStages: WorkflowStage[] = [];
           try {
             oldStages = JSON.parse(current.stages);
-          } catch {
+          } catch (err) {
             /* empty */
+            log.debug('Catch at meta-agent.ts:939', { error: String(err) });
           }
           changes.push(`阶段: ${oldStages.length} → ${newStages.length} 个`);
         }
@@ -1400,8 +1404,9 @@ async function executeEvolutionAdminTool(
                     JSON.stringify(iterResult.entry.modifiedFiles),
                     iterResult.entry.status,
                   );
-                } catch {
+                } catch (err) {
                   /* DB save failure is non-critical */
+                  log.debug('DB save failure is', { error: String(err) });
                 }
               }
             } else if (iterResult.rolledBack) {
@@ -1425,8 +1430,9 @@ async function executeEvolutionAdminTool(
                   proposal.description,
                   iterResult.entry ? iterResult.entry.fitnessScore - (preflight.baselineFitness?.score || 0) : 0,
                 );
-              } catch {
+              } catch (err) {
                 /* DB save failure is non-critical */
+                log.debug('DB save failure is', { error: String(err) });
               }
             }
           } catch (genErr: unknown) {
@@ -1622,7 +1628,8 @@ export function setupMetaAgentHandlers() {
                 const fileContent = fs.readFileSync(att.data, 'utf-8').slice(0, 10000);
                 contentBlocks.push({ type: 'text', text: `[附件: ${att.name}]\n\`\`\`\n${fileContent}\n\`\`\`` });
               }
-            } catch {
+            } catch (err) {
+              log.debug('Catch at meta-agent.ts:1631', { error: String(err) });
               contentBlocks.push({ type: 'text', text: `[附件: ${att.name} — 读取失败]` });
             }
           }
@@ -1792,8 +1799,9 @@ export function setupMetaAgentHandlers() {
           };
           cacheContextSnapshot(projectId, snapshot);
           sendToUI(win, 'agent:context-snapshot', { projectId, snapshot });
-        } catch {
+        } catch (err) {
           // 快照生成非关键路径，静默失败
+          log.debug('// 快照生成非关键路径，静默失败', { error: String(err) });
         }
       }
 
@@ -1840,8 +1848,9 @@ export function setupMetaAgentHandlers() {
             try {
               toolArgs =
                 typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-            } catch {
+            } catch (err) {
               /* silent: tool args JSON parse failed */
+              log.debug('tool args JSON parse failed', { error: String(err) });
               toolArgs = {};
             }
 
@@ -2056,7 +2065,8 @@ export function setupMetaAgentHandlers() {
             wishContent = parsed.wishContent || '';
             memoryNotes = parsed.memoryNotes || '';
           }
-        } catch {
+        } catch (err) {
+          log.debug('Catch at meta-agent.ts:2068', { error: String(err) });
           reply =
             finalReply
               .replace(/```json[\s\S]*?```/g, '')
@@ -2259,7 +2269,8 @@ export function setupMetaAgentHandlers() {
         ? (() => {
             try {
               return JSON.parse(r.attachments as string);
-            } catch {
+            } catch (err) {
+              log.debug('Catch at meta-agent.ts:2272', { error: String(err) });
               return undefined;
             }
           })()

@@ -53,8 +53,9 @@ function getSchemaVersion(): number {
       | { value: string }
       | undefined;
     return row ? parseInt(row.value, 10) : 0;
-  } catch {
+  } catch (err) {
     /* silent: schema_version表不存在(首次运行) */
+    log.debug('schema_version表不存在(首次运行)', { error: String(err) });
     // schema_version 表不存在 = 旧版本数据库
     return 0;
   }

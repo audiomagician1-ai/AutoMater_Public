@@ -123,7 +123,8 @@ export async function compactMessages(
         `请将以下 ReAct 对话历史压缩为关键摘要（保留：已完成的操作、已创建/修改的文件、遇到的错误、关键决策）：\n\n${middleText}`,
       );
       usedLLM = true;
-    } catch { /* silent: LLM summarize failed — use raw text */
+    } catch (err) { /* silent: LLM summarize failed — use raw text */
+      log.debug('Catch at context-compaction.ts:126', { error: String(err) });
       summaryText = middleText;
     }
   } else {

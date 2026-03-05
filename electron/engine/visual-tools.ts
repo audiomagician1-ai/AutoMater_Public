@@ -177,7 +177,7 @@ export async function visualAssert(
           reasoning: parsed.reasoning || response,
         };
       }
-    } catch { /* fallback to text analysis */ }
+    } catch (err) { /* fallback to text analysis */ }
 
     // 无法解析 JSON，从文本推断
     const passed = response.toLowerCase().includes('pass') || response.toLowerCase().includes('true');

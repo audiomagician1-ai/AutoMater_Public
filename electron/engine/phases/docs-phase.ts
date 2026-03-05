@@ -241,11 +241,12 @@ export async function phaseIncrementalDocSync(
     try {
       const { stdout: diffOutput } = await execAsync('git diff --name-only HEAD~5 HEAD', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 });
       if (diffOutput.trim()) { changedFiles = diffOutput.trim().split('\n').filter(Boolean); }
-    } catch { /* silent: git log parse failed */
+    } catch (err) { /* silent: git log parse failed */
+      log.debug('Catch at docs-phase.ts:244', { error: String(err) });
       try {
         const { stdout: statusOutput } = await execAsync('git diff --name-only --cached', { cwd: workspacePath, encoding: 'utf-8', timeout: 10_000 });
         if (statusOutput.trim()) { changedFiles = statusOutput.trim().split('\n').filter(Boolean); }
-      } catch { /* no git available */ }
+      } catch (err) { /* no git available */ }
     }
 
     if (changedFiles.length === 0) {

@@ -234,7 +234,8 @@ function parseJsonArray(text: string): Array<{ summary: string; scope: string }>
         typeof (item as Record<string, unknown>).scope === 'string',
       )
       .slice(0, 3);
-  } catch {
+  } catch (err) {
+    log.debug('Catch at experience-harvester.ts:237', { error: String(err) });
     return [];
   }
 }

@@ -87,7 +87,7 @@ export function toErrorMessage(err: unknown): string {
   try {
     const json = JSON.stringify(err);
     if (json !== undefined) return json;
-  } catch { /* fall through */ }
+  } catch (err) { /* fall through */ }
   return String(err);
 }
 
@@ -107,7 +107,7 @@ function normalizeError(err: unknown): { message: string; stack?: string } {
   }
   try {
     return { message: JSON.stringify(err) };
-  } catch { /* silent: JSON.stringify failed — use String() */
+  } catch (err) { /* silent: JSON.stringify failed — use String() */
     return { message: String(err) };
   }
 }

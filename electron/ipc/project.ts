@@ -311,8 +311,9 @@ function getGitConfig(project: {
     try {
       const encrypted = getSecretFn(project.id, 'github_token');
       if (encrypted) token = encrypted;
-    } catch {
+    } catch (err) {
       /* secret-manager not available, use legacy */
+      log.debug('secret-manager not available, use legacy', { error: String(err) });
     }
   }
   return {
@@ -454,8 +455,9 @@ export function setupProjectHandlers() {
       let config: Record<string, unknown> = {};
       try {
         config = JSON.parse(row.config || '{}');
-      } catch {
+      } catch (err) {
         /* silent */
+        log.debug('silent', { error: String(err) });
       }
       config.permissions = permissions;
       db.prepare("UPDATE projects SET config = ?, updated_at = datetime('now') WHERE id = ?").run(
@@ -475,8 +477,9 @@ export function setupProjectHandlers() {
     try {
       const config = JSON.parse(row.config || '{}');
       return config.permissions || { externalRead: false, externalWrite: false, shellExec: false };
-    } catch {
+    } catch (err) {
       /* silent: 权限config解析失败,使用默认值 */
+      log.debug('权限config解析失败,使用默认值', { error: String(err) });
       return { externalRead: false, externalWrite: false, shellExec: false };
     }
   });
@@ -989,8 +992,9 @@ export function setupProjectHandlers() {
           }
         }
         // importCompleted=true → 不走导入，走正常 orchestrator
-      } catch {
+      } catch (err) {
         /* non-critical: JSON parse fallback */
+        log.debug(': JSON parse fallback', { error: String(err) });
       }
     }
 
@@ -1130,7 +1134,8 @@ export function setupProjectHandlers() {
             const existingCfg = JSON.parse(proj?.config || '{}');
             existingCfg.importCompleted = true;
             updatedConfig = JSON.stringify(existingCfg);
-          } catch {
+          } catch (err) {
+            log.debug('Catch at project.ts:1137', { error: String(err) });
             updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true });
           }
           db.prepare(
@@ -1242,7 +1247,7 @@ export function setupProjectHandlers() {
     //         .catch((err: unknown) => log.warn('Post-stop consolidation failed', { error: String(err) }));
     //     }
     //   }
-    // } catch { /* non-critical */ }
+    // } catch (err) { /* non-critical */ }
 
     return { success: true };
   });
@@ -1700,7 +1705,8 @@ export function setupProjectHandlers() {
           const existingCfg = JSON.parse(project.config || '{}');
           existingCfg.importCompleted = true;
           updatedConfig = JSON.stringify(existingCfg);
-        } catch {
+        } catch (err) {
+          log.debug('Catch at project.ts:1708', { error: String(err) });
           updatedConfig = JSON.stringify({ importExisting: true, importCompleted: true });
         }
         db.prepare(
@@ -1868,13 +1874,15 @@ export function setupProjectHandlers() {
         .map(f => {
           try {
             return JSON.parse(fs.readFileSync(path.join(probesDir, f), 'utf-8'));
-          } catch {
+          } catch (err) {
+            log.debug('Catch at project.ts:1877', { error: String(err) });
             return null;
           }
         })
         .filter(Boolean);
       return { success: true, reports };
-    } catch {
+    } catch (err) {
+      log.debug('Catch at project.ts:1884', { error: String(err) });
       return { success: true, reports: [] };
     }
   });

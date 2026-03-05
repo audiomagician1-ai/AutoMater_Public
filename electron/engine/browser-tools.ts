@@ -103,7 +103,8 @@ export async function closeBrowser(): Promise<{ success: boolean }> {
     if (_browser) { await _browser.close().catch(() => {}); _browser = null; }
     if (_cleanupTimer) { clearInterval(_cleanupTimer); _cleanupTimer = null; }
     return { success: true };
-  } catch { /* silent: browser cleanup error — force-null refs */
+  } catch (err) { /* silent: browser cleanup error — force-null refs */
+    log.debug('Catch at browser-tools.ts:106', { error: String(err) });
     _page = null; _context = null; _browser = null;
     return { success: true };
   }

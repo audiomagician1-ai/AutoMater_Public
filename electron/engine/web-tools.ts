@@ -340,7 +340,7 @@ export async function searchImages(
         }
       }
     }
-  } catch { /* fall through */ }
+  } catch (err) { /* fall through */ }
 
   // Strategy 2: SearXNG
   try {
@@ -361,7 +361,7 @@ export async function searchImages(
         }
       }
     }
-  } catch { /* fall through */ }
+  } catch (err) { /* fall through */ }
 
   // Strategy 3: Serper Image Search
   try {
@@ -386,7 +386,7 @@ export async function searchImages(
         }
       }
     }
-  } catch { /* fall through */ }
+  } catch (err) { /* fall through */ }
 
   // Strategy 4: Jina text search fallback
   try {
@@ -400,7 +400,7 @@ export async function searchImages(
         return { success: true, images };
       }
     }
-  } catch { /* fall through */ }
+  } catch (err) { /* fall through */ }
 
   return { success: false, images: [], error: '所有图片搜索引擎均失败。请配置 BRAVE_SEARCH_API_KEY / SEARXNG_URL / SERPER_API_KEY 中的至少一个。' };
 }

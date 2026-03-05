@@ -36,8 +36,9 @@ function getEncryptionKey(): Buffer {
     // Electron 环境: 使用进程 PID 文件夹路径作为 machine 标识 (跨重启稳定)
     const { app } = require('electron');
     machineId = app.getPath('userData');
-  } catch {
+  } catch (err) {
     /* silent: electron app路径获取失败,使用回退 */
+    log.debug('electron app路径获取失败,使用回退', { error: String(err) });
     // 非 Electron 环境 (测试): 使用 hostname
     const os = require('os');
     machineId = os.hostname();
@@ -165,8 +166,9 @@ export function listSecrets(projectId: string, provider?: SecretProvider): Secre
       } else {
         maskedValue = plain.slice(0, 4) + '…' + plain.slice(-4);
       }
-    } catch {
+    } catch (err) {
       /* silent: 解密失败,值不可用 */
+      log.debug('解密失败,值不可用', { error: String(err) });
       maskedValue = '(解密失败)';
     }
 

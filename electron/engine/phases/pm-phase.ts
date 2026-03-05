@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PM Phase — 需求分析 + 增量分析 + 批量验收
  * Extracted from orchestrator.ts for maintainability.
  * @module phases/pm-phase
@@ -121,7 +121,8 @@ export async function phasePMAnalysis(
               return JSON.parse(n.affected_files || '[]')
                 .slice(0, 5)
                 .join(', ');
-            } catch {
+            } catch (err) {
+              _log.debug('Catch at pm-phase.ts:124', { error: String(err) });
               return '';
             }
           })();
@@ -146,8 +147,9 @@ export async function phasePMAnalysis(
           archDocSnippet = raw.length > 4000 ? raw.slice(0, 4000) + '\n...(截断)' : raw;
           archDocSnippet = `\n\n## 📄 架构文档摘要\n${archDocSnippet}`;
         }
-      } catch {
+      } catch (err) {
         /* silent */
+        _log.debug('silent', { error: String(err) });
       }
     }
 
@@ -567,7 +569,8 @@ export async function phasePMAcceptance(
         if (parsed.ok) {
           verdicts = (Array.isArray(parsed.data) ? parsed.data : [parsed.data]) as typeof verdicts;
         }
-      } catch {
+      } catch (err) {
+        _log.debug('Catch at pm-phase.ts:572', { error: String(err) });
         try {
           const raw = JSON.parse(
             acceptResult.content
@@ -576,8 +579,9 @@ export async function phasePMAcceptance(
               .trim(),
           );
           verdicts = Array.isArray(raw) ? raw : [raw];
-        } catch {
+        } catch (err) {
           /* parse failed */
+          _log.debug('parse failed', { error: String(err) });
         }
       }
 

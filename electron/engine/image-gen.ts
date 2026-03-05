@@ -445,7 +445,7 @@ async function _saveImages(base64List: string[], basePath?: string): Promise<str
 
   try {
     fs.mkdirSync(dir, { recursive: true });
-  } catch { /* exists */ }
+  } catch (err) { /* exists */ }
 
   for (let i = 0; i < base64List.length; i++) {
     if (!base64List[i]) continue;

@@ -70,8 +70,9 @@ export function emitScheduleEvent(type: ScheduleEventType, payload: ScheduleEven
       type: type as EventType,
       data: payload,
     });
-  } catch {
+  } catch (err) {
     /* non-critical: 审计失败不影响调度 */
+    log.debug(': 审计失败不影响调度', { error: String(err) });
   }
 
   // 2. 发射到内存总线（Scheduler 即时响应）

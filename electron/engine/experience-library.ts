@@ -546,7 +546,8 @@ export function retrieveErrorExperience(
 
     log.info(`[D5] Retrieved ${relevantInstances.length} instances + ${relevantPatterns.length} patterns for error context`);
     return sections.join('\n\n');
-  } catch {
+  } catch (err) {
+    log.debug('Catch at experience-library.ts:549', { error: String(err) });
     return '';
   }
 }
@@ -736,7 +737,8 @@ export function checkMemoryBudget(
       currentSize: content.length,
       limit: maxChars,
     };
-  } catch {
+  } catch (err) {
+    log.debug('Catch at experience-library.ts:740', { error: String(err) });
     return { overBudget: false, currentSize: 0, limit: maxChars };
   }
 }

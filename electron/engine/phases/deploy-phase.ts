@@ -116,7 +116,7 @@ function detectDeployContext(
       else if (deps['react'] || deps['vue'] || deps['svelte']) ctx.projectType = 'SPA';
       else if (deps['express'] || deps['fastify'] || deps['hono'] || deps['koa']) ctx.projectType = 'Node.js API';
       else ctx.projectType = 'Node.js';
-    } catch { /* parse error */ }
+    } catch (err) { /* parse error */ }
   } else if (hasRequirements || hasPyproject) {
     ctx.buildSystem = 'pip';
     ctx.projectType = 'Python';
@@ -152,7 +152,7 @@ function detectDeployContext(
     // 从分支名提取 Issue 编号 (e.g., feature/issue-42-login, fix/42)
     const issueMatch = branch.match(/(?:issue-?|fix[/-]|feat[/-])(\d+)/i);
     if (issueMatch) ctx.issueNumber = parseInt(issueMatch[1], 10);
-  } catch { /* not a git repo */ }
+  } catch (err) { /* not a git repo */ }
 
   // 如果分支没有 Issue 编号，尝试从 feature 表获取
   if (!ctx.issueNumber) {
@@ -162,7 +162,7 @@ function detectDeployContext(
         "SELECT github_issue_number FROM features WHERE project_id = ? AND github_branch = ? AND github_issue_number IS NOT NULL LIMIT 1"
       ).get(projectId, ctx.currentBranch) as { github_issue_number: number } | undefined;
       if (row) ctx.issueNumber = row.github_issue_number;
-    } catch { /* no feature table yet */ }
+    } catch (err) { /* no feature table yet */ }
   }
 
   // 可用密钥

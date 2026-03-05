@@ -110,11 +110,11 @@ $graphics.Dispose()
     const [w, h] = output.split(',').map(Number);
 
     // 清理临时文件
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(tmpFile); } catch (err) { /* ignore */ }
 
     return { success: true, base64, width: w || 0, height: h || 0 };
   } catch (err: unknown) {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(tmpFile); } catch (err) { /* ignore */ }
     return { success: false, base64: '', width: 0, height: 0, error: (err instanceof Error ? err.message : String(err)) };
   }
 }

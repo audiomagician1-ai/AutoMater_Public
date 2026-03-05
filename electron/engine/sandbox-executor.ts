@@ -71,7 +71,8 @@ function isForbidden(command: string): boolean {
   return FORBIDDEN_PATTERNS.some(p => {
     try {
       return new RegExp(p, 'i').test(lower);
-    } catch { /* regex compile failed — fallback to includes() */
+    } catch (err) { /* regex compile failed — fallback to includes() */
+      log.debug('Catch at sandbox-executor.ts:74', { error: String(err) });
       return lower.includes(p);
     }
   });
@@ -128,8 +129,9 @@ function validateWorkspacePath(workspacePath: string): { ok: boolean; error?: st
     if (!stat.isDirectory()) {
       return { ok: false, error: `工作路径不是目录: ${resolved}`, resolved };
     }
-  } catch { /* silent: 路径stat失败 */
+  } catch (err) { /* silent: 路径stat失败 */
     // Directory doesn't exist — will be created by caller
+    log.debug('// Directory doesn\'t exist — will be created by caller', { error: String(err) });
   }
 
   // v5.5: Check for symlink escape
@@ -141,8 +143,9 @@ function validateWorkspacePath(workspacePath: string): { ok: boolean; error?: st
         return { ok: false, error: `工作路径是指向系统目录的符号链接: ${resolved} → ${real}`, resolved };
       }
     }
-  } catch { /* silent: 进程清理失败(可能已退出) */
+  } catch (err) { /* silent: 进程清理失败(可能已退出) */
     // realpathSync failed — directory may not exist yet, allow it
+    log.debug('// realpathSync failed — directory may not exist yet, allow it', { error: String(err) });
   }
 
   return { ok: true, resolved };
@@ -428,7 +431,7 @@ export function execInSandboxAsync(
       if (stdoutBuf.length > maxBuffer) stdoutBuf = stdoutBuf.slice(0, maxBuffer);
     }
     for (const cb of dataListeners) {
-      try { cb(text, 'stdout'); } catch { /* ignore listener errors */ }
+      try { cb(text, 'stdout'); } catch (err) { /* ignore listener errors */ }
     }
   });
 
@@ -440,7 +443,7 @@ export function execInSandboxAsync(
       if (stderrBuf.length > maxBuffer / 2) stderrBuf = stderrBuf.slice(0, maxBuffer / 2);
     }
     for (const cb of dataListeners) {
-      try { cb(text, 'stderr'); } catch { /* ignore listener errors */ }
+      try { cb(text, 'stderr'); } catch (err) { /* ignore listener errors */ }
     }
   });
 
@@ -449,7 +452,7 @@ export function execInSandboxAsync(
     killed = true;
     child.kill('SIGTERM');
     // 给进程 5s 收尾
-    setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already dead */ } }, 5000);
+    setTimeout(() => { try { child.kill('SIGKILL'); } catch (err) { /* already dead */ } }, 5000);
   }, timeout);
 
   // AbortSignal 集成
@@ -624,7 +627,7 @@ export async function waitForProcess(id: string, timeoutMs: number = 120_000): P
 /** 杀掉所有活跃子进程 (graceful shutdown) */
 export function killAllProcesses(): void {
   for (const [id, handle] of activeProcesses) {
-    try { handle.kill(); } catch { /* ignore */ }
+    try { handle.kill(); } catch (err) { /* ignore */ }
     activeProcesses.delete(id);
   }
 }

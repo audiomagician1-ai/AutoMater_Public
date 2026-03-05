@@ -88,7 +88,7 @@ const MINI_TOOLS: MiniTool[] = [
           : `grep -rn --include="*" -C 1 "${String(args.pattern || '').replace(/"/g, '\\"')}" . 2>/dev/null | head -40`;
         const { stdout } = await execAsync(cmd, { cwd: ctx.workspacePath, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 });
         return stdout.trim().slice(0, 3000) || '无匹配';
-      } catch { return '无匹配'; }
+      } catch (err) { return '无匹配'; }
     },
   },
   {
@@ -240,7 +240,7 @@ export async function runResearcher(
           toolArgs = typeof tc.function.arguments === 'string'
             ? JSON.parse(tc.function.arguments)
             : tc.function.arguments;
-        } catch { toolArgs = {}; }
+        } catch (err) { toolArgs = {}; }
 
         // done 工具 → 结束
         if (tc.function.name === 'done') {

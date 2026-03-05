@@ -482,7 +482,7 @@ export async function detectImplicitChanges(
 
   const featureList = existingFeatures.map(f => {
     let criteria = '';
-    try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch { /* silent: acceptance_criteria JSON parse */ }
+    try { criteria = JSON.parse(f.acceptance_criteria || '[]').join('; '); } catch (err) { /* silent: acceptance_criteria JSON parse */ }
     // D3: 优先使用 summary 减少 token，fallback 到 description
     const desc = f.summary || f.description;
     return `- **${f.id}** [${f.status}]: ${f.title}\n  摘要: ${desc}\n  验收: ${criteria}`;

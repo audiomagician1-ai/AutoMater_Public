@@ -22,7 +22,8 @@ const log = createLogger('safe-json');
 export function safeJsonParse<T>(text: string, fallback: T, label?: string): T {
   try {
     return JSON.parse(text) as T;
-  } catch {
+  } catch (err) {
+    log.debug('Catch at safe-json.ts:25', { error: String(err) });
     if (label) {
       log.warn(`${label}: invalid JSON, using fallback`, { preview: text?.slice(0, 200) });
     }

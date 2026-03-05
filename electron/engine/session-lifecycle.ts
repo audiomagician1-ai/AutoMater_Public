@@ -146,8 +146,9 @@ export function gcSessions(config: Partial<GCConfig> = {}): { archived: number; 
           if (fs.existsSync(session.backup_path)) {
             fs.unlinkSync(session.backup_path);
           }
-        } catch {
+        } catch (err) {
           /* non-critical: 文件可能已被手动删除 */
+          log.debug(': 文件可能已被手动删除', { error: String(err) });
         }
       }
 

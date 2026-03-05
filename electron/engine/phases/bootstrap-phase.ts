@@ -131,8 +131,9 @@ export async function phaseEnvironmentBootstrap(
       await execAsync('go mod download 2>&1', { cwd: workspacePath, encoding: 'utf-8', timeout: 120_000 });
       result.dependenciesInstalled = true;
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ✅ Go 模块下载成功' });
-    } catch {
+    } catch (err) {
       /* silent: go mod download可能失败,非阻塞 */
+      log.debug('go mod download可能失败,非阻塞', { error: String(err) });
       sendToUI(win, 'agent:log', { projectId, agentId: 'system', content: '  ⚠️ Go 模块下载失败 (非致命)' });
     }
   } else {

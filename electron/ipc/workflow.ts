@@ -87,7 +87,7 @@ const BUILTIN_PRESETS: Array<{
 
 function rowToPreset(row: WorkflowPresetRow): WorkflowPreset {
   let stages: WorkflowStage[] = [];
-  try { stages = JSON.parse(row.stages); } catch { stages = []; }
+  try { stages = JSON.parse(row.stages); } catch (err) { stages = []; }
   return {
     id: row.id,
     projectId: row.project_id,

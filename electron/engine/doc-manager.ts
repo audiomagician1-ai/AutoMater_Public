@@ -195,8 +195,9 @@ export function getDocVersion(workspacePath: string, type: DocType, id: string =
       if (entry.type === type && entry.id === docId && entry.version > maxVersion) {
         maxVersion = entry.version;
       }
-    } catch { /* silent: 文档版本解析失败,使用默认值 */
+    } catch (err) { /* silent: 文档版本解析失败,使用默认值 */
       // 跳过损坏的行
+      log.debug('// 跳过损坏的行', { error: String(err) });
     }
   }
   return maxVersion;

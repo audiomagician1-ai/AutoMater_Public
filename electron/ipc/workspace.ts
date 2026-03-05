@@ -189,7 +189,8 @@ export function setupWorkspaceHandlers() {
           }
         }
         return null;
-      } catch {
+      } catch (err) {
+        log.debug('Catch at workspace.ts:192', { error: String(err) });
         return null;
       }
     });

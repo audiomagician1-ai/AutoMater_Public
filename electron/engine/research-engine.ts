@@ -127,8 +127,9 @@ ${question}`;
       subQueries: (parsed.sub_queries || parsed.subQueries || [question]).slice(0, maxQueries),
       searchStrategy: parsed.strategy || '',
     };
-  } catch { /* silent: 搜索策略LLM解析失败 */
+  } catch (err) { /* silent: 搜索策略LLM解析失败 */
     // LLM 解析失败 → 用原始问题
+    _log.debug('// LLM 解析失败 → 用原始问题', { error: String(err) });
     decomposed = {
       subQueries: [question, `${question} best practices`, `${question} examples`].slice(0, maxQueries),
       searchStrategy: 'fallback: using original question',
@@ -197,8 +198,9 @@ async function deepExtract(
         extractions.set(r.url, read.content);
         onProgress?.('extraction', `✓ 已提取: ${r.title.slice(0, 50)}`);
       }
-    } catch { /* silent: 单页提取失败,继续下一页 */
+    } catch (err) { /* silent: 单页提取失败,继续下一页 */
       // 单个提取失败不影响整体
+      _log.debug('// 单个提取失败不影响整体', { error: String(err) });
     }
   });
 
@@ -281,7 +283,8 @@ ${resultsText.slice(0, 25000)}
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     };
-  } catch { /* silent: synthesis LLM call failed */
+  } catch (err) { /* silent: synthesis LLM call failed */
+    _log.debug('Catch at research-engine.ts:286', { error: String(err) });
     return {
       report: result.content,
       keyFindings: [],

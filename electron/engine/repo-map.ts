@@ -89,7 +89,7 @@ function collectEntries(
       const stat = fs.statSync(absPath);
       if (stat.size > 256 * 1024) continue; // skip files > 256KB
       content = fs.readFileSync(absPath, 'utf-8');
-    } catch { continue; }
+    } catch (err) { continue; }
 
     const ext = path.extname(file).toLowerCase();
     const symbols = extractSymbols(content, ext, maxSymbols);
@@ -111,7 +111,7 @@ function collectCodeFiles(
   if (!fs.existsSync(absDir)) return result;
 
   let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return result; }
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch (err) { return result; }
 
   for (const entry of entries) {
     if (result.length >= maxFiles) break;

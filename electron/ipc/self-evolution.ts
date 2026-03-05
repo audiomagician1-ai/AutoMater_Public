@@ -41,8 +41,9 @@ function pushEvolutionEvent(channel: string, data: unknown): void {
     if (win && !win.isDestroyed()) {
       win.webContents.send(channel, data);
     }
-  } catch {
+  } catch (err) {
     // Window might be closed
+    log.debug('// Window might be closed', { error: String(err) });
   }
 }
 
@@ -170,7 +171,8 @@ function loadArchive(): {
   try {
     const db = getDb();
     return db.prepare('SELECT * FROM evolution_archive ORDER BY generation DESC LIMIT 100').all() as never[];
-  } catch {
+  } catch (err) {
+    log.debug('Catch at self-evolution.ts:174', { error: String(err) });
     return [];
   }
 }
@@ -186,7 +188,8 @@ function loadMemories(): {
   try {
     const db = getDb();
     return db.prepare('SELECT * FROM evolution_memories ORDER BY id DESC LIMIT 200').all() as never[];
-  } catch {
+  } catch (err) {
+    log.debug('Catch at self-evolution.ts:191', { error: String(err) });
     return [];
   }
 }

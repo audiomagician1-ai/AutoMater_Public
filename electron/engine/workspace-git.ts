@@ -28,7 +28,8 @@ export function hasGit(): boolean {
   try {
     execSync('git --version', { stdio: 'ignore' }); // SYNC-OK: <1ms 存在性探测, 仅启动时调用一次
     return true;
-  } catch { /* silent: git not installed */
+  } catch (err) { /* silent: git not installed */
+    log.debug('Catch at workspace-git.ts:31', { error: String(err) });
     return false;
   }
 }

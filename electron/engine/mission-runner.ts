@@ -284,7 +284,7 @@ export async function runMission(
     try {
       const jsonMatch = planResult.content.match(/\[[\s\S]*\]/);
       if (jsonMatch) tasks = JSON.parse(jsonMatch[0]);
-    } catch { /* silent: plan JSON解析失败,后续会fallback */
+    } catch (err) { /* silent: plan JSON解析失败,后续会fallback */
       log.warn('Failed to parse planner output as JSON, creating single task');
       tasks = [{ title: '全量分析', input: planResult.content }];
     }
@@ -524,7 +524,7 @@ function extractPatches(
         if (patches.length > 0) return patches;
       }
     }
-  } catch { /* not valid JSON, try other formats */ }
+  } catch (err) { /* not valid JSON, try other formats */ }
 
   // Attempt 2: 解析 Markdown diff 代码块
   const diffBlocks = output.matchAll(/```diff\n([\s\S]*?)```/g);
@@ -577,7 +577,7 @@ function extractPatches(
         }
       }
     }
-  } catch { /* not valid JSON */ }
+  } catch (err) { /* not valid JSON */ }
 
   return patches;
 }
@@ -599,7 +599,7 @@ export function getMissionPatches(missionId: string): Array<{ file: string; diff
   if (fs.existsSync(patchesFile)) {
     try {
       return JSON.parse(fs.readFileSync(patchesFile, 'utf-8'));
-    } catch { /* corrupted file */ }
+    } catch (err) { /* corrupted file */ }
   }
   return [];
 }

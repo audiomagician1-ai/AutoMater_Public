@@ -177,7 +177,8 @@ function repairObject(
             result[key] = parsed;
             warnings.push(`${fullPath}: parsed string as JSON array`);
           }
-        } catch { /* JSON array parse failed — wrap as single-item array */
+        } catch (err) { /* JSON array parse failed — wrap as single-item array */
+          log.debug('Catch at output-parser.ts:180', { error: String(err) });
           result[key] = [value];
           warnings.push(`${fullPath}: wrapped string in array`);
         }
@@ -219,7 +220,8 @@ function repairObject(
 function tryDirectParse(raw: string): unknown | null {
   try {
     return JSON.parse(raw.trim());
-  } catch { /* not valid JSON */
+  } catch (err) { /* not valid JSON */
+    log.debug('Catch at output-parser.ts:223', { error: String(err) });
     return null;
   }
 }
@@ -233,7 +235,7 @@ function tryMarkdownStrip(raw: string): unknown | null {
     const inner = match[1].trim();
     try {
       return JSON.parse(inner);
-    } catch { /* try next block */ }
+    } catch (err) { /* try next block */ }
   }
   return null;
 }
@@ -274,7 +276,8 @@ function tryBracketMatch(raw: string, targetBracket: '[' | '{'): unknown | null 
         const candidate = raw.slice(startIdx, i + 1);
         try {
           return JSON.parse(candidate);
-        } catch { /* not valid JSON at this boundary */
+        } catch (err) { /* not valid JSON at this boundary */
+          log.debug('Catch at output-parser.ts:279', { error: String(err) });
           return null;
         }
       }
@@ -314,8 +317,9 @@ function tryLineScan(raw: string, targetBracket: '[' | '{'): unknown | null {
     if (depth <= 0 && collecting) {
       try {
         return JSON.parse(buffer.trim());
-      } catch { /* silent: 最终JSON解析尝试失败 */
+      } catch (err) { /* silent: 最终JSON解析尝试失败 */
         // reset and continue
+        log.debug('// reset and continue', { error: String(err) });
         collecting = false;
         buffer = '';
         depth = 0;

@@ -634,7 +634,8 @@ class SkillEvolutionManager {
       const p = getKnowledgePath(skillId);
       if (!fs.existsSync(p)) return null;
       return fs.readFileSync(p, 'utf-8');
-    } catch { /* silent: knowledge file read failed */
+    } catch (err) { /* silent: knowledge file read failed */
+      log.debug('Catch at skill-evolution.ts:637', { error: String(err) });
       return null;
     }
   }
@@ -716,7 +717,7 @@ class SkillEvolutionManager {
 
   private emit(event: SkillLifecycleEvent): void {
     for (const listener of this.listeners) {
-      try { listener(event); } catch { /* listener error shouldn't crash manager */ }
+      try { listener(event); } catch (err) { /* listener error shouldn't crash manager */ }
     }
   }
 
@@ -773,7 +774,7 @@ class SkillEvolutionManager {
         let score = maturityLevel(s.maturity) * 20 + s.usedCount * 2 + s.successRate * 30;
         if (skill) {
           for (const scorer of this.scorers) {
-            try { score += scorer.score(skill); } catch { /* ignore scorer error */ }
+            try { score += scorer.score(skill); } catch (err) { /* ignore scorer error */ }
           }
         }
         return { ...s, score };

@@ -291,8 +291,9 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
       if (content.length > remaining) content = content.slice(0, remaining) + '\n... [truncated]';
       keyFileContents += `\n### ${kf}\n\`\`\`\n${content}\n\`\`\`\n`;
       keyChars += content.length;
-    } catch {
+    } catch (err) {
       /* skip */
+      log.debug('Catch at project-importer.ts:294', { error: String(err) });
     }
   }
 
@@ -338,8 +339,9 @@ async function collectProjectSnapshot(workspacePath: string): Promise<{
           : lines;
       entrySnippets.push(`### ${ef} (first 200 lines)\n\`\`\`\n${snippet}\n\`\`\``);
       entryChars += snippet.length;
-    } catch {
+    } catch (err) {
       /* skip */
+      log.debug('Catch at project-importer.ts:342', { error: String(err) });
     }
   }
 
@@ -383,7 +385,8 @@ function quickFileStats(
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      log.debug('Catch at project-importer.ts:388', { error: String(err) });
       return;
     }
     for (const e of entries) {
@@ -401,8 +404,9 @@ function quickFileStats(
             const estimatedLines = Math.ceil(stat.size / 40);
             totalLOC += estimatedLines;
             locByExt[ext] = (locByExt[ext] || 0) + estimatedLines;
-          } catch {
+          } catch (err) {
             /* skip */
+            log.debug('Catch at project-importer.ts:407', { error: String(err) });
           }
         }
       }
@@ -466,8 +470,9 @@ async function phase0Scan(
       readmeExists = true;
       try {
         readmeLength = fs.statSync(fp).size;
-      } catch {
+      } catch (err) {
         /* skip */
+        log.debug('Catch at project-importer.ts:473', { error: String(err) });
       }
       break;
     }
@@ -771,7 +776,7 @@ function parseJsonRobust<T>(raw: string, label: string): T | null {
         .replace(/\n/g, '\\n') // escaped newlines in strings
         .replace(/\\n/g, '\n'); // revert — only fix those in values
       return JSON.parse(repaired);
-    } catch {
+    } catch (err) {
       log.error(`${label} JSON repair also failed`);
       return null;
     }
@@ -1002,8 +1007,9 @@ async function phase2Fuse(
     const debugPath = path.join(scan.workspacePath, ANALYSIS_DIR, 'fuse-step-a-raw.txt');
     fs.mkdirSync(path.dirname(debugPath), { recursive: true });
     fs.writeFileSync(debugPath, structResult.content, 'utf-8');
-  } catch {
+  } catch (err) {
     /* best effort */
+    log.debug('best effort', { error: String(err) });
   }
 
   // ── Step B: 文档生成 (ARCHITECTURE.md + known-issues.md) ──
@@ -1305,8 +1311,9 @@ export async function importProject(
       };
       try {
         if (fs.existsSync(statsPath)) cachedStats = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
-      } catch {
+      } catch (err) {
         /* silent: stats parse */
+        log.debug('stats parse', { error: String(err) });
       }
       return { skeleton, summaries, architectureMd, docsGenerated: 2, stats: cachedStats };
     } catch (err) {
@@ -1516,7 +1523,8 @@ function collectCodeFilesSync(
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(fullPath, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    log.debug('Catch at project-importer.ts:1526', { error: String(err) });
     return;
   }
   for (const entry of entries) {
@@ -1534,8 +1542,9 @@ function collectCodeFilesSync(
           const lines = content.split('\n').length;
           locByExt[ext] = (locByExt[ext] || 0) + lines;
           fileLOCMap.set(rel, lines);
-        } catch {
+        } catch (err) {
           /* skip */
+          log.debug('Catch at project-importer.ts:1545', { error: String(err) });
         }
       }
     }
@@ -1548,7 +1557,8 @@ function buildDirectoryTree(basePath: string, relative: string, depth: number, m
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(fullPath, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    log.debug('Catch at project-importer.ts:1560', { error: String(err) });
     return '';
   }
   const indent = '  '.repeat(depth);
@@ -1639,7 +1649,8 @@ function detectModules(
       : files.reduce((s, f) => {
           try {
             return s + fs.readFileSync(path.join(workspacePath, f), 'utf-8').split('\n').length;
-          } catch {
+          } catch (err) {
+            log.debug('Catch at project-importer.ts:1652', { error: String(err) });
             return s;
           }
         }, 0);

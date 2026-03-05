@@ -69,7 +69,8 @@ function loadIndex(): KnowledgeIndex {
   }
   try {
     return JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-  } catch { /* silent: cross-project DB read failed */
+  } catch (err) { /* silent: cross-project DB read failed */
+    log.debug('Catch at cross-project.ts:72', { error: String(err) });
     return { version: 1, entries: [] };
   }
 }
@@ -163,7 +164,7 @@ export function contributeKnowledge(
     for (const tag of tags) {
       const categoryPath = getCategoryFile(tag);
       let existing = '';
-      try { existing = fs.readFileSync(categoryPath, 'utf-8'); } catch { /* silent: file read fallback */ }
+      try { existing = fs.readFileSync(categoryPath, 'utf-8'); } catch (err) { /* silent: file read fallback */ }
       if (!existing) {
         existing = `# ${tag.charAt(0).toUpperCase() + tag.slice(1)} 经验库\n\n`;
       }

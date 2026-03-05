@@ -65,7 +65,8 @@ export function loadModuleGraph(workspacePath: string): ModuleGraph | null {
     if (!graph.nodes || !graph.edges) return null;
     moduleGraphCache = { path: fullPath, mtime: stat.mtimeMs, graph };
     return graph;
-  } catch { /* silent: 模块图缓存加载失败,重新构建 */
+  } catch (err) { /* silent: 模块图缓存加载失败,重新构建 */
+    log.debug('Catch at context-collector.ts:68', { error: String(err) });
     return null;
   }
 }
@@ -558,8 +559,9 @@ export async function collectDeveloperContext(
             .filter(f => !depSet.has(f) && f !== 'ARCHITECTURE.md');
           graphSource = 'code-graph';
         }
-      } catch { /* silent: code-graph构建失败,降级为文件扫描 */
+      } catch (err) { /* silent: code-graph构建失败,降级为文件扫描 */
         // Code Graph 失败时 fallback 到关键词匹配
+        log.debug('// Code Graph 失败时 fallback 到关键词匹配', { error: String(err) });
       }
     }
 
@@ -617,7 +619,7 @@ export async function collectDeveloperContext(
           content: crossCtx, truncated: false,
         });
       }
-    } catch { /* non-fatal */ }
+    } catch (err) { /* non-fatal */ }
   }
 
   // 构建完整上下文文本
@@ -1012,7 +1014,7 @@ export function collectBaselineContext(
         files: ['.automater/project-memory.md', `.automater/memories/${role}.md`],
       });
     }
-  } catch { /* 非致命 */ }
+  } catch (err) { /* 非致命 */ }
 
   // ─── 5. 文件目录树 ───
   try {
@@ -1024,7 +1026,7 @@ export function collectBaselineContext(
         content: treeText, truncated: false,
       });
     }
-  } catch { /* 非致命 */ }
+  } catch (err) { /* 非致命 */ }
 
   // ─── 6. Repository Map ───
   try {
@@ -1035,7 +1037,7 @@ export function collectBaselineContext(
         content: repoMap, truncated: false,
       });
     }
-  } catch { /* 非致命 */ }
+  } catch (err) { /* 非致命 */ }
 
   // 构建快照
   const contextText = sectionList.map(s => s.content).join('\n\n');

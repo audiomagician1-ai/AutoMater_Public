@@ -1196,7 +1196,8 @@ export async function reactDeveloperLoop(
             (() => {
               try {
                 return JSON.parse(tc.function.arguments as string);
-              } catch {
+              } catch (err) {
+                log.debug('Catch at react-loop.ts:1199', { error: String(err) });
                 return {};
               }
             })(),
@@ -1813,7 +1814,8 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         let args: Record<string, unknown>;
         try {
           args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-        } catch {
+        } catch (err) {
+          log.debug('Catch at react-loop.ts:1817', { error: String(err) });
           args = {};
         }
         return { id: tc.id, name: tc.function.name, arguments: args };
@@ -2010,7 +2012,8 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
             (() => {
               try {
                 return JSON.parse(tc.function.arguments as string);
-              } catch {
+              } catch (err) {
+                log.debug('Catch at react-loop.ts:2015', { error: String(err) });
                 return {};
               }
             })(),

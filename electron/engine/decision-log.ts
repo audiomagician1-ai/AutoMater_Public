@@ -80,7 +80,7 @@ function readEntries(workspacePath: string): DecisionEntry[] {
     if (!trimmed) continue;
     try {
       entries.push(JSON.parse(trimmed));
-    } catch { /* silent: 单行JSON解析失败,跳过损坏条目 */
+    } catch (err) { /* silent: 单行JSON解析失败,跳过损坏条目 */
       log.warn('Failed to parse decision log line:', { preview: trimmed.slice(0, 100) });
     }
   }
@@ -227,7 +227,7 @@ export function predictAffectedFiles(feature: FeatureRow): string[] {
     try {
       const files = JSON.parse(feature.affected_files);
       if (Array.isArray(files) && files.length > 0) return files;
-    } catch { /* fallback */ }
+    } catch (err) { /* fallback */ }
   }
 
   // Heuristic: use category + title to guess directory patterns

@@ -41,7 +41,8 @@ function loadMcpConfigs(): McpServerConfig[] {
   if (!row) return [];
   try {
     return JSON.parse(row.value);
-  } catch { /* silent: MCP config JSON parse failed */
+  } catch (err) { /* silent: MCP config JSON parse failed */
+    log.debug('Catch at mcp.ts:44', { error: String(err) });
     return [];
   }
 }

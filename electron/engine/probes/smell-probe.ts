@@ -36,7 +36,7 @@ export class SmellProbe extends BaseProbe {
         if (estimatedLines > 500) {
           largeFiles.push({ file, lines: estimatedLines });
         }
-      } catch { /* skip */ }
+      } catch (_err) { /* skip: stat failed for this file */ }
     }
     largeFiles.sort((a, b) => b.lines - a.lines);
     if (largeFiles.length > 0) {

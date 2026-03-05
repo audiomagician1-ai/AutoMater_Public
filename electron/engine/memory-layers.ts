@@ -57,7 +57,7 @@ export function buildHotMemory(workspacePath: string): MemoryLayer {
         `入口: ${(skeleton.entryFiles || []).slice(0, 3).join(', ')}`,
       ].join('\n'));
     }
-  } catch { /* skeleton 不存在，跳过 */ }
+  } catch (err) { /* skeleton 不存在，跳过 */ }
 
   // 2. 架构文档摘要（前 2000 字符）
   const archContent = readWorkspaceFile(workspacePath, '.automater/docs/ARCHITECTURE.md')
@@ -106,10 +106,10 @@ export function buildWarmMemory(workspacePath: string): MemoryLayer {
         try {
           const summary = JSON.parse(fs.readFileSync(path.join(modulesDir, file), 'utf-8'));
           parts.push(`- **${summary.moduleId}** (${summary.rootPath}): ${summary.responsibility}`);
-        } catch { /* skip corrupt */ }
+        } catch (err) { /* skip corrupt */ }
       }
     }
-  } catch { /* no analysis */ }
+  } catch (err) { /* no analysis */ }
 
   if (parts.length <= 1) {
     return { tier: 'warm', content: '', tokens: 0 };

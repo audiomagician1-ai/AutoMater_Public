@@ -102,7 +102,7 @@ export async function buildCodeGraph(workspacePath: string, maxFiles: number = 5
       const stat = fs.statSync(absPath);
       if (stat.size > 256 * 1024) continue; // 跳过大文件
       content = fs.readFileSync(absPath, 'utf-8');
-    } catch { continue; }
+    } catch (err) { continue; }
 
     const ext = path.extname(file).toLowerCase();
     const rawImports = parseImports(content, ext);
@@ -525,7 +525,7 @@ function collectFiles(workspacePath: string, relative: string, maxFiles: number)
   if (!fs.existsSync(absDir)) return result;
 
   let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return result; }
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch (err) { return result; }
 
   for (const entry of entries) {
     if (result.length >= maxFiles) break;

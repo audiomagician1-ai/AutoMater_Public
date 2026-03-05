@@ -168,8 +168,9 @@ function getExternalMcpTools(_role?: string): OpenAIFunctionTool[] {
         parameters: t.inputSchema,
       }),
     );
-  } catch {
+  } catch (err) {
     /* silent: MCP tools load failed */
+    log.debug('MCP tools load failed', { error: String(err) });
     return [];
   }
 }
@@ -181,8 +182,9 @@ function getExternalSkillTools(role?: string): OpenAIFunctionTool[] {
   try {
     const defs = role ? skillManager.getDefinitionsForRole(role) : skillManager.getAllDefinitions();
     return defs.map(toOpenAITool);
-  } catch {
+  } catch (err) {
     /* silent: skill definitions load failed */
+    log.debug('skill definitions load failed', { error: String(err) });
     return [];
   }
 }

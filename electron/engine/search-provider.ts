@@ -206,8 +206,9 @@ function parseGoogleHtml(html: string, max: number): SearchResult[] {
       if (qMatch) {
         try {
           href = decodeURIComponent(qMatch[1]);
-        } catch {
+        } catch (err) {
           /* keep */
+          log.debug('Catch at search-provider.ts:209', { error: String(err) });
         }
       }
 
@@ -696,8 +697,9 @@ function parseDuckDuckGoHtml(html: string, max: number): SearchResult[] {
     if (uddgMatch) {
       try {
         url = decodeURIComponent(uddgMatch[1]);
-      } catch {
+      } catch (err) {
         /* keep original */
+        log.debug('keep original', { error: String(err) });
       }
     }
 
@@ -1005,8 +1007,9 @@ export async function readUrl(url: string, maxLength: number = 20000): Promise<R
       }
       // 内容太短 (可能是 JS 渲染页面), 尝试 Jina fallback
     }
-  } catch {
+  } catch (err) {
     /* silent: 原生 fetch 失败, 尝试 Jina */
+    log.debug('原生 fetch 失败, 尝试 Jina', { error: String(err) });
   }
 
   // 策略 2: Jina Reader (如果配了 Key, 擅长处理 JS 渲染页面)
@@ -1033,8 +1036,9 @@ export async function readUrl(url: string, maxLength: number = 20000): Promise<R
           text.length > maxLength ? text.slice(0, maxLength) + `\n\n... [截断: 总长 ${text.length} 字符]` : text;
         return { success: true, content, title, length: text.length };
       }
-    } catch {
+    } catch (err) {
       /* Jina 也失败 */
+      log.debug('Jina 也失败', { error: String(err) });
     }
   }
 

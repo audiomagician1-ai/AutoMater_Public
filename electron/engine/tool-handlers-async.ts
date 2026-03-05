@@ -1372,7 +1372,8 @@ export async function executeToolAsyncRaw(call: ToolCall, ctx: ToolContext): Pro
         return { success: true, output: files.length > 0 ? files.join('\n') : '无匹配文件', action: 'search' };
       }
       return { success: true, output: '无匹配文件', action: 'search' };
-    } catch {
+    } catch (err) {
+      log.debug('Catch at tool-handlers-async.ts:1375', { error: String(err) });
       return { success: true, output: '无匹配文件', action: 'search' };
     }
   }

@@ -49,7 +49,9 @@ export function readGlobalMemory(): string {
   try {
     const p = getGlobalMemoryPath();
     if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
-  } catch { /* ignore */ }
+  } catch (err) {
+    log.debug('Global memory read failed', { error: String(err) });
+  }
   return '';
 }
 
@@ -57,7 +59,9 @@ export function readProjectMemory(workspacePath: string): string {
   try {
     const p = getProjectMemoryPath(workspacePath);
     if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
-  } catch { /* ignore */ }
+  } catch (err) {
+    log.debug('Project memory read failed', { error: String(err) });
+  }
   return '';
 }
 
@@ -65,7 +69,9 @@ export function readRoleMemory(workspacePath: string, role: string): string {
   try {
     const p = getRoleMemoryPath(workspacePath, role);
     if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
-  } catch { /* ignore */ }
+  } catch (err) {
+    log.debug('Role memory read failed', { error: String(err) });
+  }
   return '';
 }
 
@@ -268,10 +274,10 @@ export function readRecentDecisions(workspacePath: string, limit: number = 30): 
     const lines = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean);
     const decisions: SharedDecision[] = [];
     for (const line of lines.slice(-limit)) {
-      try { decisions.push(JSON.parse(line)); } catch { /* skip bad lines */ }
+      try { decisions.push(JSON.parse(line)); } catch (err) { /* skip bad lines */ }
     }
     return decisions;
-  } catch { return []; }
+  } catch (err) { return []; }
 }
 
 /** 格式化决策日志为上下文文本 */

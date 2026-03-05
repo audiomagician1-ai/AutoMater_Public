@@ -17,6 +17,8 @@ import { promisify as _promisify } from 'util';
 export const execAsync = _promisify(_execCb);
 export { getDb } from '../../db';
 export { createLogger, toErrorMessage } from '../logger';
+import { createLogger as _createLogger } from '../logger';
+const log = _createLogger('phase:shared');
 
 // ── Engine modules ──
 export { callLLM, calcCost, getSettings, sleep, validateModel, NonRetryableError } from '../llm-client';
@@ -115,7 +117,8 @@ export function safeJsonParse<T>(str: string | null | undefined, fallback: T): T
   if (!str) return fallback;
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (err) {
+    log.debug('Catch at shared.ts:118', { error: String(err) });
     return fallback;
   }
 }

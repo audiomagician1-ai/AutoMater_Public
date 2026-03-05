@@ -247,7 +247,8 @@ export async function setWorkerSecret(
       child.on('error', () => resolve(false));
       setTimeout(() => { child.kill(); resolve(false); }, 30_000);
     });
-  } catch { /* silent: 进程kill失败(可能已退出) */
+  } catch (err) { /* silent: 进程kill失败(可能已退出) */
+    log.debug('Catch at cloudflare-tools.ts:250', { error: String(err) });
     return false;
   }
 }

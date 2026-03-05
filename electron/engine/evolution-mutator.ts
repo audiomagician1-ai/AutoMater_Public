@@ -214,8 +214,9 @@ export class EvolutionMutator {
                 files.add(rel);
               }
             }
-          } catch {
+          } catch (err) {
             // Directory not readable
+            log.debug('// Directory not readable', { error: String(err) });
           }
         }
       } else {
@@ -249,7 +250,7 @@ export class EvolutionMutator {
         } else {
           contents.set(file, content);
         }
-      } catch {
+      } catch (err) {
         log.warn(`Cannot read target file: ${file}`);
       }
     }
@@ -360,7 +361,7 @@ export class EvolutionMutator {
       try {
         const parsed = JSON.parse(jsonMatch[1]);
         return this.normalizeProposal(parsed, strategy);
-      } catch {
+      } catch (err) {
         log.warn('JSON parse of mutation proposal failed, falling back to text extraction');
       }
     }

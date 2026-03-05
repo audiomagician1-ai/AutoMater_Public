@@ -30,8 +30,9 @@ export function sendToUI(win: BrowserWindow | null, channel: string, data: unkno
         const db = getDb();
         db.prepare('INSERT INTO agent_logs (project_id, agent_id, type, content) VALUES (?, ?, ?, ?)')
           .run(d.projectId as string, (d.agentId as string) || 'system', 'info', d.content as string);
-      } catch { /* silent: DB日志写入失败不应阻塞UI推送 */
+      } catch (err) { /* silent: DB日志写入失败不应阻塞UI推送 */
         // 静默: 可能在批量日志输出时偶发 busy
+        log.debug('// 静默: 可能在批量日志输出时偶发 busy', { error: String(err) });
       }
     }
   }

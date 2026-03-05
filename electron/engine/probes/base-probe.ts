@@ -51,7 +51,8 @@ export function readFileContent(
     const lines = content.split('\n');
     if (lines.length <= maxLines) return content;
     return lines.slice(0, maxLines).join('\n') + `\n... [truncated, ${lines.length - maxLines} more lines]`;
-  } catch { /* silent: 文件读取截断时异常,返回原内容 */
+  } catch (err) { /* silent: 文件读取截断时异常,返回原内容 */
+    log.debug('Catch at base-probe.ts:54', { error: String(err) });
     return '';
   }
 }
@@ -93,7 +94,7 @@ export function grepFiles(
           results.push({ file, lineNum: i + 1, line: lines[i].trim() });
         }
       }
-    } catch { /* skip */ }
+    } catch (err) { /* skip */ }
   }
 
   return results;
@@ -158,18 +159,18 @@ export function extractJSON<T>(text: string, label?: string): T | null {
   if (label) {
     const fenced = text.match(new RegExp('```' + label + '\\s*\\n([\\s\\S]*?)```'));
     if (fenced?.[1]) {
-      try { return JSON.parse(fenced[1].trim()) as T; } catch { /* fall through */ }
+      try { return JSON.parse(fenced[1].trim()) as T; } catch (err) { /* fall through */ }
     }
   }
   // Try generic json fence
   const jsonFence = text.match(/```json\s*\n([\s\S]*?)```/);
   if (jsonFence?.[1]) {
-    try { return JSON.parse(jsonFence[1].trim()) as T; } catch { /* fall through */ }
+    try { return JSON.parse(jsonFence[1].trim()) as T; } catch (err) { /* fall through */ }
   }
   // Try bare JSON object
   const bare = text.match(/\{[\s\S]*\}/);
   if (bare?.[0]) {
-    try { return JSON.parse(bare[0]) as T; } catch { /* fall through */ }
+    try { return JSON.parse(bare[0]) as T; } catch (err) { /* fall through */ }
   }
   return null;
 }

@@ -52,7 +52,8 @@ async function hasGit(): Promise<boolean> {
   try {
     await execAsync('git --version');
     return true;
-  } catch {
+  } catch (err) {
+    log.debug('Catch at git-provider.ts:55', { error: String(err) });
     return false;
   }
 }
@@ -111,8 +112,9 @@ export async function commit(config: GitProviderConfig, message: string): Promis
     try {
       await execAsync('git diff --cached --quiet', { cwd: workspacePath });
       return { success: false }; // no changes
-    } catch {
+    } catch (err) {
       /* has changes — proceed to commit */
+      log.debug('has changes — proceed to commit', { error: String(err) });
     }
 
     await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: workspacePath });
@@ -335,7 +337,8 @@ export async function getFileDiff(workspacePath: string, commitHash: string, fil
         maxBuffer: 2 * 1024 * 1024,
       });
       return stdout;
-    } catch {
+    } catch (err) {
+      log.debug('Catch at git-provider.ts:340', { error: String(err) });
       return '';
     }
   }
@@ -484,8 +487,9 @@ export async function getCurrentBranch(workspacePath: string): Promise<string> {
   try {
     const { stdout } = await execAsync('git branch --show-current', { cwd: workspacePath, encoding: 'utf-8' });
     return stdout.trim();
-  } catch {
+  } catch (err) {
     /* silent: git branch查询失败 */
+    log.debug('git branch查询失败', { error: String(err) });
     return '';
   }
 }
@@ -502,8 +506,9 @@ export async function listBranches(workspacePath: string): Promise<BranchInfo[]>
         name: line.replace(/^\*?\s+/, '').trim(),
         current: line.startsWith('*'),
       }));
-  } catch {
+  } catch (err) {
     /* silent: git branch解析失败 */
+    log.debug('git branch解析失败', { error: String(err) });
     return [];
   }
 }

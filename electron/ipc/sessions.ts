@@ -94,8 +94,9 @@ export function setupSessionHandlers() {
         await shell.openPath(dir);
         return { success: true };
       }
-    } catch {
+    } catch (err) {
       /* fallthrough */
+      log.debug('fallthrough', { error: String(err) });
     }
     return { success: false, error: 'No backup path found' };
   });

@@ -202,7 +202,8 @@ export class SafeGitOps {
     try {
       this.git(`rev-parse --verify ${branch}`);
       return true;
-    } catch {
+    } catch (err) {
+      log.debug('Catch at self-evolution-engine.ts:205', { error: String(err) });
       return false;
     }
   }
@@ -225,8 +226,9 @@ export class SafeGitOps {
   createSnapshot(tag: string): void {
     try {
       this.git(`tag -d ${tag}`);
-    } catch {
+    } catch (err) {
       // tag 不存在，忽略
+      log.debug('// tag 不存在，忽略', { error: String(err) });
     }
     this.git(`tag ${tag}`);
     log.info(`Created snapshot tag: ${tag}`);
@@ -242,8 +244,9 @@ export class SafeGitOps {
   deleteTag(tag: string): void {
     try {
       this.git(`tag -d ${tag}`);
-    } catch {
+    } catch (err) {
       // 已不存在
+      log.debug('// 已不存在', { error: String(err) });
     }
   }
 
@@ -257,8 +260,9 @@ export class SafeGitOps {
         log.info('Nothing to commit');
         return this.getHead();
       }
-    } catch {
+    } catch (err) {
       // status 失败，继续尝试提交
+      log.debug('// status 失败，继续尝试提交', { error: String(err) });
     }
     // --no-verify: 跳过 pre-commit hooks (lint-staged / typecheck)
     // 进化引擎自己通过 FitnessEvaluator 做更全面的质量评估
@@ -277,7 +281,8 @@ export class SafeGitOps {
     try {
       const output = this.git(`diff --name-only ${from} ${to}`);
       return output ? output.split('\n').filter(Boolean) : [];
-    } catch {
+    } catch (err) {
+      log.debug('Catch at self-evolution-engine.ts:284', { error: String(err) });
       return [];
     }
   }
@@ -293,7 +298,7 @@ export class SafeGitOps {
     try {
       this.git(`merge --ff-only ${branch}`);
       return true;
-    } catch {
+    } catch (err) {
       log.warn(`Fast-forward merge of ${branch} failed`);
       return false;
     }
@@ -304,12 +309,14 @@ export class SafeGitOps {
     try {
       this.git(`merge --no-verify --no-ff -m "${message.replace(/"/g, '\\"')}" ${branch}`);
       return true;
-    } catch {
+    } catch (err) {
       // 合并冲突 — 中止
+      log.debug('// 合并冲突 — 中止', { error: String(err) });
       try {
         this.git('merge --abort');
-      } catch {
+      } catch (err) {
         // 已经没有在合并中
+        log.debug('// 已经没有在合并中', { error: String(err) });
       }
       log.warn(`Merge of ${branch} failed (conflicts)`);
       return false;
@@ -320,8 +327,9 @@ export class SafeGitOps {
   deleteBranch(branch: string): void {
     try {
       this.git(`branch -D ${branch}`);
-    } catch {
+    } catch (err) {
       // 分支可能不存在
+      log.debug('// 分支可能不存在', { error: String(err) });
     }
   }
 
@@ -329,7 +337,8 @@ export class SafeGitOps {
   getDiffStat(from: string, to = 'HEAD'): string {
     try {
       return this.git(`diff --stat ${from} ${to}`);
-    } catch {
+    } catch (err) {
+      log.debug('Catch at self-evolution-engine.ts:340', { error: String(err) });
       return '(diff unavailable)';
     }
   }
@@ -487,8 +496,9 @@ export class FitnessEvaluator {
         passed = json.numPassedTests || 0;
         failed = json.numFailedTests || 0;
       }
-    } catch {
+    } catch (err) {
       // JSON 解析失败 — 尝试从文本输出解析
+      log.debug('// JSON 解析失败 — 尝试从文本输出解析', { error: String(err) });
       const testsMatch = combined.match(/(\d+)\s+passed/);
       const failedMatch = combined.match(/(\d+)\s+failed/);
       if (testsMatch) passed = parseInt(testsMatch[1], 10);
@@ -521,8 +531,9 @@ export class FitnessEvaluator {
         const coverageData = JSON.parse(fs.readFileSync(coveragePath, 'utf-8'));
         statementCoverage = coverageData?.total?.statements?.pct || 0;
       }
-    } catch {
+    } catch (err) {
       // 回退: 从输出中解析
+      log.debug('// 回退: 从输出中解析', { error: String(err) });
       const covMatch = combined.match(/Statements\s*:\s*([\d.]+)%/);
       if (covMatch) statementCoverage = parseFloat(covMatch[1]);
     }
@@ -706,7 +717,8 @@ export class SelfEvolutionEngine {
     // 2. Git 仓库
     try {
       this.gitOps.getCurrentBranch();
-    } catch {
+    } catch (err) {
+      log.debug('Catch at self-evolution-engine.ts:720', { error: String(err) });
       errors.push('Not a git repository');
       return { ok: false, errors };
     }
@@ -1000,7 +1012,8 @@ export class SelfEvolutionEngine {
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'package.json'), 'utf-8'));
       return pkg.version || 'unknown';
-    } catch {
+    } catch (err) {
+      log.debug('Catch at self-evolution-engine.ts:1015', { error: String(err) });
       return 'unknown';
     }
   }

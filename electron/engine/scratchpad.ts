@@ -290,12 +290,12 @@ export function getOtherWorkersChanges(
           lines.push(...recentDecisions.map(e => `- ${e.content}`));
         }
         sections.push(lines.join('\n'));
-      } catch { continue; }
+      } catch (err) { continue; }
     }
 
     if (sections.length === 0) return '';
     return `## 🔄 其他 Worker 的最新变更\n\n${sections.join('\n\n')}`;
-  } catch { return ''; }
+  } catch (err) { return ''; }
 }
 
 // ═══════════════════════════════════════
@@ -586,7 +586,8 @@ export function listScratchpads(workspacePath: string): string[] {
     return fs.readdirSync(dir)
       .filter(f => f.endsWith('.json'))
       .map(f => f.replace('.json', ''));
-  } catch {
+  } catch (err) {
+    log.debug('Catch at scratchpad.ts:589', { error: String(err) });
     return [];
   }
 }

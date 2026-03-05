@@ -161,8 +161,9 @@ async function sampleGpu(): Promise<{ usage: number; memoryPercent: number; name
         name: parts[2],
       };
     }
-  } catch {
+  } catch (err) {
     /* silent: 系统指标采集失败,返回空 */
+    log.debug('系统指标采集失败,返回空', { error: String(err) });
     // nvidia-smi 不存在或执行失败 — 保持上一次值或 -1
   }
   _gpuSamplePending = false;

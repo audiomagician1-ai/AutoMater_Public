@@ -409,7 +409,8 @@ export async function spawnSubAgent(
             toolArgs = typeof tc.function.arguments === 'string'
               ? JSON.parse(tc.function.arguments)
               : tc.function.arguments;
-          } catch { /* silent: tool args JSON parse failed */
+          } catch (err) { /* silent: tool args JSON parse failed */
+            log.debug('Catch at sub-agent-framework.ts:412', { error: String(err) });
             toolArgs = {};
           }
 

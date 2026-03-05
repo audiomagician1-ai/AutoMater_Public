@@ -335,8 +335,9 @@ export async function workerLoop(
               reactResult.totalOutputTokens,
               reactResult.totalCost,
             );
-          } catch {
+          } catch (err) {
             /* safe */
+            _log.debug('Catch at worker-phase.ts:338', { error: String(err) });
           }
         }
 
@@ -453,8 +454,9 @@ export async function workerLoop(
           if (featureSessionId) {
             try {
               updateSessionStats(featureSessionId, qaResult.inputTokens, qaResult.outputTokens, qaCost);
-            } catch {
+            } catch (err) {
               /* safe */
+              _log.debug('Catch at worker-phase.ts:457', { error: String(err) });
             }
           }
           db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(localQaId, projectId);
@@ -503,8 +505,9 @@ export async function workerLoop(
                   `${feature.id} 完成: ${(feature.title || '').slice(0, 80)} — ${reactResult.filesWritten.length} 文件, ${reactResult.iterations} 迭代`,
                   undefined,
                 );
-              } catch {
+              } catch (err) {
                 /* non-critical */
+                _log.debug('Catch at worker-phase.ts:508', { error: String(err) });
               }
             }
             broadcastFilesCreated(workerId, feature.id, reactResult.filesWritten);
@@ -548,8 +551,9 @@ export async function workerLoop(
                   `${feature.id} QA 驳回 (${qaResult.score}): ${(qaResult.summary || '').slice(0, 150)}`,
                   undefined,
                 );
-              } catch {
+              } catch (err) {
                 /* silent */
+                _log.debug('silent', { error: String(err) });
               }
             }
           }
@@ -589,8 +593,9 @@ export async function workerLoop(
       if (featureSessionId) {
         try {
           transitionSession(featureSessionId, 'suspended', 'Signal aborted');
-        } catch {
+        } catch (err) {
           /* safe */
+          _log.debug('Catch at worker-phase.ts:596', { error: String(err) });
         }
       }
       break;
@@ -610,8 +615,9 @@ export async function workerLoop(
           passed ? 'completed' : 'failed',
           passed ? undefined : lastErrorMsg || 'Feature not passed',
         );
-      } catch {
+      } catch (err) {
         /* session lifecycle non-critical */
+        _log.debug('session lifecycle', { error: String(err) });
       }
     }
 
@@ -670,8 +676,9 @@ export async function workerLoop(
       // v22.0: project-memory.md 容量自治 — 每完成一个 feature 检查并压缩
       try {
         compactProjectMemory(workspacePath, 8000);
-      } catch {
+      } catch (err) {
         /* silent */
+        _log.debug('silent', { error: String(err) });
       }
     }
 
@@ -744,8 +751,9 @@ export async function workerLoop(
     if (issueBranch && workspacePath && gitConfig.mode === 'github') {
       try {
         await switchBranch(gitConfig, 'main');
-      } catch {
+      } catch (err) {
         /* silent: 分支切回main失败不影响主流程 */
+        _log.debug('分支切回main失败不影响主流程', { error: String(err) });
         // Non-fatal: might not have a main branch
       }
     }

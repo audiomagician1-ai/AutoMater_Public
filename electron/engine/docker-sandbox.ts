@@ -104,7 +104,8 @@ export function isDockerAvailable(): boolean {
   try {
     execSync('docker info', { stdio: 'ignore', timeout: 5000 }); // SYNC-OK: 存在性探测, 结果已缓存至 _dockerAvailable
     _dockerAvailable = true;
-  } catch { /* silent: docker not available */
+  } catch (err) { /* silent: docker not available */
+    log.debug('Catch at docker-sandbox.ts:107', { error: String(err) });
     _dockerAvailable = false;
   }
   return _dockerAvailable;
@@ -264,7 +265,7 @@ export async function writeToContainer(
     await execAsync(`docker cp "${tmpFile}" ${containerId}:${containerPath}`, { timeout: 10_000 });
 
     // 清理临时文件
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(tmpFile); } catch (err) { /* ignore */ }
 
     return { success: true };
   } catch (err: unknown) {

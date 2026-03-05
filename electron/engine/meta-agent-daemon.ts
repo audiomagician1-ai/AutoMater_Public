@@ -182,7 +182,8 @@ function getTodayTokenUsage(): number {
       )
       .get() as { total: number };
     return row.total;
-  } catch {
+  } catch (err) {
+    log.debug('Catch at meta-agent-daemon.ts:185', { error: String(err) });
     return 0;
   }
 }
@@ -199,8 +200,9 @@ export function getDaemonConfig(): DaemonConfig {
   if (row) {
     try {
       return { ...DEFAULT_DAEMON_CONFIG, ...JSON.parse(row.value) };
-    } catch {
+    } catch (err) {
       /* fallback */
+      log.debug('fallback', { error: String(err) });
     }
   }
   return { ...DEFAULT_DAEMON_CONFIG };
@@ -566,7 +568,8 @@ export function startDaemon(): void {
     const db = getDb();
     const row = db.prepare('SELECT MAX(id) as maxId FROM events').get() as MaxIdRow | undefined;
     _lastEventCheckId = row?.maxId ?? 0;
-  } catch {
+  } catch (err) {
+    log.debug('Catch at meta-agent-daemon.ts:571', { error: String(err) });
     _lastEventCheckId = 0;
   }
 
@@ -626,7 +629,8 @@ export function getHeartbeatLogs(limit: number = 50): HeartbeatLog[] {
   try {
     const db = getDb();
     return db.prepare('SELECT * FROM meta_agent_heartbeat_log ORDER BY id DESC LIMIT ?').all(limit) as HeartbeatLog[];
-  } catch {
+  } catch (err) {
+    log.debug('Catch at meta-agent-daemon.ts:632', { error: String(err) });
     return [];
   }
 }

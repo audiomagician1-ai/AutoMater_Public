@@ -75,7 +75,8 @@ function hashFile(filePath: string): string {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
-  } catch { /* silent: 文件hash计算失败 */
+  } catch (err) { /* silent: 文件hash计算失败 */
+    log.debug('Catch at probe-cache.ts:78', { error: String(err) });
     return 'missing';
   }
 }
@@ -110,7 +111,8 @@ export function loadProbeCache(workspacePath: string): ProbeCache | null {
       return null;
     }
     return cache;
-  } catch { /* silent: 缓存加载失败,重新扫描 */
+  } catch (err) { /* silent: 缓存加载失败,重新扫描 */
+    log.debug('Catch at probe-cache.ts:114', { error: String(err) });
     return null;
   }
 }
@@ -315,8 +317,9 @@ export function detectIncrementalChanges(workspacePath: string): IncrementalResu
     if (untrackedOutput) {
       changedFiles.push(...untrackedOutput.split('\n').filter(Boolean));
     }
-  } catch { /* silent: git untracked文件列表失败 */
+  } catch (err) { /* silent: git untracked文件列表失败 */
     // Git not available — fall back to mtime comparison
+    log.debug('// Git not available — fall back to mtime comparison', { error: String(err) });
     log.debug('Git not available, falling back to mtime check');
     for (const probe of cache.probes) {
       for (const file of probe.files) {
@@ -325,8 +328,9 @@ export function detectIncrementalChanges(workspacePath: string): IncrementalResu
           if (stat.mtimeMs > cache.cachedAt) {
             changedFiles.push(file);
           }
-        } catch { /* silent: git diff解析失败 */
+        } catch (err) { /* silent: git diff解析失败 */
           // File deleted — counts as changed
+          log.debug('// File deleted — counts as changed', { error: String(err) });
           changedFiles.push(file);
         }
       }
@@ -404,7 +408,7 @@ export function applyUserCorrection(
   let graph: ModuleGraph;
   try {
     graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
-  } catch { /* silent: code-graph缓存读取失败 */
+  } catch (err) { /* silent: code-graph缓存读取失败 */
     log.warn('Cannot load module-graph for correction');
     return null;
   }

@@ -53,8 +53,9 @@ function loadSettings(): AppSettings {
   if (row) {
     try {
       settings = { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) };
-    } catch {
+    } catch (err) {
       /* silent: settings JSON parse — use defaults */
+      log.debug('settings JSON parse — use defaults', { error: String(err) });
       settings = { ...DEFAULT_SETTINGS };
     }
   } else {
@@ -68,8 +69,9 @@ function loadSettings(): AppSettings {
       settings.apiKey = encrypted;
     }
     // else: 保留 settings 表中的 apiKey (兼容未迁移数据)
-  } catch {
+  } catch (err) {
     /* silent: secret-manager 读取失败, 使用 settings 表明文 */
+    log.debug('secret-manager 读取失败, 使用 settings 表明文', { error: String(err) });
   }
 
   return settings;

@@ -141,8 +141,9 @@ export function calcCost(
     try {
       const settings = getSettings();
       if (settings?.modelPricing) userPricing = settings.modelPricing;
-    } catch {
+    } catch (err) {
       /* settings 不可用时降级 */
+      log.debug('settings 不可用时降级', { error: String(err) });
     }
   }
   const p = userPricing?.[model] ?? MODEL_PRICING[model] ?? FALLBACK_PRICING;
@@ -166,8 +167,9 @@ export function getSettings(): AppSettings | null {
     try {
       const encrypted = getSecret('__global__', 'llm_api_key');
       if (encrypted) settings.apiKey = encrypted;
-    } catch {
+    } catch (err) {
       /* silent: secret-manager 不可用时保留空 apiKey */
+      log.debug('secret-manager 不可用时保留空 apiKey', { error: String(err) });
     }
   }
 
@@ -271,8 +273,9 @@ function sanitizeMessagesForAPI(
           // 验证是否为合法 JSON
           try {
             JSON.parse(args);
-          } catch {
+          } catch (err) {
             // 不合法 → 尝试修复或替换为空对象
+            log.debug('// 不合法 → 尝试修复或替换为空对象', { error: String(err) });
             log.warn(`Sanitized invalid tool_call arguments for ${fn.name}: ${(args as string).slice(0, 100)}...`);
             args = '{}';
           }
@@ -417,8 +420,9 @@ async function _callOpenAI(
           inputTokens = json.usage.prompt_tokens ?? inputTokens;
           outputTokens = json.usage.completion_tokens ?? outputTokens;
         }
-      } catch {
+      } catch (err) {
         /* skip malformed SSE JSON chunk (common during streaming) */
+        log.debug('skip malformed SSE JSON chunk (common during streaming)', { error: String(err) });
       }
     }
   }
@@ -499,8 +503,9 @@ async function _callAnthropic(
         } else if (json.type === 'message_delta' && json.usage) {
           outputTokens = json.usage.output_tokens ?? 0;
         }
-      } catch {
+      } catch (err) {
         /* skip malformed Anthropic SSE chunk */
+        log.debug('skip malformed Anthropic SSE chunk', { error: String(err) });
       }
     }
   }
@@ -638,8 +643,9 @@ async function _callOpenAIWithTools(
           inputTokens = json.usage.prompt_tokens ?? inputTokens;
           outputTokens = json.usage.completion_tokens ?? outputTokens;
         }
-      } catch {
+      } catch (err) {
         /* skip malformed SSE JSON chunk */
+        log.debug('skip malformed SSE JSON chunk', { error: String(err) });
       }
     }
   }

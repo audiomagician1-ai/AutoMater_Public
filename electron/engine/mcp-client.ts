@@ -157,7 +157,9 @@ export class McpConnection {
       try {
         this.process.stdin?.end();
         this.process.kill('SIGTERM');
-      } catch { /* 进程可能已退出 */ }
+      } catch (err) {
+        log.debug('Process kill failed (may have already exited)', { error: String(err) });
+      }
       this.process = null;
     }
 
@@ -441,7 +443,7 @@ export class McpConnection {
           try {
             const json = JSON.parse(dataLine.slice(6)) as JsonRpcResponse;
             this.handleResponse(json);
-          } catch { /* silent: JSON-RPC响应解析失败,跳过损坏帧 */
+          } catch (err) { /* silent: JSON-RPC响应解析失败,跳过损坏帧 */
             log.debug('Failed to parse SSE data', { data: dataLine.slice(0, 200) });
           }
         }

@@ -703,8 +703,9 @@ export function getBackupStats(): {
         }
       };
       walkSize(backupRoot);
-    } catch {
+    } catch (err) {
       /* safe walk */
+      log.debug('Catch at conversation-backup.ts:706', { error: String(err) });
     }
   }
 
