@@ -105,14 +105,40 @@ export function getDevPhaseContext(projectId: string): DevPhaseContext | undefin
 // Core scheduling logic
 // ═══════════════════════════════════════
 
+/** v33.1: per-project 互斥锁 — 防止并发 scheduleProject 超额 spawn */
+const _scheduleLocks = new Map<string, Promise<{ spawned: number }>>();
+
 /**
  * 为指定项目执行一轮调度:
  * 扫描 todo feature → 匹配有空闲 slot 的 Agent → spawn session → 启动 workerLoop
  *
  * v32.0: 1-Session-1-Feature — 每个 spawn 的 workerLoop 只处理 scheduler 分配的单个 feature，
  * 完成后由事件驱动的 onFeatureCompleted 触发新一轮 scheduleProject
+ * v33.1: per-project 互斥锁，防止并发调用超额 spawn
  */
 export async function scheduleProject(projectId: string): Promise<{ spawned: number }> {
+  if (!_enabled) return { spawned: 0 };
+
+  // v33.1: 互斥 — 如果同项目已有 scheduleProject 在执行，排队等待后再重试
+  const existing = _scheduleLocks.get(projectId);
+  if (existing) {
+    await existing;
+    // 前一个调度可能已经填满了 slot，仍需重新检查
+  }
+
+  const promise = _scheduleProjectInner(projectId);
+  _scheduleLocks.set(projectId, promise);
+  try {
+    return await promise;
+  } finally {
+    // 只清除自己（如果后续调用已覆盖，则不删）
+    if (_scheduleLocks.get(projectId) === promise) {
+      _scheduleLocks.delete(projectId);
+    }
+  }
+}
+
+async function _scheduleProjectInner(projectId: string): Promise<{ spawned: number }> {
   if (!_enabled) return { spawned: 0 };
 
   const ctx = devPhaseContexts.get(projectId);

@@ -334,6 +334,7 @@ export async function workerLoop(
       }
     }
     let lastErrorMsg = '';
+    let featurePaused = false; // v33.1: 跟踪 feature 是否被标记为 paused
 
     for (let qaAttempt = 1; qaAttempt <= maxQARetries && !signal.aborted; qaAttempt++) {
       // v31.0: Feature Workpad — 记录开发阶段开始
@@ -449,6 +450,7 @@ export async function workerLoop(
               "UPDATE features SET status = 'paused', resume_snapshot = ? WHERE id = ? AND project_id = ?",
             ).run(snapshot, feature.id, projectId);
             sendToUI(win, 'feature:status', { projectId, featureId: feature.id, status: 'paused' });
+            featurePaused = true; // v33.1: 标记为 paused，防止后续被覆盖为 failed
             sendToUI(win, 'agent:log', {
               projectId,
               agentId: workerId,
@@ -735,6 +737,23 @@ export async function workerLoop(
         }
       }
       break;
+    }
+
+    // v33.1: paused feature 的状态已在 QA 循环中设置，不再覆盖
+    // paused feature 保留锁和 session（用户手动恢复时需要），只结束 session
+    if (featurePaused) {
+      if (featureSessionId) {
+        try {
+          transitionSession(featureSessionId, 'suspended', 'Feature paused (max_iterations)');
+        } catch {
+          /* session lifecycle non-critical */
+        }
+      }
+      db.prepare('UPDATE agents SET current_task = NULL WHERE id = ? AND project_id = ?').run(workerId, projectId);
+      featuresProcessed++;
+      featuresFailed++;
+      await sleep(500);
+      continue;
     }
 
     // Release claims and locks (use lockIdentity to match lockNextFeature)

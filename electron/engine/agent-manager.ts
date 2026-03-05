@@ -12,7 +12,6 @@ import type { MemberLLMConfig, AppSettings, FeatureRow } from './types';
 import { createLogger } from './logger';
 const log = createLogger('agent-manager');
 
-
 // ═══════════════════════════════════════
 // 运行中的编排器注册表（支持停止）
 // ═══════════════════════════════════════
@@ -60,7 +59,7 @@ export function stopOrchestrator(projectId: string) {
   const newStatus = row?.status === 'analyzing' ? 'analyzing' : 'paused';
   db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, projectId);
   db.prepare(
-    "UPDATE features SET status = 'todo', locked_by = NULL WHERE project_id = ? AND status IN ('in_progress', 'reviewing')",
+    "UPDATE features SET status = 'todo', locked_by = NULL, locked_at = NULL WHERE project_id = ? AND status IN ('in_progress', 'reviewing')",
   ).run(projectId);
   db.prepare("UPDATE agents SET status = 'idle', current_task = NULL WHERE project_id = ? AND status = 'working'").run(
     projectId,
@@ -316,7 +315,9 @@ export function lockNextFeature(projectId: string, workerId: string): FeatureRow
       let deps: string[] = [];
       try {
         deps = JSON.parse(f.depends_on || '[]');
-      } catch (err) { log.debug('Failed to parse feature.depends_on', { featureId: f.id, error: String(err) }); }
+      } catch (err) {
+        log.debug('Failed to parse feature.depends_on', { featureId: f.id, error: String(err) });
+      }
       const depsOk = deps.every((d: string) => passedSet.has(d));
       if (!depsOk) continue;
 
