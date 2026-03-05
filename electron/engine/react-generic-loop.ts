@@ -6,7 +6,7 @@
  */
 
 import { BrowserWindow } from 'electron';
-import { callLLMWithTools, calcCost, sleep, NonRetryableError } from './llm-client';
+import { callLLMWithTools, calcCost, sleep, NonRetryableError, type ContentChunkCallback } from './llm-client';
 import { sendToUI, addLog } from './ui-bridge';
 import { updateAgentStats } from './agent-manager';
 import type { AppSettings, LLMMessage, LLMToolCall } from './types';
@@ -45,12 +45,7 @@ import {
   checkContextBudget,
   compressToolOutputs,
 } from './react-resilience';
-import {
-  recordFileChange,
-  recordToolError,
-  maskOldToolOutputs,
-  buildScratchpadAnchor,
-} from './scratchpad';
+import { recordFileChange, recordToolError, maskOldToolOutputs, buildScratchpadAnchor } from './scratchpad';
 import { summarizeToolResult } from './tool-result-summarizer';
 import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
@@ -222,7 +217,15 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         });
       }
 
-      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384);
+      // v33.0: 流式推送思维链 — 让用户实时看到 PM/Architect 等角色的思考过程
+      sendToUI(win, 'agent:stream-start', { projectId, agentId, label: `[${iter}] ${role} 思考中` });
+      const onContentChunk: ContentChunkCallback = (chunk, type) => {
+        if (type === 'reasoning' || type === 'content') {
+          sendToUI(win, 'agent:stream', { projectId, agentId, chunk });
+        }
+      };
+      const result = await callLLMWithTools(settings, model, messages, tools, signal, 16384, onContentChunk);
+      sendToUI(win, 'agent:stream-end', { projectId, agentId });
       const cost = calcCost(model, result.inputTokens, result.outputTokens);
       totalCost += cost;
       totalIn += result.inputTokens;
