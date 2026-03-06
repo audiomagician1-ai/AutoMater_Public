@@ -240,6 +240,19 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
     return unsub;
   }, [chatKey, addMessage]);
 
+  // v31.0: 实时接收管家思考过程，替换"思考中..."占位符
+  useEffect(() => {
+    const unsub = window.automater.on(
+      'meta-agent:reply-chunk',
+      (data: { projectId: string; content: string; type: string; iteration: number }) => {
+        if (!data.content) return;
+        const prefix = data.type === 'thinking' ? '💭 ' : '';
+        updateLastAssistant(chatKey, prefix + data.content);
+      },
+    );
+    return unsub;
+  }, [chatKey, updateLastAssistant]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, metaAgentWorkMsgs.length]);

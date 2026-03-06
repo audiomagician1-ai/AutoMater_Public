@@ -492,6 +492,16 @@ export function setupMetaAgentHandlers() {
 
           const msg = result.message;
 
+          // v31.0: 实时推送思考内容到对话面板（替换"思考中..."占位符）
+          if (msg.content) {
+            sendToUI(win, 'meta-agent:reply-chunk', {
+              projectId: projectId || 'system',
+              content: msg.content,
+              type: 'thinking',
+              iteration: iter,
+            });
+          }
+
           // 推送思考日志
           if (msg.content) {
             const shortThought = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
@@ -615,7 +625,12 @@ export function setupMetaAgentHandlers() {
 
             // ── v34.0: Repair tools (健康诊断/修复管理) ──
             if (tc.function.name.startsWith('repair_')) {
-              const repairResult = await executeRepairAdminTool(tc.function.name, toolArgs, projectId ?? undefined, win);
+              const repairResult = await executeRepairAdminTool(
+                tc.function.name,
+                toolArgs,
+                projectId ?? undefined,
+                win,
+              );
               if (repairResult) {
                 sendToUI(win, 'agent:log', {
                   projectId: projectId || 'system',
@@ -696,6 +711,25 @@ export function setupMetaAgentHandlers() {
               agentId,
               content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
             });
+
+            // v31.0: 推送工具调用摘要到对话面板
+            if (tc.function.name === 'think') {
+              // think 工具: 推送思考内容
+              sendToUI(win, 'meta-agent:reply-chunk', {
+                projectId: projectId || 'system',
+                content: toolArgs.thought || '',
+                type: 'thinking',
+                iteration: iter,
+              });
+            } else {
+              // 其他工具: 推送执行摘要
+              sendToUI(win, 'meta-agent:reply-chunk', {
+                projectId: projectId || 'system',
+                content: `🔧 ${tc.function.name} → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 80)}`,
+                type: 'tool',
+                iteration: iter,
+              });
+            }
 
             messages.push({
               role: 'tool',

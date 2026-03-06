@@ -389,6 +389,19 @@ export function MetaAgentPanel() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, metaAgentWorkMsgs.length]);
 
+  // v31.0: 实时接收管家思考过程，替换"思考中..."占位符
+  useEffect(() => {
+    const unsub = window.automater.on(
+      'meta-agent:reply-chunk',
+      (data: { projectId: string; content: string; type: string; iteration: number }) => {
+        if (!data.content) return;
+        const prefix = data.type === 'thinking' ? '💭 ' : '';
+        updateLastAssistant(chatKey, prefix + data.content);
+      },
+    );
+    return unsub;
+  }, [chatKey, updateLastAssistant]);
+
   // 切换项目时恢复最近活跃会话
   useEffect(() => {
     (async () => {
