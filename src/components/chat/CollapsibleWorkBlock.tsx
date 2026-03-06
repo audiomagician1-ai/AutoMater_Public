@@ -1,7 +1,7 @@
-/**
+﻿/**
  * CollapsibleWorkBlock — 工作过程折叠区
  *
- * 借鉴 Echo Agent ChatView.vue 的 Compact/Full 双模式设计:
+ * Compact/Full 双模式设计:
  *   - 折叠状态: "工作过程 · N 步 💭M 🔧K" 单行摘要
  *   - 展开状态: 渲染所有 InlineWorkMessage
  *

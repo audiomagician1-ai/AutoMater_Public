@@ -1,7 +1,7 @@
-/**
+﻿/**
  * BashBlock — Echo 风格终端命令展示
  *
- * 借鉴 Echo Agent ToolCallMessage.vue 的 TerminalBlock 设计:
+ * TerminalBlock 设计:
  *   - 深色终端背景
  *   - $ command 高亮
  *   - 展开时显示完整输出

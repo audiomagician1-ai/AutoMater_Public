@@ -1,8 +1,8 @@
-/**
+﻿/**
  * InlineWorkMessage — 紧凑内联工作消息卡片
  *
  * 用于 MetaAgentPanel / WishPage 中嵌入 assistant 消息下方。
- * 借鉴 Echo Agent CompactMessage.vue 的工具调用两行摘要设计,
+ * 工具调用两行摘要设计,
  * 同时集成分类渲染 (DiffBlock / BashBlock / GenericToolCard)。
  *
  * v31.0: 从 MetaAgentPanel + WishPage 的重复实现合并为单一共享组件,

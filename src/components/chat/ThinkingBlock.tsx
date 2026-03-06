@@ -1,7 +1,7 @@
-/**
+﻿/**
  * ThinkingBlock — Echo 风格思维链: 💡 首行缩略 ▾
  *
- * 借鉴 Echo Agent CompactMessage.vue 的 reasoning 折叠设计:
+ * reasoning 折叠设计:
  *   - 收起时: 💡 + 首行预览 + ▾
  *   - 展开时: reasoning (蓝色左边框) + 正文 (Markdown)
  *

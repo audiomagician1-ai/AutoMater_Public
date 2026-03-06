@@ -1,7 +1,7 @@
-/**
+﻿/**
  * UserMessageNav — 用户消息快速跳转导航条
  *
- * 借鉴 Echo Agent ChatView.vue 的 UserMessageNavigator 设计:
+ * UserMessageNavigator 设计:
  *   - 固定在消息列表左侧
  *   - 每个用户消息对应一个小圆点
  *   - 点击跳转到对应消息位置

@@ -1,7 +1,7 @@
-/**
+﻿/**
  * ToolCallCard — 根据工具类型自动选择渲染器
  *
- * 借鉴 Echo Agent ToolCallMessage.vue 的分类渲染设计:
+ * 分类渲染设计:
  *   - edit_file / write_file → DiffBlock
  *   - run_command / run_test → BashBlock
  *   - 其他 → GenericToolCard

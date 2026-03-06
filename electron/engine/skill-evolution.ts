@@ -1,7 +1,7 @@
 ﻿/**
  * Skill Evolution Engine — Agent 技能自主习得与进化
  *
- * 设计哲学 (参照 echo agent-memory 系统):
+ * 设计哲学 :
  *   - 技能从经验中"结晶"：Agent 在开发过程中反复遇到的模式 → 提炼为可复用技能
  *   - 三级成熟度: draft → proven → stable，只有被验证有效的技能才会沉淀
  *   - 自动触发匹配：新任务开始时，扫描已有技能的 trigger 描述，自动注入相关技能
@@ -70,12 +70,15 @@ export interface SkillExecutionConfig {
 /** 技能参数 Schema (JSON Schema) */
 export interface SkillParameterSchema {
   type: 'object';
-  properties: Record<string, {
-    type: string;
-    description: string;
-    default?: unknown;
-    enum?: string[];
-  }>;
+  properties: Record<
+    string,
+    {
+      type: string;
+      description: string;
+      default?: unknown;
+      enum?: string[];
+    }
+  >;
   required?: string[];
 }
 
@@ -83,7 +86,7 @@ export interface SkillParameterSchema {
 export interface SkillVersion {
   version: number;
   timestamp: string;
-  author: string;       // 'agent:{agentId}' | 'user' | 'system'
+  author: string; // 'agent:{agentId}' | 'user' | 'system'
   changeNote: string;
   /** 快照的执行配置 (可选, 仅在大变更时保存) */
   executionSnapshot?: SkillExecutionConfig;
@@ -160,7 +163,7 @@ export interface SkillIndexEntry {
 /** 技能搜索匹配结果 */
 export interface SkillMatch {
   skill: SkillIndexEntry;
-  relevance: number;   // 0-100
+  relevance: number; // 0-100
   matchReason: string;
 }
 
@@ -262,7 +265,7 @@ class SkillEvolutionManager {
       const raw = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       this.index = raw.skills || [];
     } catch (err: unknown) {
-      log.warn('Failed to load skill index, resetting', { error: (err instanceof Error ? err.message : String(err)) });
+      log.warn('Failed to load skill index, resetting', { error: err instanceof Error ? err.message : String(err) });
       this.index = [];
     }
   }
@@ -270,12 +273,20 @@ class SkillEvolutionManager {
   private saveIndex(): void {
     const indexPath = getIndexPath();
     fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-    fs.writeFileSync(indexPath, JSON.stringify({
-      _doc: 'AutoMater 进化技能索引 — 自动生成, 请勿手动编辑',
-      _version: 1,
-      updatedAt: new Date().toISOString(),
-      skills: this.index,
-    }, null, 2), 'utf-8');
+    fs.writeFileSync(
+      indexPath,
+      JSON.stringify(
+        {
+          _doc: 'AutoMater 进化技能索引 — 自动生成, 请勿手动编辑',
+          _version: 1,
+          updatedAt: new Date().toISOString(),
+          skills: this.index,
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
   }
 
   // ── 技能 CRUD ──
@@ -319,12 +330,14 @@ class SkillEvolutionManager {
       parameters: input.parameters || { type: 'object', properties: {}, required: [] },
       execution: input.execution,
       knowledgePath: input.knowledge ? `${id}.md` : null,
-      history: [{
-        version: 1,
-        timestamp: now,
-        author: input.source.agentId ? `agent:${input.source.agentId}` : 'system',
-        changeNote: 'Initial acquisition',
-      }],
+      history: [
+        {
+          version: 1,
+          timestamp: now,
+          author: input.source.agentId ? `agent:${input.source.agentId}` : 'system',
+          changeNote: 'Initial acquisition',
+        },
+      ],
       stats: {
         usedCount: 0,
         successCount: 0,
@@ -370,15 +383,18 @@ class SkillEvolutionManager {
    * 改进已有技能 — 更新执行配置或知识文档。
    * 自动递增版本号。
    */
-  improve(skillId: string, updates: {
-    execution?: Partial<SkillExecutionConfig>;
-    description?: string;
-    trigger?: string;
-    tags?: string[];
-    knowledge?: string;
-    changeNote: string;
-    author: string;
-  }): EvolvableSkill | null {
+  improve(
+    skillId: string,
+    updates: {
+      execution?: Partial<SkillExecutionConfig>;
+      description?: string;
+      trigger?: string;
+      tags?: string[];
+      knowledge?: string;
+      changeNote: string;
+      author: string;
+    },
+  ): EvolvableSkill | null {
     this.ensureInitialized();
 
     const skill = this.loadSkill(skillId);
@@ -530,11 +546,14 @@ class SkillEvolutionManager {
    * 使用关键词匹配 trigger + tags + name + description。
    * 返回按相关度排序的匹配列表。
    */
-  searchSkills(query: string, options?: {
-    maxResults?: number;
-    minMaturity?: SkillMaturity;
-    tags?: string[];
-  }): SkillMatch[] {
+  searchSkills(
+    query: string,
+    options?: {
+      maxResults?: number;
+      minMaturity?: SkillMaturity;
+      tags?: string[];
+    },
+  ): SkillMatch[] {
     this.ensureInitialized();
 
     const maxResults = options?.maxResults ?? 5;
@@ -623,7 +642,7 @@ class SkillEvolutionManager {
       if (!fs.existsSync(p)) return null;
       return JSON.parse(fs.readFileSync(p, 'utf-8'));
     } catch (err: unknown) {
-      log.warn('Failed to load skill', { id: skillId, error: (err instanceof Error ? err.message : String(err)) });
+      log.warn('Failed to load skill', { id: skillId, error: err instanceof Error ? err.message : String(err) });
       return null;
     }
   }
@@ -634,7 +653,8 @@ class SkillEvolutionManager {
       const p = getKnowledgePath(skillId);
       if (!fs.existsSync(p)) return null;
       return fs.readFileSync(p, 'utf-8');
-    } catch (err) { /* silent: knowledge file read failed */
+    } catch (err) {
+      /* silent: knowledge file read failed */
       log.debug('Catch at skill-evolution.ts:637', { error: String(err) });
       return null;
     }
@@ -680,9 +700,7 @@ class SkillEvolutionManager {
   // ── 索引同步 ──
 
   private syncIndex(skill: EvolvableSkill): void {
-    const successRate = skill.stats.usedCount > 0
-      ? skill.stats.successCount / skill.stats.usedCount
-      : 0;
+    const successRate = skill.stats.usedCount > 0 ? skill.stats.successCount / skill.stats.usedCount : 0;
 
     const idx = this.index.findIndex(e => e.id === skill.id);
     const entry: SkillIndexEntry = {
@@ -717,7 +735,11 @@ class SkillEvolutionManager {
 
   private emit(event: SkillLifecycleEvent): void {
     for (const listener of this.listeners) {
-      try { listener(event); } catch (err) { /* listener error shouldn't crash manager */ }
+      try {
+        listener(event);
+      } catch (err) {
+        /* listener error shouldn't crash manager */
+      }
     }
   }
 
@@ -757,7 +779,7 @@ class SkillEvolutionManager {
           }
         }
       } catch (err: unknown) {
-        errors.push(`${provider.name}: ${(err instanceof Error ? err.message : String(err))}`);
+        errors.push(`${provider.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -774,7 +796,11 @@ class SkillEvolutionManager {
         let score = maturityLevel(s.maturity) * 20 + s.usedCount * 2 + s.successRate * 30;
         if (skill) {
           for (const scorer of this.scorers) {
-            try { score += scorer.score(skill); } catch (err) { /* ignore scorer error */ }
+            try {
+              score += scorer.score(skill);
+            } catch (err) {
+              /* ignore scorer error */
+            }
           }
         }
         return { ...s, score };
@@ -785,10 +811,14 @@ class SkillEvolutionManager {
 
 function maturityLevel(m: SkillMaturity): number {
   switch (m) {
-    case 'deprecated': return 0;
-    case 'draft': return 1;
-    case 'proven': return 2;
-    case 'stable': return 3;
+    case 'deprecated':
+      return 0;
+    case 'draft':
+      return 1;
+    case 'proven':
+      return 2;
+    case 'stable':
+      return 3;
   }
 }
 
@@ -804,10 +834,7 @@ function maturityLevel(m: SkillMaturity): number {
  * @param maxSkills - 最多加载几个技能 (默认 2, 防 token 膨胀)
  * @returns 可直接注入 system prompt 的技能上下文文本
  */
-export function buildSkillContext(
-  taskDescription: string,
-  maxSkills: number = 2,
-): string {
+export function buildSkillContext(taskDescription: string, maxSkills: number = 2): string {
   const matches = skillEvolution.searchSkills(taskDescription, {
     maxResults: maxSkills,
     minMaturity: 'draft',

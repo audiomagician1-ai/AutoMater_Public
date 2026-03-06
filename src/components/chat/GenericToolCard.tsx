@@ -1,7 +1,7 @@
-/**
+﻿/**
  * GenericToolCard — 通用工具调用卡片 (read_file / search_files 等)
  *
- * 借鉴 Echo Agent ToolCallMessage.vue 的 generic 折叠面板设计:
+ * generic 折叠面板设计:
  *   - 折叠: 工具名 + ✓/✗ + 参数预览
  *   - 展开: 完整参数 JSON + 执行输出
  *

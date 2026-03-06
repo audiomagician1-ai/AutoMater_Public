@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Chat Components — 共享聊天 UI 组件库
  *
- * 借鉴 Echo Agent 的 ChatMessage/CompactMessage/ToolCallMessage 三组件设计:
+ * ChatMessage/CompactMessage/ToolCallMessage 三组件设计:
  *   - 分类渲染: ThinkingBlock / DiffBlock / BashBlock / GenericToolCard / OutputBlock
  *   - Compact/Full 双模式: CollapsibleWorkBlock (折叠/展开工作过程)
  *   - InlineWorkMessage: 紧凑的内联工作消息卡片

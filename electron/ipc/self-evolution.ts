@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Self-Evolution IPC Handlers — 自我进化 IPC 接口
  *
  * 提供 Electron IPC 接口让渲染进程 (管家 UI / 进化仪表板) 触发和监控自我进化。
@@ -78,7 +78,7 @@ function resolveSourceRoot(): string {
   // 2. 已知开发路径 (开发模式)
   const knownPaths = [
     path.resolve(__dirname, '..', '..'), // electron/ipc → 项目根
-    'D:\\EchoAgent\\projects\\AgentForge',
+    'D:\\\\projects\\\\AgentForge',
   ];
 
   for (const p of knownPaths) {

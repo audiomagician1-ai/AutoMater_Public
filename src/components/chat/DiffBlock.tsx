@@ -1,7 +1,7 @@
-/**
+﻿/**
  * DiffBlock — Echo 风格文件 diff 展示
  *
- * 借鉴 Echo Agent ToolCallMessage.vue 的 DiffBlock 设计:
+ * DiffBlock 设计:
  *   - Header: tool name + file path + 行数统计 (+N -N) + ✓/✗
  *   - 展开: 红删绿增 diff 内容
  *
