@@ -138,6 +138,11 @@ export function ensureEventTable(): void {
 
 let _insertStmt: SqliteStatement | null = null;
 
+/** 清除缓存的 prepared statement — 测试用 (resetTestDb 后调用) */
+export function resetEventStoreCache(): void {
+  _insertStmt = null;
+}
+
 function getInsertStmt() {
   if (!_insertStmt) {
     const db = getDb();

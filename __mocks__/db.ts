@@ -19,7 +19,19 @@ function ensureDb(): any {
   if (db) return db;
   if (initError) throw initError;
   try {
-    Database = require('better-sqlite3');
+    // Try multiple loading strategies for better-sqlite3 native module
+    if (!Database) {
+      try {
+        Database = require('better-sqlite3');
+      } catch {
+        // In vitest ESM context, require may fail — try createRequire
+        const { createRequire } = require('module');
+        const _require = createRequire(
+          typeof __filename !== 'undefined' ? __filename : process.cwd() + '/db-mock.js'
+        );
+        Database = _require('better-sqlite3');
+      }
+    }
     db = new Database(':memory:');
     return db;
   } catch (err: any) {

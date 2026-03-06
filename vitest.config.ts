@@ -8,11 +8,12 @@ export default defineConfig({
     pool: 'forks',
     include: ['electron/**/*.test.ts', 'src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['node_modules', 'dist', 'dist-electron', 'release'],
-    alias: {
+    alias: [
       // Mock heavy native/Electron modules
-      electron: path.resolve(__dirname, '__mocks__/electron.ts'),
-      '../db': path.resolve(__dirname, '__mocks__/db.ts'),
-    },
+      { find: 'electron', replacement: path.resolve(__dirname, '__mocks__/electron.ts') },
+      // Single regex alias so ALL import depths (../db, ../../db, etc.) share ONE module instance
+      { find: /^(\.\.\/)+db$/, replacement: path.resolve(__dirname, '__mocks__/db.ts') },
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'json-summary', 'html'],

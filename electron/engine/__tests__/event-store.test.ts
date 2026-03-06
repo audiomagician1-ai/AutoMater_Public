@@ -28,6 +28,7 @@ import {
   getRecentEvents,
   getProjectEventStats,
   exportEventsNDJSON,
+  resetEventStoreCache,
   type AgentEvent,
   type EventType,
 } from '../event-store';
@@ -45,6 +46,7 @@ const describeDb = hasRealSqlite ? describe : describe.skip;
 describeDb('event-store (in-memory SQLite)', () => {
   beforeEach(() => {
     resetTestDb();
+    resetEventStoreCache(); // Clear cached prepared statements after DB reset
     ensureEventTable();
   });
 
