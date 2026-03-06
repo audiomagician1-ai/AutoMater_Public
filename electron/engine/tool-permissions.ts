@@ -429,6 +429,12 @@ const ROLE_TOOLS: Record<AgentRole, string[]> = {
     'admin_evolution_auto_run',
     'list_conversation_sessions',
     'read_conversation_history', // v27.0: 对话历史浏览
+    // v34.0: 健康诊断 + 自动修复管理工具
+    'repair_diagnostics',
+    'repair_history',
+    'repair_stats',
+    'repair_run_l1',
+    'repair_trigger_l3',
   ],
 };
 

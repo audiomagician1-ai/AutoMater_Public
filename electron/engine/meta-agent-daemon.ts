@@ -26,6 +26,14 @@ import {
   disableScheduler,
 } from './session-scheduler';
 import { cleanupZombieLocks, gcSessions } from './session-lifecycle';
+import {
+  runDiagnostics,
+  recordFeatureFailure,
+  recordFeatureSuccess,
+  recordQAReject,
+  formatAnomalySummary,
+} from './health-diagnostics';
+import { handleAnomalies, ensureRemediationTable } from './auto-remediation';
 
 const log = createLogger('meta-daemon');
 
@@ -470,6 +478,17 @@ function checkEventHooks(): void {
     const triggers: string[] = [];
 
     for (const evt of events) {
+      // v34.0: 实时更新 health tracking 计数器
+      if (evt.type === 'feature:failed' || evt.type === 'feature:passed' ||
+          evt.type === 'feature:qa_passed' || evt.type === 'feature:qa:result' ||
+          evt.type === 'schedule:feature_failed') {
+        const data = safeJsonParse<Record<string, string>>(evt.data || '{}', {}, 'hook-health');
+        const featureId = data.featureId || data.feature_id || '';
+        if (featureId) {
+          updateFeatureHealth(evt.type, evt.project_id, featureId);
+        }
+      }
+
       if (config.hooks.onFeatureFailed && evt.type === 'feature:failed') {
         const data = safeJsonParse<Record<string, string>>(evt.data || '{}', {}, 'hook-feature-failed');
         triggers.push(`Feature 失败: ${data.title || data.featureId || evt.project_id}`);
@@ -549,6 +568,13 @@ export function startDaemon(): void {
     log.info('Daemon disabled, not starting');
     return;
   }
+
+  // v34.0: 确保修复日志表存在
+  try {
+    ensureRemediationTable();
+  } catch (err) {
+    log.debug('Remediation table init', { error: String(err) });
+  }
   if (_running) {
     log.info('Daemon already running, restarting...');
     stopDaemon();
@@ -585,6 +611,8 @@ export function startDaemon(): void {
       // v28.0: 心跳时执行维护任务（低频，不会每 30s 跑）
       cleanupZombieLocks();
       gcSessions();
+      // v34.0: 心跳时执行健康诊断 + 自动修复
+      runHealthDiagnosticsCycle();
     }, intervalMs);
   }
 
@@ -653,4 +681,50 @@ export function getDaemonStatus(): {
 /** Manual trigger — force a heartbeat check now */
 export async function triggerManualHeartbeat(): Promise<void> {
   await runAgentCheck('heartbeat', '手动触发心跳');
+}
+
+// ═══════════════════════════════════════
+// v34.0: Health Diagnostics + Auto-Remediation
+// ═══════════════════════════════════════
+
+/**
+ * 健康诊断 + 自动修复周期
+ * 由心跳定时触发。零 token 检测 → 按需触发 L1/L2/L3 修复。
+ */
+async function runHealthDiagnosticsCycle(): Promise<void> {
+  try {
+    const anomalies = runDiagnostics();
+    if (anomalies.length === 0) return;
+
+    log.info(`Health diagnostics: ${anomalies.length} anomalies detected`);
+
+    // 推送诊断摘要到 UI
+    const win = BrowserWindow.getAllWindows()[0] ?? null;
+    const summary = formatAnomalySummary(anomalies);
+    sendToUI(win, 'agent:log', {
+      projectId: 'system',
+      agentId: 'health-monitor',
+      content: summary,
+    });
+
+    // 执行自动修复
+    await handleAnomalies(anomalies, win);
+  } catch (err) {
+    log.error('Health diagnostics cycle failed', err);
+  }
+}
+
+/**
+ * v34.0: 事件钩子 — Feature 状态变化时更新健康追踪
+ * 由 checkEventHooks 内部调用，喂入 health-diagnostics 的计数器
+ */
+export function updateFeatureHealth(eventType: string, projectId: string, featureId: string): void {
+  if (eventType === 'feature:failed' || eventType === 'schedule:feature_failed') {
+    recordFeatureFailure(projectId, featureId);
+  } else if (eventType === 'feature:passed' || eventType === 'feature:qa_passed') {
+    recordFeatureSuccess(featureId);
+  } else if (eventType === 'feature:qa:result') {
+    // QA reject 的具体判断在 checkEventHooks 中通过 data 解析
+    recordQAReject(projectId, featureId);
+  }
 }

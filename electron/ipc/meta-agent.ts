@@ -78,7 +78,7 @@ import {
 
 import { buildSystemPrompt } from './meta-agent-prompts';
 
-import { executeAdminTool, executeEvolutionAdminTool } from './meta-agent-admin';
+import { executeAdminTool, executeEvolutionAdminTool, executeRepairAdminTool } from './meta-agent-admin';
 
 // ═══════════════════════════════════════
 // Re-exports for backward compatibility
@@ -611,6 +611,20 @@ export function setupMetaAgentHandlers() {
                 messages.push({ role: 'tool', tool_call_id: tc.id, content: `创建需求失败: ${errMsg}` });
               }
               continue;
+            }
+
+            // ── v34.0: Repair tools (健康诊断/修复管理) ──
+            if (tc.function.name.startsWith('repair_')) {
+              const repairResult = await executeRepairAdminTool(tc.function.name, toolArgs, projectId ?? undefined, win);
+              if (repairResult) {
+                sendToUI(win, 'agent:log', {
+                  projectId: projectId || 'system',
+                  agentId,
+                  content: `🔧 ${tc.function.name} → ${repairResult.success ? '✅' : '❌'} ${repairResult.output.slice(0, 120)}`,
+                });
+                messages.push({ role: 'tool', tool_call_id: tc.id, content: repairResult.output.slice(0, 8000) });
+                continue;
+              }
             }
 
             // ── v22.0: Admin tools (管理模式専用) ──

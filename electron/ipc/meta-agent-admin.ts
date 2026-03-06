@@ -14,6 +14,19 @@ import {
   type EvolutionScopeLevel,
   type MutationStrategy,
 } from '../engine/evolution-mutator';
+import {
+  runDiagnostics,
+  runProjectDiagnostics,
+  formatAnomalySummary,
+} from '../engine/health-diagnostics';
+import {
+  handleAnomalies,
+  getRemediationHistory,
+  getRemediationStats,
+  ensureRemediationTable,
+} from '../engine/auto-remediation';
+import { SelfRepairEngine } from '../engine/self-repair-engine';
+import type { AnomalyReport, L1ActionType } from '../engine/health-diagnostics';
 import type { WorkflowPresetRow, WorkflowStage } from '../engine/types';
 import fs from 'fs';
 import path from 'path';
@@ -785,4 +798,196 @@ export async function executeEvolutionAdminTool(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, output: `进化工具执行错误: ${errMsg}` };
   }
+}
+
+// ═══════════════════════════════════════
+// v34.0: Repair Admin Tool Executor
+// ═══════════════════════════════════════
+
+/**
+ * 执行健康诊断/修复管理工具 (异步)
+ * 返回 null 表示不是修复工具
+ */
+export async function executeRepairAdminTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  projectId: string | undefined,
+  win: BrowserWindow | null,
+): Promise<AdminToolResult | null> {
+  try {
+    switch (toolName) {
+      case 'repair_diagnostics': {
+        const targetProjectId = (args.project_id as string) || projectId;
+        const autoFix = args.auto_fix === true;
+
+        const anomalies = targetProjectId
+          ? runProjectDiagnostics(targetProjectId)
+          : runDiagnostics();
+
+        const summary = formatAnomalySummary(anomalies);
+        const lines = [summary];
+
+        if (autoFix && anomalies.length > 0) {
+          try {
+            ensureRemediationTable();
+            const results = await handleAnomalies(anomalies, win);
+            const successCount = results.filter(r => r.status === 'success').length;
+            lines.push('', `## 自动修复结果: ${successCount}/${results.length} 成功`);
+            for (const r of results) {
+              lines.push(`- [L${r.level}] ${r.action}: ${r.status === 'success' ? '✅' : '❌'} ${r.detail.slice(0, 100)}`);
+            }
+          } catch (fixErr) {
+            lines.push(`\n⚠️ 自动修复失败: ${fixErr instanceof Error ? fixErr.message : String(fixErr)}`);
+          }
+        }
+
+        return { success: true, output: lines.join('\n') };
+      }
+
+      case 'repair_history': {
+        const pid = (args.project_id as string) || projectId;
+        if (!pid) return { success: false, output: '需要指定项目 ID' };
+
+        ensureRemediationTable();
+        const history = getRemediationHistory(pid, (args.limit as number) || 20);
+        if (history.length === 0) {
+          return { success: true, output: `项目 ${pid} 无修复记录` };
+        }
+
+        const lines = [`## 修复历史 (${history.length} 条)`];
+        for (const r of history) {
+          const icon = r.status === 'success' ? '✅' : r.status === 'failed' ? '❌' : '⏳';
+          // DB rows may have snake_case or camelCase fields
+          const row = r as unknown as Record<string, unknown>;
+          const level = row.level ?? r.level;
+          const pattern = row.anomaly_pattern ?? r.anomalyPattern;
+          const action = row.action ?? r.action;
+          const created = (row.created_at as string) ?? r.createdAt ?? '';
+          lines.push(`- ${icon} [L${level}] ${pattern} → ${action} (${r.status}) ${created}`);
+        }
+        return { success: true, output: lines.join('\n') };
+      }
+
+      case 'repair_stats': {
+        const pid = args.project_id as string | undefined;
+        ensureRemediationTable();
+        const stats = getRemediationStats(pid);
+
+        const lines = [
+          `## 修复统计${pid ? ` (${pid})` : ' (全局)'}`,
+          `- 总计: ${stats.total}`,
+          `- 成功: ${stats.success}`,
+          `- 失败: ${stats.failed}`,
+          `- 成功率: ${stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0}%`,
+          '',
+          '### 按级别',
+          ...Object.entries(stats.byLevel).map(([level, count]) => `- L${level}: ${count}`),
+          '',
+          '### 按模式',
+          ...Object.entries(stats.byPattern).map(([pattern, count]) => `- ${pattern}: ${count}`),
+        ];
+        return { success: true, output: lines.join('\n') };
+      }
+
+      case 'repair_run_l1': {
+        const pid = (args.project_id as string) || projectId;
+        if (!pid) return { success: false, output: '需要指定项目 ID' };
+        const action = args.action as string;
+        if (!action) return { success: false, output: '需要指定修复动作' };
+
+        ensureRemediationTable();
+
+        const anomaly: AnomalyReport = {
+          pattern: 'zombie_feature',
+          severity: 'warning',
+          projectId: pid,
+          featureId: args.feature_id as string | undefined,
+          description: `Manual L1: ${action}`,
+          evidence: { manual: true, reason: args.reason },
+          suggestedLevel: 1,
+          suggestedAction: {
+            type: action as L1ActionType,
+            params: {
+              projectId: pid,
+              featureId: args.feature_id,
+              reason: (args.reason as string) ?? 'manual',
+              all: action === 'release_lock' && !args.feature_id,
+            },
+          },
+          detectedAt: new Date().toISOString(),
+        };
+
+        const results = await handleAnomalies([anomaly], win);
+        const result = results[0];
+        return {
+          success: result?.status === 'success',
+          output: result?.detail ?? 'No action taken',
+        };
+      }
+
+      case 'repair_trigger_l3': {
+        const pid = (args.project_id as string) || projectId;
+        if (!pid) return { success: false, output: '需要指定项目 ID' };
+
+        const sourceRoot = resolveSourceRoot();
+        const engine = new SelfRepairEngine({ sourceRoot });
+
+        const repairResult = await engine.repair({
+          anomalyPattern: ((args.anomaly_pattern as string) ?? 'unknown') as import('../engine/health-diagnostics').AnomalyPattern,
+          level: 3,
+          projectId: pid,
+          action: 'self_repair',
+          status: 'pending',
+          detail: (args.detail as string) ?? '',
+          tokensUsed: 0,
+          costUsd: 0,
+        });
+
+        const lines = [
+          `## ${repairResult.success ? '✅' : '❌'} L3 深度自修复`,
+          `- 修复 ID: ${repairResult.repairId}`,
+          `- 分支: ${repairResult.branch}`,
+          `- 合并: ${repairResult.merged ? '是' : '否'}`,
+          `- 回滚: ${repairResult.rolledBack ? '是' : '否'}`,
+          `- 修改文件: ${repairResult.modifiedFiles.join(', ') || '无'}`,
+          `- Token: ${repairResult.tokensUsed}`,
+        ];
+
+        if (repairResult.error) {
+          lines.push(`- 错误: ${repairResult.error}`);
+        }
+
+        if (repairResult.fitness) {
+          lines.push(
+            '',
+            '### 质量门结果',
+            `- 适应度: ${repairResult.fitness.score.toFixed(4)}`,
+            `- tsc: ${repairResult.fitness.tscPassed ? '✅' : '❌'}`,
+            `- 测试: ${repairResult.fitness.passedTests}/${repairResult.fitness.totalTests}`,
+          );
+        }
+
+        if (repairResult.logs.length > 0) {
+          lines.push('', '### 执行日志 (最近10条)');
+          lines.push(...repairResult.logs.slice(-10));
+        }
+
+        return { success: repairResult.success, output: lines.join('\n') };
+      }
+
+      default:
+        return null;
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, output: `修复工具执行错误: ${errMsg}` };
+  }
+}
+
+// ── Helper: resolve source root ──
+function resolveSourceRoot(): string {
+  if (process.env.AUTOMATER_SOURCE_ROOT) return process.env.AUTOMATER_SOURCE_ROOT;
+  const candidate = path.resolve(__dirname, '..', '..');
+  if (fs.existsSync(path.join(candidate, 'electron', 'engine'))) return candidate;
+  return candidate;
 }
