@@ -12,7 +12,9 @@ import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as R
 import { useAppStore, type MetaAgentMessage, type AgentWorkMessage } from '../stores/app-store';
 import type { MetaSessionItem, ChatMode } from '../stores/slices/meta-agent-slice';
 import { MetaAgentSettings } from './MetaAgentSettings';
-import { MSG_STYLES } from './AgentWorkFeed';
+import { MSG_STYLES } from './chat';
+import { InlineWorkMessage } from './chat/InlineWorkMessage';
+import { CollapsibleWorkBlock } from './chat/CollapsibleWorkBlock';
 import { friendlyErrorMessage } from '../utils/errors';
 import { renderMarkdown } from '../utils/markdown';
 import { ChatInput, type ChatAttachment, type ChatInputHandle } from './ChatInput';
@@ -29,93 +31,8 @@ const CHAT_MODE_INFO: Record<ChatMode, { icon: string; label: string; desc: stri
   admin: { icon: '🛠️', label: '管理', desc: '修改团队/工作流/项目配置', color: 'text-rose-400' },
 };
 
-// ═══════════════════════════════════════
-// InlineWorkMessage — 内联工具活动消息卡片
-// ═══════════════════════════════════════
-
-function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
-  const style = MSG_STYLES[msg.type] || MSG_STYLES.status;
-  const [expanded, setExpanded] = useState(false);
-  const isLong = msg.content.length > 300;
-
-  return (
-    <div className={`border-l-2 ${style.border} ${style.bg} rounded-r-lg px-2.5 py-1.5 transition-colors`}>
-      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mb-0.5">
-        <span>{style.icon}</span>
-        <span className="font-medium text-slate-400">{style.label}</span>
-        {msg.iteration && <span className="text-slate-600">#{msg.iteration}</span>}
-        <span className="ml-auto text-slate-700">
-          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-        </span>
-      </div>
-
-      {msg.type === 'tool-result' && msg.tool ? (
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span
-              className={`text-[10px] font-mono px-1 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}
-            >
-              {msg.tool.name}
-            </span>
-            <span className="text-[10px] text-slate-500 truncate max-w-[200px]">{msg.tool.args}</span>
-          </div>
-          {msg.tool.outputPreview && (
-            <pre className="text-[10px] text-slate-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-32 overflow-y-auto">
-              {msg.tool.outputPreview}
-            </pre>
-          )}
-        </div>
-      ) : (
-        <div
-          className={`text-[11px] text-slate-300 leading-relaxed ${isLong && !expanded ? 'line-clamp-4 cursor-pointer' : 'whitespace-pre-wrap break-all'}`}
-          onClick={() => isLong && setExpanded(!expanded)}
-        >
-          {msg.content}
-        </div>
-      )}
-      {isLong && !expanded && (
-        <div
-          className="text-[9px] text-slate-600 mt-0.5 cursor-pointer hover:text-slate-400"
-          onClick={() => setExpanded(true)}
-        >
-          点击展开 ▸
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════
-// CollapsibleWorkBlockMini — 已完成对话的工作过程折叠区 (紧凑版)
-// ═══════════════════════════════════════
-
-function CollapsibleWorkBlockMini({ workMessages }: { workMessages: AgentWorkMessage[] }) {
-  const [expanded, setExpanded] = useState(true);
-  const thinkCount = workMessages.filter(m => m.type === 'think').length;
-  const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
-
-  return (
-    <div className="mt-1">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 text-[9px] text-slate-500 hover:text-slate-300 transition-colors py-0.5 group"
-      >
-        <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
-        <span className="w-1 h-1 rounded-full bg-slate-600 group-hover:bg-slate-400 shrink-0" />
-        <span>工作过程 · {workMessages.length} 步</span>
-        {thinkCount > 0 && <span className="text-blue-500/60">💭{thinkCount}</span>}
-        {toolCount > 0 && <span className="text-emerald-500/60">🔧{toolCount}</span>}
-      </button>
-      {expanded && (
-        <div className="mt-1 space-y-1 pl-1 border-l border-slate-800/50">
-          {workMessages.map(wm => (
-            <InlineWorkMessage key={wm.id} msg={wm} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// v31.0: InlineWorkMessage + CollapsibleWorkBlock moved to components/chat/
+// See imports at top of file.
 // ═══════════════════════════════════════
 // SessionDropdown — 顶栏下拉选单
 // ═══════════════════════════════════════
@@ -945,7 +862,9 @@ export function MetaAgentPanel() {
                     </div>
                   </div>
 
-                  {sending &&
+                  {/* v31.0: 实时工作过程 — 受 showWorkDetails 开关控制 */}
+                  {showWorkDetails &&
+                    sending &&
                     idx === displayMessages.length - 1 &&
                     msg.role === 'assistant' &&
                     currentRoundWorkMsgs.length > 0 && (
@@ -959,10 +878,29 @@ export function MetaAgentPanel() {
                         ))}
                       </div>
                     )}
-                  {/* v28.1: 已完成的消息 — 折叠式工作过程回顾 */}
-                  {!sending && msg.role === 'assistant' && msg.workMessages && msg.workMessages.length > 0 && (
-                    <CollapsibleWorkBlockMini workMessages={msg.workMessages} />
-                  )}
+                  {/* v31.0: 已完成对话的工作过程回顾 — Compact/Full 双模式 (showWorkDetails 控制) */}
+                  {showWorkDetails &&
+                    !sending &&
+                    msg.role === 'assistant' &&
+                    msg.workMessages &&
+                    msg.workMessages.length > 0 && (
+                      <CollapsibleWorkBlock workMessages={msg.workMessages} compact defaultExpanded />
+                    )}
+                  {/* Compact 模式: 仅显示步骤数摘要 */}
+                  {!showWorkDetails &&
+                    !sending &&
+                    msg.role === 'assistant' &&
+                    msg.workMessages &&
+                    msg.workMessages.length > 0 && (
+                      <div className="mt-0.5 text-[9px] text-slate-600">
+                        📋 {msg.workMessages.length} 步工作过程
+                        {msg.workMessages.filter(m => m.diff).length > 0 && (
+                          <span className="ml-1 text-amber-500/50">
+                            📝{msg.workMessages.filter(m => m.diff).length}
+                          </span>
+                        )}
+                      </div>
+                    )}
                 </div>
               ))}
               <div ref={chatEndRef} />

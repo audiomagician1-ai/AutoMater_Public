@@ -19,7 +19,9 @@ import { friendlyErrorMessage } from '../utils/errors';
 import { toast, confirm } from '../stores/toast-store';
 import { renderMarkdown } from '../utils/markdown';
 import { EmptyState } from '../components/EmptyState';
-import { MSG_STYLES } from '../components/AgentWorkFeed';
+import { MSG_STYLES } from '../components/chat';
+import { InlineWorkMessage } from '../components/chat/InlineWorkMessage';
+import { CollapsibleWorkBlock } from '../components/chat/CollapsibleWorkBlock';
 import { ChatInput, type ChatAttachment, type ChatInputHandle } from '../components/ChatInput';
 import { MessageAttachments } from '../components/MessageAttachments';
 import { MetaAgentSettings } from '../components/MetaAgentSettings';
@@ -39,93 +41,8 @@ const GREETING: MetaAgentMessage = {
 
 const META_AGENT_ID = 'meta-agent';
 
-// ═══════════════════════════════════════
-// InlineWorkMessage — 思维过程/工具调用内联卡片 (复用 AgentWorkFeed 样式)
-// ═══════════════════════════════════════
-
+// v31.0: InlineWorkMessage + CollapsibleWorkBlock moved to components/chat/
 const EMPTY_WORK_MSGS: readonly AgentWorkMessage[] = [];
-
-function InlineWorkMessage({ msg }: { msg: AgentWorkMessage }) {
-  const style = MSG_STYLES[msg.type] || MSG_STYLES.status;
-  const [expanded, setExpanded] = useState(false);
-  const isLong = msg.content.length > 300;
-  return (
-    <div className={`border-l-2 ${style.border} ${style.bg} rounded-r-lg px-2.5 py-1.5 transition-colors`}>
-      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mb-0.5">
-        <span>{style.icon}</span>
-        <span className="font-medium text-slate-400">{style.label}</span>
-        {msg.iteration && <span className="text-slate-600">#{msg.iteration}</span>}
-        <span className="ml-auto text-slate-700">
-          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-        </span>
-      </div>
-      {msg.type === 'tool-result' && msg.tool ? (
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span
-              className={`text-[10px] font-mono px-1 py-0.5 rounded ${msg.tool.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}
-            >
-              {msg.tool.name}
-            </span>
-            <span className="text-[10px] text-slate-500 truncate max-w-[300px]">{msg.tool.args}</span>
-          </div>
-          {msg.tool.outputPreview && (
-            <pre className="text-[10px] text-slate-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-32 overflow-y-auto">
-              {msg.tool.outputPreview}
-            </pre>
-          )}
-        </div>
-      ) : (
-        <div
-          className={`text-[11px] text-slate-300 leading-relaxed ${isLong && !expanded ? 'line-clamp-4 cursor-pointer' : 'whitespace-pre-wrap break-all'}`}
-          onClick={() => isLong && setExpanded(!expanded)}
-        >
-          {msg.content}
-        </div>
-      )}
-      {isLong && !expanded && (
-        <div
-          className="text-[9px] text-slate-600 mt-0.5 cursor-pointer hover:text-slate-400"
-          onClick={() => setExpanded(true)}
-        >
-          点击展开 ▸
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════
-// CollapsibleWorkBlock — 已完成对话的工作过程折叠区
-// ═══════════════════════════════════════
-
-function CollapsibleWorkBlock({ workMessages }: { workMessages: AgentWorkMessage[] }) {
-  const [expanded, setExpanded] = useState(true);
-  const thinkCount = workMessages.filter(m => m.type === 'think').length;
-  const toolCount = workMessages.filter(m => m.type === 'tool-result' || m.type === 'tool-call').length;
-
-  return (
-    <div className="mt-1.5 max-w-[85%]">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors py-0.5 group"
-      >
-        <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
-        <span className="w-1 h-1 rounded-full bg-slate-600 group-hover:bg-slate-400 shrink-0" />
-        <span>工作过程 · {workMessages.length} 步</span>
-        {thinkCount > 0 && <span className="text-blue-500/60">💭{thinkCount}</span>}
-        {toolCount > 0 && <span className="text-emerald-500/60">🔧{toolCount}</span>}
-      </button>
-      {expanded && (
-        <div className="mt-1 space-y-1 pl-1.5 border-l border-slate-800/50">
-          {workMessages.map(wm => (
-            <InlineWorkMessage key={wm.id} msg={wm} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ═══════════════════════════════════════
 // MetaAgentChat — 对话区 (含会话持久化)
@@ -688,7 +605,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                 })()}
               {/* v28.1: 已完成的消息 — 折叠式工作过程回顾 */}
               {!sending && msg.role === 'assistant' && msg.workMessages && msg.workMessages.length > 0 && (
-                <CollapsibleWorkBlock workMessages={msg.workMessages} />
+                <CollapsibleWorkBlock workMessages={msg.workMessages} defaultExpanded />
               )}
             </div>
           ))}
