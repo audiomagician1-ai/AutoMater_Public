@@ -291,6 +291,19 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         finalText = msg.content;
         const short = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
         sendToUI(win, 'agent:log', { projectId, agentId, content: `💭 [${iter}] ${short}` });
+        // v35.0: 推送结构化 thinking 工作消息 (对齐 react-loop.ts)
+        sendToUI(win, 'agent:work-message', {
+          projectId,
+          agentId,
+          message: {
+            id: `think-${iter}-${Date.now()}`,
+            type: 'think',
+            content: msg.content,
+            reasoning: result.reasoning || undefined,
+            timestamp: Date.now(),
+            iteration: iter,
+          },
+        });
       }
 
       // 无 tool_calls → 结束
@@ -443,11 +456,47 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
             continue;
           }
 
-          // 日志
+          // v35.0: 结构化工具调用事件 (对齐 react-loop.ts)
           const argsSummary =
-            tc.function.name === 'write_file'
-              ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
-              : JSON.stringify(toolArgs).slice(0, 120);
+            tc.function.name === 'edit_file'
+              ? `path=${toolArgs.path}, replace ${(toolArgs.old_string || '').length}→${(toolArgs.new_string || '').length} chars`
+              : tc.function.name === 'write_file'
+                ? `path=${toolArgs.path}, ${Buffer.byteLength(toolArgs.content || '', 'utf-8')}B`
+                : JSON.stringify(toolArgs).slice(0, 150);
+
+          const enhancedToolData: Record<string, unknown> = {
+            projectId,
+            agentId,
+            tool: tc.function.name,
+            args: argsSummary,
+            success: result.success,
+            outputPreview: result.output.slice(0, 500),
+            fullOutput: result.output.slice(0, 5000),
+            fullArgs: JSON.stringify(toolArgs).slice(0, 2000),
+            iteration: iter,
+          };
+          if (tc.function.name === 'edit_file') {
+            enhancedToolData.diff = {
+              path: toolArgs.path,
+              oldString: (toolArgs.old_string || '').slice(0, 3000),
+              newString: (toolArgs.new_string || '').slice(0, 3000),
+              added: (toolArgs.new_string || '').split('\n').length,
+              removed: (toolArgs.old_string || '').split('\n').length,
+            };
+          }
+          if (tc.function.name === 'write_file') {
+            enhancedToolData.diff = {
+              path: toolArgs.path,
+              newString: (toolArgs.content || '').slice(0, 3000),
+              added: (toolArgs.content || '').split('\n').length,
+              removed: 0,
+            };
+          }
+          if (['run_command', 'run_test', 'run_lint'].includes(tc.function.name)) {
+            enhancedToolData.command = toolArgs.command || toolArgs.cmd || '';
+            enhancedToolData.cwd = toolArgs.cwd || '';
+          }
+          sendToUI(win, 'agent:tool-call', enhancedToolData);
           sendToUI(win, 'agent:log', {
             projectId,
             agentId,
