@@ -93,7 +93,13 @@ import { cacheAgentReactState, cacheContextSnapshot } from './react-state';
 import type { AgentReactState, ReactIterationState, MessageTokenBreakdown, ReactResult } from './react-state';
 import { computeMessageBreakdown } from './react-helpers';
 import { generateTerminationSummary } from './react-helpers';
-import { inferDomainsFromFeature, compressMessageHistorySmart } from './react-compression';
+import {
+  inferDomainsFromFeature,
+  compressMessageHistorySmart,
+  compressInBackground,
+  sanitizeToolPairs,
+  type BackgroundCompressionResult,
+} from './react-compression';
 
 const log = createLogger('react-loop');
 
@@ -386,6 +392,10 @@ export async function reactDeveloperLoop(
     maxContextWindow: 256000,
   };
 
+  // v31.0: 后台异步记忆压缩 — 三层渐进式上下文管理
+  let pendingSummary: Promise<BackgroundCompressionResult | null> | null = null;
+  let pendingSnapshotLength = 0;
+
   for (let iter = 1; iter <= MAX_ITERATIONS && !signal.aborted; iter++) {
     // v3.0: 程序化终止检查 (每轮迭代前)
     guardState.iteration = iter;
@@ -428,6 +438,36 @@ export async function reactDeveloperLoop(
     }
 
     try {
+      // v31.0: 检查后台摘要是否完成 (非阻塞)
+      if (pendingSummary) {
+        const bgResult = await Promise.race([pendingSummary.then(r => r), Promise.resolve('not-ready' as const)]);
+        if (bgResult !== 'not-ready' && bgResult !== null) {
+          const currentLength = messages.length;
+          const newSinceSnapshot = currentLength - pendingSnapshotLength;
+          // 安全阈值: 快照后新增 >20 条消息则过时
+          if (newSinceSnapshot <= 20) {
+            const tailMessages = newSinceSnapshot > 0 ? messages.slice(pendingSnapshotLength) : [];
+            messages.length = 0;
+            messages.push(...bgResult.compressedMessages, ...tailMessages);
+            sanitizeToolPairs(messages);
+            // 注入 Scratchpad 锚点
+            if (workspacePath) {
+              const anchor = buildScratchpadAnchor(workspacePath, workerId);
+              if (anchor) {
+                const insertIdx = Math.min(2, messages.length);
+                messages.splice(insertIdx, 0, anchor);
+              }
+            }
+            log.info(
+              `[background] Summary applied — ${pendingSnapshotLength} → ${messages.length} messages (tail: ${tailMessages.length})`,
+            );
+          } else {
+            log.warn(`[background] Summary expired — ${newSinceSnapshot} new messages since snapshot, discarding`);
+          }
+          pendingSummary = null;
+        }
+      }
+
       // v18.0: 注入从失败中学到的教训
       injectLessons(messages, learningState);
 
@@ -1016,16 +1056,14 @@ export async function reactDeveloperLoop(
         break;
       }
 
-      // ── v10.2 渐进式上下文压缩 (Proactive Compaction) ──
-      // 不再等到 overflow 才压缩，而是基于 token 预算主动分级处理：
-      //   ok (< 50%)      → 无操作
-      //   warning (50-75%) → 仅 Observation Masking (轻量，不丢信息)
-      //   critical (75-90%) → Masking + Tool 输出截断 + LLM 摘要压缩
-      //   overflow (> 90%)  → 全面压缩 + 激进截断
+      // ── v31.0 三层渐进式上下文压缩 (Background Compaction) ──
+      //   Layer 1 (每轮): Observation Masking — 零成本，纯字符串替换
+      //   Layer 2 (warning 50%+): 启动后台 LLM 摘要 — 不阻塞主循环
+      //   Layer 3 (overflow 90%+): 紧急 rule-based 截断 — 最后防线
       const budget = checkContextBudget(contextTokens, model);
 
       if (budget.status !== 'ok') {
-        // Step 1: Observation Masking — 所有非 ok 状态都执行 (成本: 0, 纯字符串替换)
+        // Layer 1: Observation Masking — 所有非 ok 状态都执行 (成本: 0)
         const keepRecentCount = budget.status === 'overflow' ? 6 : budget.status === 'critical' ? 8 : 10;
         const maskResult = maskOldToolOutputs(messages, keepRecentCount);
         if (maskResult.maskedCount > 0) {
@@ -1034,20 +1072,34 @@ export async function reactDeveloperLoop(
           );
         }
 
-        // Step 2: 深度压缩 — 仅 critical/overflow 或消息数过多时执行
-        if (budget.status === 'overflow' || budget.status === 'critical') {
-          compressToolOutputs(messages, budget.status);
-          await compressMessageHistorySmart(messages, settings, signal);
-        } else if (messages.length > 25) {
-          // warning + 消息数较多 → 轻度截断
-          compressToolOutputs(messages, 'warning');
+        // Layer 2: 后台 LLM 摘要 — warning/critical 时启动 (不阻塞)
+        if (!pendingSummary && (budget.status === 'warning' || budget.status === 'critical')) {
+          if (messages.length > 15) {
+            pendingSnapshotLength = messages.length;
+            const snapshotMessages = structuredClone(messages);
+            pendingSummary = compressInBackground(snapshotMessages, settings, signal);
+            log.info(`[${budget.status}] Background compression started — snapshot: ${pendingSnapshotLength} messages`);
+          }
+          // 同时做轻度截断减轻压力
+          compressToolOutputs(messages, budget.status === 'critical' ? 'critical' : 'warning');
         }
 
-        // Step 3: 注入 Scratchpad 锚点 — 确保关键信息存活于压缩
+        // Layer 3: 紧急同步截断 — overflow 时不等后台
+        if (budget.status === 'overflow') {
+          compressToolOutputs(messages, 'overflow');
+          // 后台结果已过时，取消
+          if (pendingSummary) {
+            pendingSummary = null;
+            log.info('[overflow] Cancelled pending background summary — doing emergency truncation');
+          }
+          // 同步 fallback: 直接用既有压缩
+          await compressMessageHistorySmart(messages, settings, signal);
+        }
+
+        // 注入 Scratchpad 锚点 — 确保关键信息存活于压缩
         if (workspacePath) {
           const anchor = buildScratchpadAnchor(workspacePath, workerId);
           if (anchor) {
-            // 插在 system prompt 之后, 压缩摘要之后
             const insertIdx = Math.min(2, messages.length);
             messages.splice(insertIdx, 0, anchor);
           }

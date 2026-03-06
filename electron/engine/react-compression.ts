@@ -155,6 +155,90 @@ export async function compressMessageHistorySmart(
   sanitizeToolPairs(messages);
 }
 
+// ═══════════════════════════════════════
+// Background Compression — 非阻塞后台压缩
+// ═══════════════════════════════════════
+
+/** compressInBackground 的返回结果 */
+export interface BackgroundCompressionResult {
+  /** 压缩后的消息数组 (在快照上就地修改) */
+  compressedMessages: LLMMessage[];
+  /** LLM 生成的摘要文本 (如果有) */
+  summaryText: string | null;
+}
+
+/**
+ * 在后台执行 LLM 摘要压缩，不阻塞调用方。
+ *
+ * 接收 MemoryManager.snapshotForCompression() 的快照，在快照上执行
+ * compressMessageHistorySmart，完成后返回结果供 applyBackgroundSummary 使用。
+ *
+ * @param snapshotMessages 深拷贝的消息快照
+ * @param settings  LLM 配置
+ * @param signal    取消信号
+ * @returns Promise — 压缩完成后 resolve
+ */
+export async function compressInBackground(
+  snapshotMessages: LLMMessage[],
+  settings: AppSettings,
+  signal?: AbortSignal,
+): Promise<BackgroundCompressionResult | null> {
+  const keepRecent = 10;
+  if (snapshotMessages.length <= keepRecent + 2) return null;
+
+  const safeCount = findSafeCompressBoundary(snapshotMessages, keepRecent);
+  const compressRange = snapshotMessages.slice(1, safeCount);
+  if (compressRange.length < 5) return null;
+
+  const compressText = compressRange
+    .map(m => {
+      const role = m.role;
+      const content = typeof m.content === 'string' ? m.content.slice(0, 300) : JSON.stringify(m.content).slice(0, 300);
+      const toolInfo = m.tool_calls
+        ? ` [tools: ${m.tool_calls.map((t: LLMToolCall) => t.function.name).join(',')}]`
+        : '';
+      return `[${role}]${toolInfo} ${content}`;
+    })
+    .join('\n');
+
+  try {
+    const summaryModel = resolveModel(selectModelTier({ type: 'summarize' }).tier, settings);
+    const summaryResult = await callLLM(
+      settings,
+      summaryModel,
+      [
+        {
+          role: 'system',
+          content:
+            '你是对话摘要助手。将以下 Agent 对话历史压缩为一段简洁摘要（200-400字），保留关键决策、已创建的文件、遇到的问题和解决方案。只输出摘要，不要其他内容。',
+        },
+        { role: 'user', content: `请摘要以下 ${compressRange.length} 条对话:\n\n${compressText.slice(0, 4000)}` },
+      ],
+      signal,
+      1024,
+      0,
+    );
+
+    if (summaryResult.content) {
+      const summaryMsg: LLMMessage = {
+        role: 'user',
+        content: `## 之前的对话摘要 (${compressRange.length} 条消息已压缩)\n${summaryResult.content}`,
+      };
+      snapshotMessages.splice(1, compressRange.length, summaryMsg);
+      sanitizeToolPairs(snapshotMessages);
+      return { compressedMessages: snapshotMessages, summaryText: summaryResult.content };
+    }
+  } catch (err) {
+    if (signal?.aborted) return null;
+    log.warn('Background LLM summarizer failed, falling back to simple truncation', { error: String(err) });
+  }
+
+  // fallback: simple truncation on snapshot
+  compressMessageHistorySimple(snapshotMessages);
+  sanitizeToolPairs(snapshotMessages);
+  return { compressedMessages: snapshotMessages, summaryText: null };
+}
+
 export function compressMessageHistorySimple(messages: LLMMessage[]) {
   const keepRecent = 10;
   const cutoff = messages.length - keepRecent;

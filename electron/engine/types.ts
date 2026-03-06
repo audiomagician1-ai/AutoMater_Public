@@ -425,6 +425,9 @@ export interface LLMMessage {
   tool_calls?: LLMToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** v31.0: MemoryManager synthetic markers (not sent to LLM) */
+  _summary?: boolean;
+  _summaryCompact?: boolean;
 }
 
 /** OpenAI tools 定义格式 */

@@ -51,7 +51,12 @@ import { buildExecutionPlan, type ToolCallInfo } from './parallel-tools';
 import { createLearningState, recordFailure, injectLessons, type LearningState } from './iteration-learning';
 import { computeMessageBreakdown } from './react-helpers';
 import { generateTerminationSummary } from './react-helpers';
-import { compressMessageHistorySmart } from './react-compression';
+import {
+  compressMessageHistorySmart,
+  compressInBackground,
+  sanitizeToolPairs,
+  type BackgroundCompressionResult,
+} from './react-compression';
 
 const log = createLogger('react-generic-loop');
 export interface GenericReactConfig {
@@ -166,6 +171,10 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     content: `🔄 开始 ReAct 工具循环 (最多 ${maxIterations} 轮, 角色: ${role})`,
   });
 
+  // v31.0: 后台异步记忆压缩
+  let pendingSummary: Promise<BackgroundCompressionResult | null> | null = null;
+  let pendingSnapshotLength = 0;
+
   for (let iter = 1; iter <= maxIterations && !signal.aborted; iter++) {
     guardState.iteration = iter;
     const termCheck = checkReactTermination(
@@ -182,6 +191,32 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
     );
     if (!termCheck.shouldContinue) {
       terminationReason = termCheck.reason;
+      // v31.0: 检查后台摘要是否完成 (非阻塞)
+      if (pendingSummary) {
+        const bgResult = await Promise.race([pendingSummary.then(r => r), Promise.resolve('not-ready' as const)]);
+        if (bgResult !== 'not-ready' && bgResult !== null) {
+          const currentLength = messages.length;
+          const newSinceSnapshot = currentLength - pendingSnapshotLength;
+          if (newSinceSnapshot <= 20) {
+            const tailMessages = newSinceSnapshot > 0 ? messages.slice(pendingSnapshotLength) : [];
+            messages.length = 0;
+            messages.push(...bgResult.compressedMessages, ...tailMessages);
+            sanitizeToolPairs(messages);
+            if (workspacePath) {
+              const anchor = buildScratchpadAnchor(workspacePath, agentId);
+              if (anchor) {
+                const insertIdx = Math.min(2, messages.length);
+                messages.splice(insertIdx, 0, anchor);
+              }
+            }
+            log.info(`[background] Summary applied — ${pendingSnapshotLength} → ${messages.length} messages`);
+          } else {
+            log.warn(`[background] Summary expired — ${newSinceSnapshot} new messages, discarding`);
+          }
+          pendingSummary = null;
+        }
+      }
+
       sendToUI(win, 'agent:log', { projectId, agentId, content: `🛑 终止: ${termCheck.reason}` });
       break;
     }
@@ -510,24 +545,37 @@ export async function reactAgentLoop(config: GenericReactConfig): Promise<Generi
         break;
       }
 
-      // ── v10.2 渐进式上下文压缩 (Proactive Compaction) ──
+      // ── v31.0 三层渐进式上下文压缩 (Background Compaction) ──
       const { total: ctxTokens } = computeMessageBreakdown(messages);
       const budget = checkContextBudget(ctxTokens, model);
 
       if (budget.status !== 'ok') {
-        // Step 1: Observation Masking — 所有非 ok 状态都执行
+        // Layer 1: Observation Masking — 零成本
         const keepRecentCount = budget.status === 'overflow' ? 6 : budget.status === 'critical' ? 8 : 10;
         maskOldToolOutputs(messages, keepRecentCount);
 
-        // Step 2: 深度压缩 — 仅 critical/overflow 时
-        if (budget.status === 'overflow' || budget.status === 'critical') {
-          compressToolOutputs(messages, budget.status);
-          await compressMessageHistorySmart(messages, settings, signal);
-        } else if (messages.length > 25) {
-          compressToolOutputs(messages, 'warning');
+        // Layer 2: 后台 LLM 摘要 — warning/critical 时启动 (不阻塞)
+        if (!pendingSummary && (budget.status === 'warning' || budget.status === 'critical')) {
+          if (messages.length > 15) {
+            pendingSnapshotLength = messages.length;
+            const snapshotMessages = structuredClone(messages);
+            pendingSummary = compressInBackground(snapshotMessages, settings, signal);
+            log.info(`[${budget.status}] Background compression started — snapshot: ${pendingSnapshotLength} messages`);
+          }
+          compressToolOutputs(messages, budget.status === 'critical' ? 'critical' : 'warning');
         }
 
-        // Step 3: 注入 Scratchpad 锚点
+        // Layer 3: 紧急同步截断 — overflow 时不等后台
+        if (budget.status === 'overflow') {
+          compressToolOutputs(messages, 'overflow');
+          if (pendingSummary) {
+            pendingSummary = null;
+            log.info('[overflow] Cancelled pending background summary — doing emergency truncation');
+          }
+          await compressMessageHistorySmart(messages, settings, signal);
+        }
+
+        // 注入 Scratchpad 锚点
         if (workspacePath) {
           const anchor = buildScratchpadAnchor(workspacePath, agentId);
           if (anchor) {
