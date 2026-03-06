@@ -500,6 +500,18 @@ export function setupMetaAgentHandlers() {
               type: 'thinking',
               iteration: iter,
             });
+            // v35.0: 同时推送结构化工作消息 (thinking 类型) 供 workMessages 展示
+            sendToUI(win, 'agent:work-message', {
+              projectId: projectId || 'system',
+              agentId,
+              message: {
+                id: `wm-think-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'think' as const,
+                timestamp: Date.now(),
+                content: msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content,
+                iteration: iter,
+              },
+            });
           }
 
           // 推送思考日志
@@ -696,25 +708,58 @@ export function setupMetaAgentHandlers() {
               ? await executeToolAsync(toolCall, toolCtx)
               : executeTool(toolCall, toolCtx);
 
-            // 推送工具调用日志
-            const argsSummary = JSON.stringify(toolArgs).slice(0, 150);
-            sendToUI(win, 'agent:tool-call', {
+            // v35.0: 增强工具调用数据 (对齐 react-loop.ts 的结构化格式)
+            const argsSummary =
+              tc.function.name === 'edit_file'
+                ? `path=${toolArgs.path}, replace ${(toolArgs.old_string || '').length}→${(toolArgs.new_string || '').length} chars`
+                : JSON.stringify(toolArgs).slice(0, 150);
+
+            const enhancedToolData: Record<string, unknown> = {
               projectId: projectId || 'system',
               agentId,
               tool: tc.function.name,
               args: argsSummary,
               success: toolResult.success,
-              outputPreview: toolResult.output.slice(0, 200),
-            });
+              outputPreview: toolResult.output.slice(0, 500),
+              fullOutput: toolResult.output.slice(0, 5000),
+              fullArgs: JSON.stringify(toolArgs).slice(0, 2000),
+              iteration: iter,
+            };
+
+            // edit_file: 携带 diff 数据
+            if (tc.function.name === 'edit_file') {
+              enhancedToolData.diff = {
+                path: toolArgs.path,
+                oldString: (toolArgs.old_string || '').slice(0, 3000),
+                newString: (toolArgs.new_string || '').slice(0, 3000),
+                added: (toolArgs.new_string || '').split('\n').length,
+                removed: (toolArgs.old_string || '').split('\n').length,
+              };
+            }
+            // write_file: 携带文件内容摘要
+            if (tc.function.name === 'write_file') {
+              enhancedToolData.diff = {
+                path: toolArgs.path,
+                newString: (toolArgs.content || '').slice(0, 3000),
+                added: (toolArgs.content || '').split('\n').length,
+                removed: 0,
+              };
+            }
+            // run_command / bash 类: 携带命令和输出
+            if (['run_command', 'run_test', 'run_lint'].includes(tc.function.name)) {
+              enhancedToolData.command = toolArgs.command || toolArgs.cmd || '';
+              enhancedToolData.cwd = toolArgs.cwd || '';
+            }
+
+            sendToUI(win, 'agent:tool-call', enhancedToolData);
             sendToUI(win, 'agent:log', {
               projectId: projectId || 'system',
               agentId,
               content: `🔧 ${tc.function.name}(${argsSummary}) → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 100)}`,
             });
 
-            // v31.0: 推送工具调用摘要到对话面板
+            // v35.0: 推送工具调用摘要到对话面板 (保持实时内容更新)
             if (tc.function.name === 'think') {
-              // think 工具: 推送思考内容
               sendToUI(win, 'meta-agent:reply-chunk', {
                 projectId: projectId || 'system',
                 content: toolArgs.thought || '',
@@ -722,7 +767,6 @@ export function setupMetaAgentHandlers() {
                 iteration: iter,
               });
             } else {
-              // 其他工具: 推送执行摘要
               sendToUI(win, 'meta-agent:reply-chunk', {
                 projectId: projectId || 'system',
                 content: `🔧 ${tc.function.name} → ${toolResult.success ? '✅' : '❌'} ${toolResult.output.slice(0, 80)}`,

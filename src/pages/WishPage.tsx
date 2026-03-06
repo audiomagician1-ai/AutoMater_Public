@@ -17,11 +17,11 @@ import { useAppStore, type MetaAgentMessage, type AgentWorkMessage } from '../st
 import type { MetaSessionItem, ChatMode } from '../stores/slices/meta-agent-slice';
 import { friendlyErrorMessage } from '../utils/errors';
 import { toast, confirm } from '../stores/toast-store';
-import { renderMarkdown } from '../utils/markdown';
 import { EmptyState } from '../components/EmptyState';
 import { MSG_STYLES } from '../components/chat';
 import { InlineWorkMessage } from '../components/chat/InlineWorkMessage';
 import { CollapsibleWorkBlock } from '../components/chat/CollapsibleWorkBlock';
+import { StructuredMessage } from '../components/chat/StructuredMessage';
 import { ChatInput, type ChatAttachment, type ChatInputHandle } from '../components/ChatInput';
 import { MessageAttachments } from '../components/MessageAttachments';
 import { MetaAgentSettings } from '../components/MetaAgentSettings';
@@ -149,7 +149,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
   const [panelDragOver, setPanelDragOver] = useState(false);
 
   // 思维过程 (工作消息)
-  const metaCK = currentProjectId ? currentProjectId + ':meta-agent' : 'meta-agent';
+  const metaCK = (currentProjectId || 'system') + ':meta-agent';
   const metaAgentWorkMsgsRaw = useAppStore(s => s.agentWorkMessages.get(metaCK));
   const metaAgentWorkMsgs = metaAgentWorkMsgsRaw ?? EMPTY_WORK_MSGS;
   const sendingStartMsgIndexRef = useRef(0);
@@ -563,7 +563,7 @@ function MetaAgentChat({ compact = false }: { compact?: boolean }) {
                   }`}
                 >
                   {msg.role === 'assistant' ? (
-                    <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                    <StructuredMessage content={msg.content} />
                   ) : (
                     <>
                       {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}

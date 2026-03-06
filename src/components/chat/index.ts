@@ -26,3 +26,4 @@ export { StatusBlock } from './StatusBlock';
 export { InlineWorkMessage } from './InlineWorkMessage';
 export { CollapsibleWorkBlock } from './CollapsibleWorkBlock';
 export { UserMessageNav } from './UserMessageNav';
+export { StructuredMessage } from './StructuredMessage';

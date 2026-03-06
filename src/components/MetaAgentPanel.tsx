@@ -15,8 +15,8 @@ import { MetaAgentSettings } from './MetaAgentSettings';
 import { MSG_STYLES } from './chat';
 import { InlineWorkMessage } from './chat/InlineWorkMessage';
 import { CollapsibleWorkBlock } from './chat/CollapsibleWorkBlock';
+import { StructuredMessage } from './chat/StructuredMessage';
 import { friendlyErrorMessage } from '../utils/errors';
-import { renderMarkdown } from '../utils/markdown';
 import { ChatInput, type ChatAttachment, type ChatInputHandle } from './ChatInput';
 import { MessageAttachments } from './MessageAttachments';
 
@@ -363,13 +363,13 @@ export function MetaAgentPanel() {
   const [greeting, setGreeting] = useState('你好！我是元Agent管家。告诉我你的需求，或问我任何项目相关的问题。');
   const [panelWidth, setPanelWidth] = useState(380);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [showWorkDetails, setShowWorkDetails] = useState(false);
+  const [showWorkDetails, setShowWorkDetails] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const [panelDragOver, setPanelDragOver] = useState(false);
   const resizingRef = useRef(false);
   const sendingStartMsgIndexRef = useRef(0);
-  const metaAgentCK = currentProjectId ? currentProjectId + ':' + META_AGENT_ID : META_AGENT_ID;
+  const metaAgentCK = (currentProjectId || 'system') + ':' + META_AGENT_ID;
   const metaAgentWorkMsgsRaw = useAppStore(s => s.agentWorkMessages.get(metaAgentCK));
   const metaAgentWorkMsgs = metaAgentWorkMsgsRaw ?? EMPTY_WORK_MSGS;
 
@@ -837,10 +837,7 @@ export function MetaAgentPanel() {
                       }`}
                     >
                       {msg.role === 'assistant' ? (
-                        <div
-                          className="markdown-body"
-                          dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                        />
+                        <StructuredMessage content={msg.content} />
                       ) : (
                         <>
                           {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
